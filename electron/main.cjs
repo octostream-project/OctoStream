@@ -230,16 +230,16 @@ function startProxyServer() {
       return
     }
 
-    if (parsed.pathname === '/raw') {
-      // Raw proxy: takes the entire path after /raw/ as the target URL
-      // This avoids encoding issues with query params in the target URL
-      const targetUrl = req.url.replace(/^\/raw\//, '')
+    if (req.url.startsWith('/raw/')) {
+      // Raw proxy: everything after /raw/ is the target URL (preserves query params)
+      const targetUrl = req.url.substring(5) // strip '/raw/'
       if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
         res.writeHead(400)
         res.end('Invalid url')
         return
       }
-      const clientIp = req.socket.remoteAddress.replace(/^::ffff:/, '')
+      console.log('[Proxy] raw:', targetUrl.substring(0, 120))
+      const clientIp = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
       const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
       const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
       proxyFetch(targetUrl, res, prefix)
@@ -360,6 +360,51 @@ function createWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://localhost:5173') || url.startsWith('file://')) return
     event.preventDefault()
+  })
+
+  // Intercept requests to inject correct Origin/Referer and bypass CORS
+  win.webContents.session.webRequest.onBeforeSendHeaders((details, cb) => {
+    const url = details.url || ''
+    const headers = { ...details.requestHeaders }
+    // Inject correct Origin/Referer for known providers
+    if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
+      headers['Origin'] = 'https://www.atresplayer.com'
+      headers['Referer'] = 'https://www.atresplayer.com/'
+    } else if (/mediaset\.net|mediasetinfinity|mediasetstream/i.test(url)) {
+      headers['Origin'] = 'https://www.mediasetinfinity.es'
+      headers['Referer'] = 'https://www.mediasetinfinity.es/'
+    } else if (/rtve\.es|rtvelivestream/i.test(url)) {
+      headers['Origin'] = 'https://www.rtve.es'
+      headers['Referer'] = 'https://www.rtve.es/'
+    } else if (/tdtchannels\.com/i.test(url)) {
+      headers['Referer'] = 'https://www.tdtchannels.com/'
+    } else if (/tdtspain\.com/i.test(url)) {
+      headers['Referer'] = 'https://www.tdtspain.com/'
+    } else if (/dailymotion\.com|geo\.dailymotion/i.test(url)) {
+      headers['Origin'] = 'https://geo.dailymotion.com'
+      headers['Referer'] = 'https://geo.dailymotion.com/'
+    }
+    // Always set a user agent
+    if (!headers['User-Agent'] || headers['User-Agent'].includes('Electron')) {
+      headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+    }
+    cb({ cancel: false, requestHeaders: headers })
+  })
+
+  // Strip CORS headers from responses so renderer can access them
+  win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
+    const headers = { ...details.responseHeaders }
+    // Force allow all origins
+    headers['Access-Control-Allow-Origin'] = ['*']
+    headers['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS']
+    headers['Access-Control-Allow-Headers'] = ['*']
+    headers['Access-Control-Allow-Credentials'] = ['true']
+    // Remove any restrictive CORS headers
+    delete headers['access-control-allow-origin']
+    delete headers['access-control-allow-methods']
+    delete headers['access-control-allow-headers']
+    delete headers['access-control-allow-credentials']
+    cb({ cancel: false, responseHeaders: headers })
   })
 
   const isDev = !app.isPackaged
