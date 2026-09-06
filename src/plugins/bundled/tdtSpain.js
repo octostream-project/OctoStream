@@ -565,11 +565,14 @@ async function resolveU7dStream(itemId, cache) {
         return null
       }
 
-      // Build SMIL URL from all mediaSelector fields (like the APK does)
+      // Build SMIL URL - only pass safe params, skip assetTypes
+      // (assetTypes with geoES|geoNo causes NoAssetTypeFormatMatches
+      //  when the server can't match the exact asset type requested)
       const authBasic = btoa(':' + beToken)
       const smilParams = new URLSearchParams()
       for (const [k, v] of Object.entries(ms)) {
-        if (k !== 'url') smilParams.append(k, v)
+        if (k === 'url' || k === 'assetTypes') continue
+        smilParams.append(k, v)
       }
       const smilUrl = ms.url + '?' + smilParams.toString()
       const smilRes = await fetch(smilUrl, { headers: { ...hdr, Authorization: 'Basic ' + authBasic } })
