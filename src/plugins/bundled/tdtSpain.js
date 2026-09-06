@@ -490,11 +490,116 @@ async function resolveU7dStream(itemId, cache) {
   }
 
   if (u7dtype === 'stream10') {
-    // Mediaset U7D VOD: NOT PLAYABLE without DRM/Widevine + paid subscription.
-    // The CDN (rawvod.mediaset.es) returns 403 for all requests.
-    // SVOD content returns LicenseNotGranted with anonymous login.
-    // Mediaset U7D channels are filtered out of the catalog entirely.
-    return null
+    // Mediaset U7D VOD: anonymous login → playback check → mediaSelector → SMIL → stream URL
+    // Only AVOD (free) content is shown in the catalog. SVOD content returns LicenseNotGranted.
+    // The stream URL (rawvod.mediaset.es) may be geo-blocked outside Spain.
+    const u7dUrl = chData.u7ddata || ''
+    if (!u7dUrl) return null
+    try {
+      // Re-fetch programs to find the matching item
+      const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
+      const callSign = callSignMatch ? callSignMatch[1] : ''
+      if (!callSign) return null
+
+      const now = Date.now()
+      const ONE_DAY = 24 * 60 * 60 * 1000
+      // Fetch the day containing this timestamp
+      const targetMs = startTs * 1000
+      const dayStart = targetMs - ONE_DAY
+      const dayEnd = targetMs + ONE_DAY
+      const dayUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${dayStart}~${dayEnd}`
+      const dayData = await fetchJson(dayUrl).catch(() => null)
+      if (!dayData) return null
+
+      let guid = ''
+      let hasVod = false
+      let isFree = false
+      const entries = dayData.response?.entries || []
+      for (const entry of entries) {
+        for (const listing of (entry.listings || [])) {
+          const lTs = Math.floor((listing.startTime || 0) / 1000)
+          if (lTs === Math.floor(startTs)) {
+            const prog = listing.program || {}
+            guid = prog.guid || ''
+            hasVod = !!prog['mediasetprogram$hasVod']
+            const rights = prog['mediasetprogram$channelsRights'] || []
+            isFree = rights.includes('AVOD')
+            break
+          }
+        }
+        if (guid) break
+      }
+
+      if (!guid || !hasVod) {
+        console.warn('[TDT Spain] U7D Mediaset: no VOD for this program', chKey, startTs)
+        return null
+      }
+      if (!isFree) {
+        console.warn('[TDT Spain] U7D Mediaset: SVOD content (requires subscription)', guid)
+        return null
+      }
+
+      const hdr = { 'User-Agent': UA, Origin: 'https://www.mediasetinfinity.es', Referer: 'https://www.mediasetinfinity.es/' }
+      const appname = cache.streamTypes?.stream10?.atributtes?.appname || 'web//mediasetplay-web/1.2.1-d1b2024'
+      const clientId = String(Date.now() % 1000000000) + '-' + String(Math.floor(Math.random() * 900000) + 100000)
+
+      // Anonymous login
+      const loginRes = await fetch('https://services-ott-prod-fe.mediaset.net/esp/idm/v3.0/anonymous/login', {
+        method: 'POST', headers: { ...hdr, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appName: appname, client_id: clientId }),
+      }).then(r => r.json()).catch(() => null)
+      const sid = loginRes?.response?.sid
+      const beToken = loginRes?.response?.beToken
+      if (!sid || !beToken) return null
+
+      // Playback check with VOD streamType
+      const checkRes = await fetch(`https://services-ott-prod-fe.mediaset.net/esp/playback/v3.0/check?sid=${sid}`, {
+        method: 'POST',
+        headers: { ...hdr, Authorization: 'Bearer ' + beToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentId: guid, streamType: 'VOD', delivery: 'Streaming', createDevice: true, overrideAppName: appname }),
+      }).then(r => r.json()).catch(() => null)
+
+      const ms = checkRes?.response?.mediaSelector
+      if (!ms?.url) {
+        console.warn('[TDT Spain] U7D Mediaset: no mediaSelector for', guid)
+        return null
+      }
+
+      // Build SMIL URL from all mediaSelector fields (like the APK does)
+      const authBasic = btoa(':' + beToken)
+      const smilParams = new URLSearchParams()
+      for (const [k, v] of Object.entries(ms)) {
+        if (k !== 'url') smilParams.append(k, v)
+      }
+      const smilUrl = ms.url + '?' + smilParams.toString()
+      const smilRes = await fetch(smilUrl, { headers: { ...hdr, Authorization: 'Basic ' + authBasic } })
+      const smilText = await smilRes.text()
+
+      // Parse stream URL from SMIL XML
+      const srcMatch = smilText.match(/src="(https?:\/\/[^"]+)"/)
+      const isException = /isException.*value="true"/.test(smilText)
+      if (!srcMatch || isException) {
+        const errMatch = smilText.match(/exception.*value="([^"]+)"/)
+        const errType = errMatch?.[1] || 'unknown'
+        console.warn('[TDT Spain] U7D Mediaset: SMIL error for', guid, '-', errType)
+        return null
+      }
+
+      const streamUrl = srcMatch[1]
+      const isDash = /\.mpd/i.test(streamUrl)
+      const isMp4 = /\.mp4/i.test(streamUrl)
+      console.log('[TDT Spain] U7D Mediaset stream:', streamUrl.substring(0, 80))
+      return {
+        name: 'Mediaset VOD',
+        url: streamUrl,
+        streamType: isDash ? 'dash' : (isMp4 ? 'mp4' : 'hls'),
+        quality: 'VOD',
+        headers: hdr,
+      }
+    } catch (e) {
+      console.error('[TDT Spain] U7D Mediaset resolve error:', e?.message)
+      return null
+    }
   }
 
   console.warn('[TDT Spain] U7D: unknown type', u7dtype, 'for', chKey)
@@ -726,9 +831,8 @@ export const tdtSpainFactory = (config) => {
 
         if (id === 'u7d-tdtspain') {
           // Return list of available U7D channels (not the programs themselves)
-          // Exclude Mediaset channels - their VOD content requires DRM/Widevine
-          // and the CDN (rawvod.mediaset.es) returns 403 for all requests,
-          // so none of their U7D programs are actually playable.
+          // Mediaset U7D is included - free (AVOD) content is playable.
+          // SVOD-only programs are filtered out at the program listing level.
           cache = await getU7d(cache)
           const u7d = cache.u7d || {}
           const u7dConf = u7d.U7dConf || {}
@@ -737,8 +841,6 @@ export const tdtSpainFactory = (config) => {
             const chName = chData.idchannel || chKey
             const u7dUrl = chData.u7ddata || ''
             if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
-              // Skip Mediaset U7D - not playable without DRM/paid subscription
-              if (/mediaset/i.test(u7dUrl)) continue
               // Find matching channel from channels list for logo
               const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
               items.push({
@@ -805,19 +907,30 @@ export const tdtSpainFactory = (config) => {
                       const hasVod = !!prog['mediasetprogram$hasVod']
                       const vodUrl = prog['mediasetprogram$videoPageUrl'] || ''
                       const guid = prog.guid || ''
+                      // Determine if content is free (AVOD) or paid (SVOD-only)
+                      const rights = prog['mediasetprogram$channelsRights'] || []
+                      const isFree = hasVod && rights.includes('AVOD')
+                      // Skip SVOD-only programs (require paid subscription, return LicenseNotGranted)
+                      if (hasVod && !isFree) continue
+                      // Skip programs without VOD
+                      if (!hasVod) continue
+                      // Use thumbnail from program data
+                      const thumbs = prog.thumbnails || {}
+                      const poster = thumbs['image_keyframe_poster']?.url || thumbs['image_horizontal_cover']?.url || ''
                       items.push({
                         id: `u7d-${chKey}-${startTs || Math.random()}`,
                         type: CONTENT_TYPES.LIVE,
                         name: listing['mediasetlisting$epgTitle'] || listing.title || 'Sin título',
                         title: listing['mediasetlisting$epgTitle'] || listing.title || 'Sin título',
                         description: listing.description || prog.description || '',
-                        poster: '',
+                        poster,
                         channelName: chMatch?.name || chName,
                         channelId: chKey,
                         startTimestamp: startTs,
                         startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
                         endTimestamp: Math.floor(endMs / 1000),
                         hasVod,
+                        isFree,
                         vodUrl,
                         guid,
                         _raw: listing,
