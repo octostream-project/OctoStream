@@ -453,8 +453,8 @@ export default function LiveTV() {
                           <div className="flex items-center gap-1.5 mb-0.5">
                             {timeStr && <span className="text-dark-500 text-xs">{timeStr}</span>}
                             {playable && <span className="text-[10px] bg-green-600/30 text-green-400 px-1 rounded">GRATIS</span>}
-                            {hasVod && !isFree && <span className="text-[10px] bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
-                            {!hasVod && <span className="text-[10px] bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
+                            {hasVod && !isFree && !playable && <span className="text-[10px] bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
+                            {!playable && <span className="text-[10px] bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
                           </div>
                           <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
                           {item.description && (
