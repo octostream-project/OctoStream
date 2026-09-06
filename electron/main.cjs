@@ -374,7 +374,7 @@ function createWindow() {
     if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
       headers['Origin'] = 'https://www.atresplayer.com'
       headers['Referer'] = 'https://www.atresplayer.com/'
-    } else if (/mediaset|doubleclick\.net\/ssai/i.test(url)) {
+    } else if (/mediaset|doubleclick\.net\/ssai|dai\.google\.com/i.test(url)) {
       headers['Origin'] = 'https://www.mediasetinfinity.es'
       headers['Referer'] = 'https://www.mediasetinfinity.es/'
     } else if (/rtve\.es|rtvelivestream/i.test(url)) {
@@ -398,12 +398,17 @@ function createWindow() {
   // Strip CORS headers from responses so renderer can access them
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     const headers = { ...details.responseHeaders }
-    // Force allow all origins
-    headers['Access-Control-Allow-Origin'] = ['*']
+    const url = details.url || ''
+    // For Mediaset/DAI CDN, preserve the specific origin to allow cookies (hdntl)
+    if (/mediaset|dai\.google\.com|doubleclick\.net/i.test(url)) {
+      headers['Access-Control-Allow-Origin'] = ['https://www.mediasetinfinity.es']
+      headers['Access-Control-Allow-Credentials'] = ['true']
+    } else {
+      headers['Access-Control-Allow-Origin'] = ['*']
+    }
     headers['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS']
     headers['Access-Control-Allow-Headers'] = ['*']
-    headers['Access-Control-Allow-Credentials'] = ['true']
-    // Remove any restrictive CORS headers
+    // Remove lowercase duplicates
     delete headers['access-control-allow-origin']
     delete headers['access-control-allow-methods']
     delete headers['access-control-allow-headers']

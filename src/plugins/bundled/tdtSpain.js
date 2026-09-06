@@ -66,8 +66,13 @@ function proxied(url) {
   // go direct. We only need the proxy for:
   // - HLS streams (proxy rewrites manifests with proxied segment URLs)
   // - .gz files (proxy decompresses them)
+  // EXCEPT: Mediaset/DAI streams must NOT go through the proxy because
+  // the CDN uses cookies/session tied to the original DAI request chain.
+  // Proxying breaks this and causes 403 on segments.
   // In web mode (no proxy available), return URL as-is.
   if (typeof window !== 'undefined' && window.optopus?.proxyUrl && /^https?:\/\//.test(url) && !url.includes('127.0.0.1')) {
+    // Skip proxy for Mediaset/DAI - Electron session interceptor handles headers
+    if (/mediaset|dai\.google\.com|doubleclick\.net/i.test(url)) return url
     const isHls = /\.m3u8/i.test(url) || /\.ts(\?|$)/i.test(url)
     const isGz = /\.gz$/i.test(url)
     if (isHls || isGz) {
