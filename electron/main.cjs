@@ -6,172 +6,19 @@ const { URL } = require('url')
 
 // ─── Local stream proxy ────────────────────────────────────────────────────
 // Solves CORS + SSL issues: fetches streams server-side (Node) and serves
-// them to the renderer via http://localhost:PROXY_PORT/proxy?url=...
+// them to the renderer via http://127.0.0.1:PROXY_PORT/proxy?url=...
 // The proxy injects correct headers (User-Agent, Referer, Origin) and
 // ignores certificate errors.
 
 const PROXY_PORT = 19588
+const PROXY_PREFIX = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
 let proxyServer = null
 
-function startProxyServer() {
-  if (proxyServer) return
-
-  proxyServer = http.createServer((req, res) => {
-    const parsed = new URL(req.url, `http://localhost:${PROXY_PORT}`)
-
-    if (parsed.pathname === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ status: 'ok' }))
-      return
-    }
-
-    // Handle direct HLS sub-path requests (relative segment URLs resolved against proxy)
-    // Format: /hls/<base64-or-raw-host>/<path>
-    if (parsed.pathname.startsWith('/hls/')) {
-      // Extract the real URL from the path: /hls/HOST/remaining/path
-      const hlsPath = parsed.pathname.slice(5) // remove /hls/
-      const slashIdx = hlsPath.indexOf('/')
-      if (slashIdx === -1) {
-        res.writeHead(400)
-        res.end('Invalid hls path')
-        return
-      }
-      const host = hlsPath.slice(0, slashIdx)
-      const rest = hlsPath.slice(slashIdx)
-      const targetUrl = `https://${host}${rest}${parsed.search || ''}`
-      proxyFetch(targetUrl, res)
-      return
-    }
-
-    if (parsed.pathname !== '/proxy') {
-      res.writeHead(404)
-      res.end('Not found')
-      return
-    }
-
-    const targetUrl = parsed.searchParams.get('url')
-    if (!targetUrl) {
-      res.writeHead(400)
-      res.end('Missing url param')
-      return
-    }
-
-    proxyFetch(targetUrl, res)
-  })
-
-    let target
-    try {
-      target = new URL(targetUrl)
-    } catch {
-      res.writeHead(400)
-      res.end('Invalid url')
-      return
-    }
-
-    // Determine headers based on target domain
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-    }
-
-    const host = target.hostname
-    if (/rtve\./i.test(host)) {
-      headers['Origin'] = 'https://www.rtve.es'
-      headers['Referer'] = 'https://www.rtve.es/'
-    } else if (/atresplayer\.|atresmedia\./i.test(host)) {
-      headers['Origin'] = 'https://www.atresplayer.com'
-      headers['Referer'] = 'https://www.atresplayer.com/'
-    } else if (/mediaset\./i.test(host)) {
-      headers['Origin'] = 'https://www.mediasetinfinity.es'
-      headers['Referer'] = 'https://www.mediasetinfinity.es/'
-    } else if (/tdtchannels\./i.test(host)) {
-      headers['Referer'] = 'https://www.tdtchannels.com/'
-    } else if (/tdtspain\./i.test(host)) {
-      headers['Referer'] = 'https://www.tdtspain.com/'
-    }
-
-    const isHttps = target.protocol === 'https:'
-    const options = {
-      hostname: target.hostname,
-      port: target.port || (isHttps ? 443 : 80),
-      path: target.pathname + target.search,
-      method: 'GET',
-      headers,
-      // Ignore SSL certificate errors for stream endpoints
-      rejectUnauthorized: false,
-    }
-
-    const lib = isHttps ? https : http
-
-    const proxyReq = lib.request(options, (proxyRes) => {
-      // Handle redirects (common for HLS CDNs)
-      if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
-        const redirectUrl = proxyRes.headers.location
-        const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
-        res.writeHead(302, { 'Location': `/proxy?url=${encodeURIComponent(absoluteRedirect)}` })
-        res.end()
-        return
-      }
-
-      // Forward content type and other relevant headers
-      const respHeaders = {
-        'Content-Type': proxyRes.headers['content-type'] || 'application/octet-stream',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-        'Access-Control-Allow-Headers': '*',
-      }
-      if (proxyRes.headers['content-length']) {
-        respHeaders['Content-Length'] = proxyRes.headers['content-length']
-      }
-
-      res.writeHead(proxyRes.statusCode || 200, respHeaders)
-      proxyRes.pipe(res)
-    })
-
-    proxyReq.on('error', (e) => {
-      console.error('[Proxy] error fetching', targetUrl, e.message)
-      if (!res.headersSent) {
-        res.writeHead(502, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: e.message, url: targetUrl }))
-      }
-    })
-
-    proxyReq.setTimeout(15000, () => {
-      proxyReq.destroy()
-      if (!res.headersSent) {
-        res.writeHead(504, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Gateway timeout', url: targetUrl }))
-      }
-    })
-
-    proxyReq.end()
-  })
-
-  proxyServer.listen(PROXY_PORT, '127.0.0.1', () => {
-    console.log(`[Proxy] Stream proxy running on http://127.0.0.1:${PROXY_PORT}`)
-  })
-
-  proxyServer.on('error', (e) => {
-    console.error('[Proxy] failed to start:', e.message)
-  })
-}
-
-function proxyFetch(targetUrl, res) {
-  let target
-  try {
-    target = new URL(targetUrl)
-  } catch {
-    if (!res.headersSent) { res.writeHead(400); res.end('Invalid url') }
-    return
-  }
-
-  // Determine headers based on target domain
+function headersForHost(host) {
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
     'Accept': '*/*',
   }
-
-  const host = target.hostname
   if (/rtve\./i.test(host)) {
     headers['Origin'] = 'https://www.rtve.es'
     headers['Referer'] = 'https://www.rtve.es/'
@@ -186,7 +33,19 @@ function proxyFetch(targetUrl, res) {
   } else if (/tdtspain\./i.test(host)) {
     headers['Referer'] = 'https://www.tdtspain.com/'
   }
+  return headers
+}
 
+function proxyFetch(targetUrl, res) {
+  let target
+  try {
+    target = new URL(targetUrl)
+  } catch {
+    if (!res.headersSent) { res.writeHead(400); res.end('Invalid url') }
+    return
+  }
+
+  const headers = headersForHost(target.hostname)
   const isHttps = target.protocol === 'https:'
   const options = {
     hostname: target.hostname,
@@ -282,17 +141,51 @@ function proxyFetch(targetUrl, res) {
   proxyReq.end()
 }
 
-const PROXY_PREFIX = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
+function startProxyServer() {
+  if (proxyServer) return
+
+  proxyServer = http.createServer((req, res) => {
+    const parsed = new URL(req.url, `http://localhost:${PROXY_PORT}`)
+
+    if (parsed.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ status: 'ok' }))
+      return
+    }
+
+    if (parsed.pathname !== '/proxy') {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+
+    const targetUrl = parsed.searchParams.get('url')
+    if (!targetUrl) {
+      res.writeHead(400)
+      res.end('Missing url param')
+      return
+    }
+
+    proxyFetch(targetUrl, res)
+  })
+
+  proxyServer.listen(PROXY_PORT, '127.0.0.1', () => {
+    console.log(`[Proxy] Stream proxy running on http://127.0.0.1:${PROXY_PORT}`)
+  })
+
+  proxyServer.on('error', (e) => {
+    console.error('[Proxy] failed to start:', e.message)
+  })
+}
 
 // ─── App setup ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  // Start the stream proxy
   startProxyServer()
 
   // Ignore certificate errors for all requests
   session.defaultSession.setCertificateVerifyProc((request, callback) => {
-    callback(0) // Accept all certificates
+    callback(0)
   })
 
   // Inject custom headers for API calls (not proxied streams)
@@ -339,7 +232,6 @@ function createWindow() {
     },
   })
 
-  // Prevent the renderer from opening arbitrary windows.
   win.webContents.setWindowOpenHandler(({ url }) => {
     const parsed = (() => { try { return new URL(url) } catch { return null } })()
     const allowed = ['http:', 'https:', 'vlc:', 'mpv:', 'magnet:']
@@ -349,7 +241,6 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  // Block navigation to unknown origins
   win.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://localhost:5173') || url.startsWith('file://')) return
     event.preventDefault()
