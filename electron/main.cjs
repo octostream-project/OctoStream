@@ -230,6 +230,22 @@ function startProxyServer() {
       return
     }
 
+    if (parsed.pathname === '/raw') {
+      // Raw proxy: takes the entire path after /raw/ as the target URL
+      // This avoids encoding issues with query params in the target URL
+      const targetUrl = req.url.replace(/^\/raw\//, '')
+      if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
+        res.writeHead(400)
+        res.end('Invalid url')
+        return
+      }
+      const clientIp = req.socket.remoteAddress.replace(/^::ffff:/, '')
+      const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
+      const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
+      proxyFetch(targetUrl, res, prefix)
+      return
+    }
+
     if (parsed.pathname !== '/proxy') {
       res.writeHead(404)
       res.end('Not found')

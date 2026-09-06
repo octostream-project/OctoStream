@@ -62,7 +62,27 @@ async function fetchText(url, headers = {}) {
 
 function proxied(url) {
   if (typeof window !== 'undefined' && window.optopus?.proxyUrl && /^https?:\/\//.test(url) && !url.includes('127.0.0.1')) {
-    return window.optopus.proxyUrl + encodeURIComponent(url)
+    const proxyBase = window.optopus.proxyUrl.replace(/\/proxy\?url=$/, '')
+    const isHls = /\.m3u8/i.test(url) || /\.ts(\?|$)/i.test(url)
+    const isGz = /\.gz$/i.test(url)
+    const isStream = isHls || isGz
+    const hasQueryParams = url.includes('?') || url.includes('&')
+
+    // For HLS streams without complex query params, use encoded proxy
+    if (isStream && !hasQueryParams) {
+      return window.optopus.proxyUrl + encodeURIComponent(url)
+    }
+
+    // For URLs with query params (APIs, streams with tokens), use raw proxy
+    // to avoid breaking the query params during encoding
+    if (hasQueryParams || isGz || /tdtspain\.com|tdtchannels\.com|rtvelivestream|atres-live|atresplayer|mediaset|rtve\.es\/api/i.test(url)) {
+      return proxyBase + '/raw/' + url
+    }
+
+    // For simple stream URLs, use encoded proxy
+    if (isStream) {
+      return window.optopus.proxyUrl + encodeURIComponent(url)
+    }
   }
   return url
 }
