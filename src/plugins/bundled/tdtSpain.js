@@ -39,22 +39,32 @@ function saveCache(cache) {
 }
 
 async function fetchGzJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA } })
+  const fetchUrl = proxied(url)
+  const res = await fetch(fetchUrl, { headers: { 'User-Agent': UA } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   // Browser handles gzip transparently for fetch
   return res.json()
 }
 
 async function fetchJson(url, headers = {}) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, ...headers } })
+  const fetchUrl = proxied(url)
+  const res = await fetch(fetchUrl, { headers: { 'User-Agent': UA, ...headers } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
 
 async function fetchText(url, headers = {}) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, ...headers } })
+  const fetchUrl = proxied(url)
+  const res = await fetch(fetchUrl, { headers: { 'User-Agent': UA, ...headers } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.text()
+}
+
+function proxied(url) {
+  if (typeof window !== 'undefined' && window.optopus?.proxyUrl && /^https?:\/\//.test(url) && !url.includes('127.0.0.1')) {
+    return window.optopus.proxyUrl + encodeURIComponent(url)
+  }
+  return url
 }
 
 // ─── Data loading ───────────────────────────────────────────────────────────
@@ -484,6 +494,45 @@ export const tdtSpainFactory = (config) => {
           .map(ch => normalizeChannel(ch, cache.epg))
       } catch (e) {
         logWarn('TDT Spain search failed', String(e?.message || e))
+        return []
+      }
+    },
+
+    async getEpg({ date } = {}) {
+      try {
+        let cache = loadCache()
+        cache = await getChannels(cache)
+        cache = await getEpg(cache)
+        const epg = cache.epg || {}
+        const channels = cache.channels || []
+        const targetDate = date ? new Date(date) : new Date()
+        const dayStr = targetDate.toISOString().slice(0, 10)
+        const programs = []
+        for (const ch of channels) {
+          if (String(ch.ocultar || '') === 'true') continue
+          const chName = String(ch.name || '')
+          const events = epg[chName] || epg[normKey(chName)] || []
+          for (const ev of events) {
+            const evStart = ev.start ? new Date(ev.start) : null
+            if (!evStart) continue
+            if (evStart.toISOString().slice(0, 10) !== dayStr) continue
+            programs.push({
+              id: `${ch.id}-${evStart.getTime()}`,
+              channelId: ch.id,
+              channelName: ch.name,
+              channelLogo: ch.logo,
+              title: ev.title || ev.name || 'Sin título',
+              description: ev.desc || ev.description || '',
+              start: ev.start,
+              end: ev.end || ev.stop,
+              startTimestamp: evStart.getTime() / 1000,
+              duration: ev.duration || (ev.end ? (new Date(ev.end) - evStart) / 1000 : 0),
+            })
+          }
+        }
+        return programs
+      } catch (e) {
+        logWarn('TDT Spain getEpg failed', String(e?.message || e))
         return []
       }
     },
