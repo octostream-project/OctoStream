@@ -139,22 +139,31 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           hls.currentLevel = -1
           setCurrentLevel(-1)
           // Capture subtitle tracks from HLS
-          setHlsSubtitles(hls.subtitleTracks.map((t, i) => ({
-            index: i,
-            name: t.name || t.lang || `Track ${i + 1}`,
-            lang: t.lang,
-          })))
+          const captureHlsSubs = () => {
+            setHlsSubtitles(hls.subtitleTracks.map((t, i) => ({
+              index: i,
+              name: t.name || t.lang || `Track ${i + 1}`,
+              lang: t.lang,
+            })))
+          }
+          captureHlsSubs()
           // Disable all subtitles by default
           hls.subtitleTrack = -1
           hls.subtitleDisplay = false
           setActiveHlsSub(-1)
-          // Disable all native text tracks by default but capture them for UI
+          // Listen for subtitle tracks that arrive after MANIFEST_PARSED
+          // (some streams add subtitle tracks dynamically)
+          hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, captureHlsSubs)
+          // Capture native text tracks (CEA-608/708) without disabling HLS-managed ones
           const captureNativeTracks = () => {
             const tracks = []
             for (let i = 0; i < videoEl.textTracks.length; i++) {
               const tt = videoEl.textTracks[i]
-              tt.mode = 'disabled'
+              // Only capture subtitles/captions tracks
               if (tt.kind === 'subtitles' || tt.kind === 'captions') {
+                // Don't disable tracks that HLS.js is managing (mode='hidden')
+                // Only disable tracks that are 'showing' by default
+                if (tt.mode === 'showing') tt.mode = 'disabled'
                 tracks.push({
                   index: i,
                   name: tt.label || tt.language || `Track ${i + 1}`,
@@ -163,17 +172,12 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
                 })
               }
             }
-            if (tracks.length > 0) setNativeSubs(tracks)
+            setNativeSubs(tracks)
           }
           captureNativeTracks()
           // Watch for new text tracks being added (CEA-708 may arrive late)
           videoEl.textTracks.addEventListener('addtrack', () => {
-            // Disable new tracks by default, but update the list
-            for (let i = 0; i < videoEl.textTracks.length; i++) {
-              if (videoEl.textTracks[i].mode === 'hidden') {
-                videoEl.textTracks[i].mode = 'disabled'
-              }
-            }
+            // Don't disable 'hidden' tracks - HLS.js uses that mode internally
             captureNativeTracks()
           })
           setLoading(false)
@@ -424,20 +428,24 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
 
   const handleHlsSubtitleToggle = (subIndex) => {
     const hls = hlsRef.current
-    const videoEl = videoRef.current
     if (hls) {
       hls.subtitleTrack = subIndex
       hls.subtitleDisplay = subIndex >= 0
       setActiveHlsSub(subIndex)
     }
-    // Also toggle native text tracks
-    if (videoEl) {
-      for (let i = 0; i < videoEl.textTracks.length; i++) {
-        videoEl.textTracks[i].mode = (subIndex >= 0 && i === subIndex) ? 'showing' : 'disabled'
-      }
-    }
+    // Don't touch videoEl.textTracks - HLS.js manages them internally
+    // when subtitleDisplay=true, HLS.js renders cues on the video element
     // Clear native sub selection when using HLS subs
     if (subIndex >= 0) setActiveNativeSub(-1)
+    // Also clear OpenSubtitles
+    if (subIndex >= 0) {
+      const videoEl = videoRef.current
+      if (videoEl) {
+        const track = videoEl.querySelector('track[data-subs]')
+        if (track) track.remove()
+        setActiveSubtitle(null)
+      }
+    }
     setShowSubsPanel(false)
   }
 
@@ -456,6 +464,12 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
       videoEl.textTracks[i].mode = (trackIndex >= 0 && i === trackIndex) ? 'showing' : 'disabled'
     }
     setActiveNativeSub(trackIndex)
+    // Also clear OpenSubtitles
+    if (trackIndex >= 0) {
+      const track = videoEl.querySelector('track[data-subs]')
+      if (track) track.remove()
+      setActiveSubtitle(null)
+    }
     setShowSubsPanel(false)
   }
 
