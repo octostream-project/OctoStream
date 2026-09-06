@@ -1,8 +1,19 @@
+// Silence Fontconfig warnings (harmless on some Linux distros)
+process.env.FONTCONFIG_PATH = process.env.FONTCONFIG_PATH || '/etc/fonts'
+
 const { app, BrowserWindow, shell, session } = require('electron')
 const path = require('path')
 const http = require('http')
 const https = require('https')
 const { URL } = require('url')
+
+// Custom HTTPS agent that ignores certificate errors.
+// Electron's Node.js (BoringSSL) requires this approach instead of
+// passing rejectUnauthorized in request options.
+const insecureAgent = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+})
 
 // ─── Local stream proxy ────────────────────────────────────────────────────
 // Solves CORS + SSL issues: fetches streams server-side (Node) and serves
@@ -53,7 +64,11 @@ function proxyFetch(targetUrl, res) {
     path: target.pathname + target.search,
     method: 'GET',
     headers,
-    rejectUnauthorized: false,
+  }
+
+  // Use insecure agent for HTTPS to bypass certificate verification
+  if (isHttps) {
+    options.agent = insecureAgent
   }
 
   const lib = isHttps ? https : http
@@ -183,9 +198,14 @@ function startProxyServer() {
 app.whenReady().then(() => {
   startProxyServer()
 
-  // Ignore certificate errors for all requests
-  session.defaultSession.setCertificateVerifyProc((request, callback) => {
-    callback(0)
+  // Ignore ALL certificate errors for all requests (renderer + proxy)
+  session.defaultSession.setCertificateVerifyProc((_request, callback) => {
+    callback(0) // 0 = accept
+  })
+
+  // Also set permission request handler for media
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'media')
   })
 
   // Inject custom headers for API calls (not proxied streams)
