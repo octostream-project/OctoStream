@@ -472,6 +472,7 @@ export const tdtSpainFactory = (config) => {
         }
 
         if (id === 'u7d-tdtspain') {
+          // Return list of available U7D channels (not the programs themselves)
           cache = await getU7d(cache)
           const u7d = cache.u7d || {}
           const u7dConf = u7d.U7dConf || {}
@@ -479,64 +480,86 @@ export const tdtSpainFactory = (config) => {
           for (const [chKey, chData] of Object.entries(u7dConf)) {
             const chName = chData.idchannel || chKey
             const u7dUrl = chData.u7ddata || ''
-            // u7ddata is a URL to fetch the actual programs
             if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
-              try {
-                const progData = await fetchJson(u7dUrl)
-                // RTVE API format: { items: [{ name, begintime, duration, description }] }
-                // Other APIs: { items: [{ title, start, end }] }
-                const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
-                for (const prog of progs) {
-                  // Parse start time: RTVE uses "20260901060000" format
-                  let startTs = 0
-                  let startStr = ''
-                  const bt = prog.begintime || prog.start || prog.begin || prog.startTime
-                  if (bt) {
-                    if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
-                      // RTVE format: YYYYMMDDHHmmss
-                      const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
-                      const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
-                      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
-                      startTs = dt.getTime() / 1000
-                      startStr = dt.toISOString()
-                    } else {
-                      const dt = new Date(bt)
-                      if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
-                    }
-                  }
-                  // Parse duration: RTVE uses "006600" (HHMMSS)
-                  let durationSec = 0
-                  const dur = prog.duration || prog.dur
-                  if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
-                    durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
-                  } else if (typeof dur === 'number') {
-                    durationSec = dur
-                  }
-                  const endTs = startTs + durationSec
-                  items.push({
-                    id: `u7d-${chKey}-${startTs || Math.random()}`,
-                    type: CONTENT_TYPES.LIVE,
-                    name: prog.name || prog.title || prog.t || 'Sin título',
-                    title: prog.name || prog.title || prog.t || 'Sin título',
-                    description: prog.description || prog.desc || prog.d || '',
-                    poster: prog.poster || prog.thumbnail || prog.image || '',
-                    channelName: chName,
-                    channelId: chKey,
-                    startTimestamp: startTs,
-                    startTime: startStr,
-                    endTimestamp: endTs,
-                    duration: durationSec,
-                    _raw: prog,
-                  })
-                }
-              } catch (e) {
-                logWarn(`TDT Spain U7D fetch failed for ${chKey}`, String(e?.message || e))
-              }
+              // Find matching channel from channels list for logo
+              const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
+              items.push({
+                id: `u7d-channel-${chKey}`,
+                type: CONTENT_TYPES.LIVE,
+                name: chMatch?.name || chName,
+                title: chMatch?.name || chName,
+                channelId: chKey,
+                channelName: chMatch?.name || chName,
+                channelLogo: chMatch?.logo || '',
+                logo: chMatch?.logo || '',
+                u7dUrl,
+                isU7dChannel: true,
+              })
             }
           }
-          // Sort by start time, most recent first
-          items.sort((a, b) => (b.startTimestamp || 0) - (a.startTimestamp || 0))
           return items.slice(skip, skip + top)
+        }
+
+        if (id.startsWith('u7d-programs-')) {
+          // Load programs for a specific U7D channel
+          const chKey = id.replace('u7d-programs-', '')
+          cache = await getU7d(cache)
+          const u7d = cache.u7d || {}
+          const u7dConf = u7d.U7dConf || {}
+          const chData = u7dConf[chKey]
+          if (!chData) return []
+          const u7dUrl = chData.u7ddata || ''
+          if (!u7dUrl || !/^https?:\/\//.test(u7dUrl)) return []
+          const chName = chData.idchannel || chKey
+          const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
+          try {
+            const progData = await fetchJson(u7dUrl)
+            const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
+            const items = []
+            for (const prog of progs) {
+              let startTs = 0
+              let startStr = ''
+              const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+              if (bt) {
+                if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                  const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                  const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                  const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                  startTs = dt.getTime() / 1000
+                  startStr = dt.toISOString()
+                } else {
+                  const dt = new Date(bt)
+                  if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                }
+              }
+              let durationSec = 0
+              const dur = prog.duration || prog.dur
+              if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
+                durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
+              } else if (typeof dur === 'number') {
+                durationSec = dur
+              }
+              items.push({
+                id: `u7d-${chKey}-${startTs || Math.random()}`,
+                type: CONTENT_TYPES.LIVE,
+                name: prog.name || prog.title || prog.t || 'Sin título',
+                title: prog.name || prog.title || prog.t || 'Sin título',
+                description: prog.description || prog.desc || prog.d || '',
+                poster: prog.poster || prog.thumbnail || prog.image || '',
+                channelName: chMatch?.name || chName,
+                channelId: chKey,
+                startTimestamp: startTs,
+                startTime: startStr,
+                duration: durationSec,
+                _raw: prog,
+              })
+            }
+            items.sort((a, b) => (b.startTimestamp || 0) - (a.startTimestamp || 0))
+            return items.slice(skip, skip + top)
+          } catch (e) {
+            logWarn(`TDT Spain U7D fetch failed for ${chKey}`, String(e?.message || e))
+            return []
+          }
         }
 
         // Default: all channels

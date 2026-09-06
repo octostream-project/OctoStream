@@ -45,12 +45,21 @@ export default function LiveTV() {
         }
         setActiveCat(channelCatalogs[0])
 
-        const loadedAll = []
-        for (const cat of channelCatalogs) {
-          const items = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 500)
-          items.forEach(item => loadedAll.push({ ...item, pluginId: cat.pluginId }))
-        }
+        // Load only the first catalog quickly, rest in background
+        const firstCat = channelCatalogs[0]
+        const firstItems = await pluginManager.getCatalogContent(firstCat.pluginId, firstCat.id, firstCat.type, 0, 500)
+        const loadedAll = firstItems.map(item => ({ ...item, pluginId: firstCat.pluginId }))
         setAllChannels(loadedAll)
+        setLoading(false)
+
+        // Load remaining catalogs in background
+        for (let i = 1; i < channelCatalogs.length; i++) {
+          const cat = channelCatalogs[i]
+          try {
+            const items = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 500)
+            setAllChannels(prev => [...prev, ...items.map(item => ({ ...item, pluginId: cat.pluginId }))])
+          } catch (e) { /* skip */ }
+        }
       } catch (e) {
         console.error('[LiveTV] error', e)
         setError(t('live.load_error') + ': ' + (e.message || 'unknown'))
@@ -93,38 +102,40 @@ export default function LiveTV() {
 
   useEffect(() => {
     if (viewMode !== 'u7d') return
-    // Load all channels for U7D selection
+    // Load U7D channel list from the catalog
     const load = async () => {
-      if (allChannels.length > 0) {
-        setU7dChannels(allChannels.filter(ch => ch.type === CONTENT_TYPES.LIVE || ch.type === CONTENT_TYPES.CHANNEL))
+      setLoading(true)
+      try {
+        if (u7dCatalogs.length > 0) {
+          const cat = u7dCatalogs[0]
+          const channels = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 200)
+          setU7dChannels(channels)
+        }
+      } catch (e) {
+        console.error('[LiveTV] U7D channel list error', e)
+      } finally {
+        setLoading(false)
       }
     }
     load()
-  }, [viewMode, allChannels])
+  }, [viewMode, u7dCatalogs])
 
   useEffect(() => {
     if (viewMode !== 'u7d' || !u7dSelectedChannel || !u7dSelectedDay) return
     const load = async () => {
       setLoading(true)
       try {
-        // Load U7D items for the selected channel and day
+        // Load programs for the selected channel only
         if (u7dCatalogs.length > 0) {
           const cat = u7dCatalogs[0]
-          const allItems = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 5000)
-          // Filter by channel and day
+          const chKey = u7dSelectedChannel.channelId || String(u7dSelectedChannel.id || '').replace(/^u7d-channel-/, '')
+          const allItems = await pluginManager.getCatalogContent(cat.pluginId, `u7d-programs-${chKey}`, cat.type, 0, 500)
+          // Filter by day
           const dayStr = u7dSelectedDay
           const filtered = allItems.filter(item => {
-            // Match channel: try channelId, channelName, and normalized variants
-            const chId = String(u7dSelectedChannel.id || '').replace(/^tdtspain-/, '')
-            const chName = String(u7dSelectedChannel.name || '')
-            const itemChId = String(item.channelId || '')
-            const itemChName = String(item.channelName || '')
-            const matchesChannel = itemChId === chId || itemChId === u7dSelectedChannel.id ||
-              itemChName === chName || itemChName === chId ||
-              itemChId === chName
             const ts = item.startTimestamp || (item.startTime ? new Date(item.startTime).getTime() / 1000 : 0)
             const itemDay = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : ''
-            return matchesChannel && itemDay === dayStr
+            return itemDay === dayStr
           })
           setU7dItems(filtered)
         }
