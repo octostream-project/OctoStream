@@ -30,7 +30,7 @@ export default function LiveTV() {
       try {
         const installed = pluginManager.getInstalledPlugins()
         const allCatalogs = await pluginManager.getAllCatalogs()
-        const channelCatalogs = allCatalogs.filter(c => c.type === CONTENT_TYPES.CHANNEL || c.type === CONTENT_TYPES.LIVE)
+        const channelCatalogs = allCatalogs.filter(c => (c.type === CONTENT_TYPES.CHANNEL || c.type === CONTENT_TYPES.LIVE) && !c.id?.startsWith('u7d-'))
         const u7dCatalogs = allCatalogs.filter(c => c.id?.startsWith('u7d-'))
         setTvCatalogs(channelCatalogs)
         setU7dCatalogs(u7dCatalogs)
