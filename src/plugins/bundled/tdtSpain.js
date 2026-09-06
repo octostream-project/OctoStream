@@ -579,7 +579,7 @@ export const tdtSpainFactory = (config) => {
       }
     },
 
-    async getEpg({ date } = {}) {
+    async getEpg({ date, channelId } = {}) {
       try {
         let cache = loadCache()
         cache = await getChannels(cache)
@@ -589,18 +589,25 @@ export const tdtSpainFactory = (config) => {
         const targetDate = date ? new Date(date) : new Date()
         const dayStr = targetDate.toISOString().slice(0, 10)
         console.log('[TDT Spain] getEpg for date', dayStr, '- epg keys:', Object.keys(epg).length, 'channels:', channels.length)
+        let searchChannels = channels
+        if (channelId) {
+          searchChannels = channels.filter(ch => String(ch.id) === channelId || String(ch.epgid) === channelId)
+        }
         const programs = []
-        for (const ch of channels) {
+        for (const ch of searchChannels) {
           if (String(ch.ocultar || '') === 'true') continue
-          const chName = String(ch.name || '')
-          // Try exact match, then normalized key match
-          let events = epg[chName] || epg[normKey(chName)] || []
-          // Also try with .TV suffix variants
+          // Match by epgid/id first (EPG uses "La1.TV" as key, channel has epgid="La1.TV")
+          const epgId = String(ch.epgid || ch.id || '')
+          let events = epg[epgId] || epg[normKey(epgId)] || []
           if (events.length === 0) {
-            const variants = [chName + '.TV', chName.replace(/\s+/g, '') + '.TV', normKey(chName) + '.tv']
-            for (const v of variants) {
-              if (epg[v]) { events = epg[v]; break }
-              if (epg[normKey(v)]) { events = epg[normKey(v)]; break }
+            const chName = String(ch.name || '')
+            events = epg[chName] || epg[normKey(chName)] || []
+            if (events.length === 0) {
+              const variants = [chName + '.TV', chName.replace(/\s+/g, '') + '.TV', normKey(chName) + '.tv']
+              for (const v of variants) {
+                if (epg[v]) { events = epg[v]; break }
+                if (epg[normKey(v)]) { events = epg[normKey(v)]; break }
+              }
             }
           }
           for (const ev of events) {
