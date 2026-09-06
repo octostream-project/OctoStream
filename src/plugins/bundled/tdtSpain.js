@@ -485,11 +485,108 @@ async function resolveU7dStream(itemId, cache) {
   }
 
   if (u7dtype === 'stream10') {
-    // Mediaset U7D: programs listed from EPG feed, but individual VOD streams
-    // are typically behind DRM/login, similar to live
-    // For now, try the same live stream resolution approach
-    console.warn('[TDT Spain] U7D Mediaset: VOD playback not yet supported')
-    return null
+    // Mediaset U7D VOD: anonymous login → playback check → mediaSelector → SMIL → stream URL
+    const u7dUrl = chData.u7ddata || ''
+    if (!u7dUrl) return null
+    try {
+      // Re-fetch programs to find the matching item
+      const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
+      const callSign = callSignMatch ? callSignMatch[1] : ''
+      if (!callSign) return null
+
+      const now = Date.now()
+      const ONE_DAY = 24 * 60 * 60 * 1000
+      // Fetch the day containing this timestamp
+      const targetMs = startTs * 1000
+      const dayStart = targetMs - ONE_DAY
+      const dayEnd = targetMs + ONE_DAY
+      const dayUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${dayStart}~${dayEnd}`
+      const dayData = await fetchJson(dayUrl).catch(() => null)
+      if (!dayData) return null
+
+      let guid = ''
+      let hasVod = false
+      const entries = dayData.response?.entries || []
+      for (const entry of entries) {
+        for (const listing of (entry.listings || [])) {
+          const lTs = Math.floor((listing.startTime || 0) / 1000)
+          if (lTs === Math.floor(startTs)) {
+            const prog = listing.program || {}
+            guid = prog.guid || ''
+            hasVod = !!prog['mediasetprogram$hasVod']
+            break
+          }
+        }
+        if (guid) break
+      }
+
+      if (!guid || !hasVod) {
+        console.warn('[TDT Spain] U7D Mediaset: no VOD for this program', chKey, startTs)
+        return null
+      }
+
+      const hdr = { 'User-Agent': UA, Origin: 'https://www.mediasetinfinity.es', Referer: 'https://www.mediasetinfinity.es/' }
+      const appname = cache.streamTypes?.stream10?.atributtes?.appname || 'web//mediasetplay-web/1.2.1-d1b2024'
+      const clientId = String(Date.now() % 1000000000) + '-' + String(Math.floor(Math.random() * 900000) + 100000)
+
+      // Anonymous login
+      const loginRes = await fetch('https://services-ott-prod-fe.mediaset.net/esp/idm/v3.0/anonymous/login', {
+        method: 'POST', headers: { ...hdr, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appName: appname, client_id: clientId }),
+      }).then(r => r.json()).catch(() => null)
+      const sid = loginRes?.response?.sid
+      const beToken = loginRes?.response?.beToken
+      if (!sid || !beToken) return null
+
+      // Playback check with VOD streamType
+      const checkRes = await fetch(`https://services-ott-prod-fe.mediaset.net/esp/playback/v3.0/check?sid=${sid}`, {
+        method: 'POST',
+        headers: { ...hdr, Authorization: 'Bearer ' + beToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentId: guid, streamType: 'VOD', delivery: 'Streaming', createDevice: true, overrideAppName: appname }),
+      }).then(r => r.json()).catch(() => null)
+
+      const ms = checkRes?.response?.mediaSelector
+      if (!ms?.url) {
+        console.warn('[TDT Spain] U7D Mediaset: no mediaSelector for', guid)
+        return null
+      }
+
+      // Fetch SMIL from mediaSelector
+      const authBasic = btoa(':' + beToken)
+      const smilParams = new URLSearchParams({
+        formats: 'M3U+none,MPEG-DASH+none,MPEG4',
+        assetTypes: 'HD,browser,geoES|geoNo:HD,browser,geoES|geoNo:HR,browser,geoES|geoNo:HR,browser,geoES|geoNo:SD,browser,geoES|geoNo:SD,browser,geoES|geoNo',
+        format: 'SMIL', auto: 'true', tracking: 'true', delivery: 'Streaming',
+      })
+      const smilUrl = ms.url + '?' + smilParams.toString()
+      const smilRes = await fetch(smilUrl, { headers: { ...hdr, Authorization: 'Basic ' + authBasic } })
+      const smilText = await smilRes.text()
+
+      // Parse stream URL from SMIL XML
+      const srcMatch = smilText.match(/src="(https?:\/\/[^"]+)"/)
+      const isException = /isException.*value="true"/.test(smilText)
+      if (!srcMatch || isException) {
+        // Try to detect geo-block or license error
+        const errMatch = smilText.match(/exception.*value="([^"]+)"/)
+        const errType = errMatch?.[1] || 'unknown'
+        console.warn('[TDT Spain] U7D Mediaset: SMIL error for', guid, '-', errType)
+        return null
+      }
+
+      const streamUrl = srcMatch[1]
+      const isDash = /\.mpd/i.test(streamUrl)
+      console.log('[TDT Spain] U7D Mediaset stream:', streamUrl.substring(0, 80))
+      return {
+        name: 'Mediaset VOD',
+        url: streamUrl,
+        streamType: isDash ? 'dash' : (/\.m3u8/i.test(streamUrl) ? 'hls' : 'mp4'),
+        quality: 'VOD',
+        headers: hdr,
+      }
+    } catch (e) {
+      console.error('[TDT Spain] U7D Mediaset resolve error:', e?.message)
+      return null
+    }
   }
 
   console.warn('[TDT Spain] U7D: unknown type', u7dtype, 'for', chKey)
@@ -701,37 +798,52 @@ export const tdtSpainFactory = (config) => {
             const isRtve = /rtve/.test(u7dUrl)
 
             if (isMediaset) {
-              // Mediaset: build valid URL (original has empty byListingTime=)
-              // Format: byCallSign=T5&byListingTime=<startMs>~<endMs>
+              // Mediaset API only accepts 1-day ranges; fetch each day in parallel
               const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
               const callSign = callSignMatch ? callSignMatch[1] : ''
               if (callSign) {
                 const now = Date.now()
-                const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
-                const mediasetUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${sevenDaysAgo}~${now}`
-                console.log('[TDT Spain] Mediaset U7D fetch:', mediasetUrl.substring(0, 120))
-                const mediasetData = await fetchJson(mediasetUrl)
-                const entries = mediasetData.response?.entries || mediasetData.entry || []
-                for (const entry of entries) {
-                  const listings = entry.listings || []
-                  for (const listing of listings) {
-                    const startMs = listing.startTime || 0
-                    const endMs = listing.endTime || 0
-                    const startTs = Math.floor(startMs / 1000)
-                    items.push({
-                      id: `u7d-${chKey}-${startTs || Math.random()}`,
-                      type: CONTENT_TYPES.LIVE,
-                      name: listing.mediasetlisting$epgTitle || listing.title || 'Sin título',
-                      title: listing.mediasetlisting$epgTitle || listing.title || 'Sin título',
-                      description: listing.description || '',
-                      poster: '',
-                      channelName: chMatch?.name || chName,
-                      channelId: chKey,
-                      startTimestamp: startTs,
-                      startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
-                      endTimestamp: Math.floor(endMs / 1000),
-                      _raw: listing,
-                    })
+                const ONE_DAY = 24 * 60 * 60 * 1000
+                const dayFetches = []
+                for (let d = 0; d < 7; d++) {
+                  const end = now - d * ONE_DAY
+                  const start = end - ONE_DAY
+                  const dayUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${start}~${end}`
+                  dayFetches.push(fetchJson(dayUrl).catch(() => null))
+                }
+                console.log('[TDT Spain] Mediaset U7D fetching 7 days for', callSign)
+                const dayResults = await Promise.all(dayFetches)
+                for (const mediasetData of dayResults) {
+                  if (!mediasetData) continue
+                  const entries = mediasetData.response?.entries || mediasetData.entry || []
+                  for (const entry of entries) {
+                    const listings = entry.listings || []
+                    for (const listing of listings) {
+                      const prog = listing.program || {}
+                      const startMs = listing.startTime || 0
+                      const endMs = listing.endTime || 0
+                      const startTs = Math.floor(startMs / 1000)
+                      const hasVod = !!prog['mediasetprogram$hasVod']
+                      const vodUrl = prog['mediasetprogram$videoPageUrl'] || ''
+                      const guid = prog.guid || ''
+                      items.push({
+                        id: `u7d-${chKey}-${startTs || Math.random()}`,
+                        type: CONTENT_TYPES.LIVE,
+                        name: listing['mediasetlisting$epgTitle'] || listing.title || 'Sin título',
+                        title: listing['mediasetlisting$epgTitle'] || listing.title || 'Sin título',
+                        description: listing.description || prog.description || '',
+                        poster: '',
+                        channelName: chMatch?.name || chName,
+                        channelId: chKey,
+                        startTimestamp: startTs,
+                        startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
+                        endTimestamp: Math.floor(endMs / 1000),
+                        hasVod,
+                        vodUrl,
+                        guid,
+                        _raw: listing,
+                      })
+                    }
                   }
                 }
                 console.log('[TDT Spain] Mediaset U7D parsed', items.length, 'programs for', callSign)
