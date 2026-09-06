@@ -480,8 +480,6 @@ export const tdtSpainFactory = (config) => {
           for (const [chKey, chData] of Object.entries(u7dConf)) {
             const chName = chData.idchannel || chKey
             const u7dUrl = chData.u7ddata || ''
-            // Skip Mediaset channels - their API is currently broken/inaccessible
-            if (u7dUrl && /mediaset/.test(u7dUrl)) continue
             if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
               // Find matching channel from channels list for logo
               const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
@@ -585,9 +583,42 @@ export const tdtSpainFactory = (config) => {
                 })
               }
             } else if (isMediaset) {
-              // Mediaset API requires byListingTime param - currently broken/inaccessible
-              // Return empty with a note
-              console.warn('[TDT Spain] Mediaset U7D API not available for', chKey)
+              // Mediaset API: services-ott-prod-fe.mediaset.net
+              // Format: byCallSign=T5&byListingTime=<startMs>~<endMs>
+              // The u7dUrl has byListingTime= (empty) - we need to fill it
+              // Extract callSign from URL
+              const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
+              const callSign = callSignMatch ? callSignMatch[1] : ''
+              if (callSign) {
+                // Build URL with date range (last 7 days to now, in ms)
+                const now = Date.now()
+                const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
+                const mediasetUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${sevenDaysAgo}~${now}`
+                const mediasetData = await fetchJson(mediasetUrl)
+                const entries = mediasetData.response?.entries || mediasetData.entry || []
+                for (const entry of entries) {
+                  const listings = entry.listings || []
+                  for (const listing of listings) {
+                    const startMs = listing.startTime || 0
+                    const endMs = listing.endTime || 0
+                    const startTs = Math.floor(startMs / 1000)
+                    items.push({
+                      id: `u7d-${chKey}-${startTs || Math.random()}`,
+                      type: CONTENT_TYPES.LIVE,
+                      name: listing.mediasetlisting$epgTitle || listing.title || listing.description?.split('.')[0] || 'Sin título',
+                      title: listing.mediasetlisting$epgTitle || listing.title || 'Sin título',
+                      description: listing.description || '',
+                      poster: '',
+                      channelName: chMatch?.name || chName,
+                      channelId: chKey,
+                      startTimestamp: startTs,
+                      startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
+                      endTimestamp: Math.floor(endMs / 1000),
+                      _raw: listing,
+                    })
+                  }
+                }
+              }
             } else {
               // Generic format: try common fields
               const progs = progData.items || progData.programs || progData.events || progData.itemRows || (Array.isArray(progData) ? progData : [])
