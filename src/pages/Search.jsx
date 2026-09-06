@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useStore } from '../store/useStore.js'
 import ContentCard from '../components/ContentCard.jsx'
-import { Search as SearchIcon, Loader2, X, Film, Tv, Radio, Layers } from 'lucide-react'
+import { Search as SearchIcon, Loader2, X, Film, Tv, Radio, Layers, Clock } from 'lucide-react'
 
 const FILTERS = [
   { id: 'all', label: 'Todo', icon: Layers },
@@ -80,7 +80,7 @@ export default function SearchPage() {
           type="text"
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="Buscar películas, series, canales..."
+          placeholder="Buscar películas, series, canales, programas U7D..."
           className="input w-full pl-10 pr-10 text-lg"
           autoFocus
         />
