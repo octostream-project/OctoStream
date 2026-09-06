@@ -61,26 +61,16 @@ async function fetchText(url, headers = {}) {
 }
 
 function proxied(url) {
+  // In Electron, session.webRequest intercepts all requests to inject
+  // correct Origin/Referer and strip CORS headers. So API calls can
+  // go direct. We only need the proxy for:
+  // - HLS streams (proxy rewrites manifests with proxied segment URLs)
+  // - .gz files (proxy decompresses them)
+  // In web mode (no proxy available), return URL as-is.
   if (typeof window !== 'undefined' && window.optopus?.proxyUrl && /^https?:\/\//.test(url) && !url.includes('127.0.0.1')) {
-    const proxyBase = window.optopus.proxyUrl.replace(/\/proxy\?url=$/, '')
     const isHls = /\.m3u8/i.test(url) || /\.ts(\?|$)/i.test(url)
     const isGz = /\.gz$/i.test(url)
-    const isStream = isHls || isGz
-    const hasQueryParams = url.includes('?') || url.includes('&')
-
-    // For HLS streams without complex query params, use encoded proxy
-    if (isStream && !hasQueryParams) {
-      return window.optopus.proxyUrl + encodeURIComponent(url)
-    }
-
-    // For URLs with query params (APIs, streams with tokens), use raw proxy
-    // to avoid breaking the query params during encoding
-    if (hasQueryParams || isGz || /tdtspain\.com|tdtchannels\.com|rtvelivestream|atres-live|atresplayer|mediaset|rtve\.es\/api/i.test(url)) {
-      return proxyBase + '/raw/' + url
-    }
-
-    // For simple stream URLs, use encoded proxy
-    if (isStream) {
+    if (isHls || isGz) {
       return window.optopus.proxyUrl + encodeURIComponent(url)
     }
   }
@@ -533,87 +523,21 @@ export const tdtSpainFactory = (config) => {
           const chName = chData.idchannel || chKey
           const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
           try {
-            const progData = await fetchJson(u7dUrl)
             const items = []
-
-            // Detect format by URL or data structure
             const isAtresplayer = /atresplayer/.test(u7dUrl)
             const isMediaset = /mediaset/.test(u7dUrl)
             const isRtve = /rtve/.test(u7dUrl)
 
-            if (isAtresplayer) {
-              // Atresmedia format: { itemRows: [{ title, startTime (ms), image: { pathHorizontal } }] }
-              const progs = progData.itemRows || progData.items || []
-              for (const prog of progs) {
-                const startMs = prog.startTime || 0
-                const startTs = Math.floor(startMs / 1000)
-                items.push({
-                  id: `u7d-${chKey}-${startTs || Math.random()}`,
-                  type: CONTENT_TYPES.LIVE,
-                  name: prog.title || 'Sin título',
-                  title: prog.title || 'Sin título',
-                  description: prog.description || prog.stickerU7D || '',
-                  poster: prog.image?.pathHorizontal ? prog.image.pathHorizontal + '640x360.jpg' : '',
-                  channelName: chMatch?.name || chName,
-                  channelId: chKey,
-                  startTimestamp: startTs,
-                  startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
-                  _raw: prog,
-                })
-              }
-            } else if (isRtve) {
-              // RTVE format: { items: [{ name, begintime "YYYYMMDDHHmmss", duration "HHMMSS" }] }
-              const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
-              for (const prog of progs) {
-                let startTs = 0
-                let startStr = ''
-                const bt = prog.begintime || prog.start || prog.begin || prog.startTime
-                if (bt) {
-                  if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
-                    const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
-                    const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
-                    const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
-                    startTs = dt.getTime() / 1000
-                    startStr = dt.toISOString()
-                  } else {
-                    const dt = new Date(bt)
-                    if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
-                  }
-                }
-                let durationSec = 0
-                const dur = prog.duration || prog.dur
-                if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
-                  durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
-                } else if (typeof dur === 'number') {
-                  durationSec = dur
-                }
-                items.push({
-                  id: `u7d-${chKey}-${startTs || Math.random()}`,
-                  type: CONTENT_TYPES.LIVE,
-                  name: prog.name || prog.title || prog.t || 'Sin título',
-                  title: prog.name || prog.title || prog.t || 'Sin título',
-                  description: prog.description || prog.desc || prog.d || '',
-                  poster: prog.poster || prog.thumbnail || prog.image || '',
-                  channelName: chMatch?.name || chName,
-                  channelId: chKey,
-                  startTimestamp: startTs,
-                  startTime: startStr,
-                  duration: durationSec,
-                  _raw: prog,
-                })
-              }
-            } else if (isMediaset) {
-              // Mediaset API: services-ott-prod-fe.mediaset.net
+            if (isMediaset) {
+              // Mediaset: build valid URL (original has empty byListingTime=)
               // Format: byCallSign=T5&byListingTime=<startMs>~<endMs>
-              // The u7dUrl has byListingTime= (empty) - we need to fill it
-              // Extract callSign from URL
               const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
               const callSign = callSignMatch ? callSignMatch[1] : ''
               if (callSign) {
-                // Build URL with date range (last 7 days to now, in ms)
                 const now = Date.now()
                 const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
                 const mediasetUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${sevenDaysAgo}~${now}`
+                console.log('[TDT Spain] Mediaset U7D fetch:', mediasetUrl.substring(0, 120))
                 const mediasetData = await fetchJson(mediasetUrl)
                 const entries = mediasetData.response?.entries || mediasetData.entry || []
                 for (const entry of entries) {
@@ -625,7 +549,7 @@ export const tdtSpainFactory = (config) => {
                     items.push({
                       id: `u7d-${chKey}-${startTs || Math.random()}`,
                       type: CONTENT_TYPES.LIVE,
-                      name: listing.mediasetlisting$epgTitle || listing.title || listing.description?.split('.')[0] || 'Sin título',
+                      name: listing.mediasetlisting$epgTitle || listing.title || 'Sin título',
                       title: listing.mediasetlisting$epgTitle || listing.title || 'Sin título',
                       description: listing.description || '',
                       poster: '',
@@ -638,43 +562,106 @@ export const tdtSpainFactory = (config) => {
                     })
                   }
                 }
+                console.log('[TDT Spain] Mediaset U7D parsed', items.length, 'programs for', callSign)
               }
             } else {
-              // Generic format: try common fields
-              const progs = progData.items || progData.programs || progData.events || progData.itemRows || (Array.isArray(progData) ? progData : [])
-              for (const prog of progs) {
-                let startTs = 0
-                let startStr = ''
-                const bt = prog.begintime || prog.start || prog.begin || prog.startTime
-                if (bt) {
-                  if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
-                    const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
-                    const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
-                    const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
-                    startTs = dt.getTime() / 1000
-                    startStr = dt.toISOString()
-                  } else if (typeof bt === 'number' && bt > 1000000000000) {
-                    // Milliseconds
-                    startTs = Math.floor(bt / 1000)
-                    startStr = new Date(bt).toISOString()
-                  } else {
-                    const dt = new Date(bt)
-                    if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
-                  }
+              // For RTVE, Atresplayer, and others: fetch the URL directly
+              console.log('[TDT Spain] U7D fetch:', u7dUrl.substring(0, 120))
+              const progData = await fetchJson(u7dUrl)
+
+              if (isAtresplayer) {
+                // Atresmedia format: { itemRows: [{ title, startTime (ms), image }] }
+                const progs = progData.itemRows || progData.items || []
+                console.log('[TDT Spain] Atresplayer U7D parsed', progs.length, 'programs')
+                for (const prog of progs) {
+                  const startMs = prog.startTime || 0
+                  const startTs = Math.floor(startMs / 1000)
+                  items.push({
+                    id: `u7d-${chKey}-${startTs || Math.random()}`,
+                    type: CONTENT_TYPES.LIVE,
+                    name: prog.title || 'Sin título',
+                    title: prog.title || 'Sin título',
+                    description: prog.description || prog.stickerU7D || '',
+                    poster: prog.image?.pathHorizontal ? prog.image.pathHorizontal + '640x360.jpg' : '',
+                    channelName: chMatch?.name || chName,
+                    channelId: chKey,
+                    startTimestamp: startTs,
+                    startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
+                    _raw: prog,
+                  })
                 }
-                items.push({
-                  id: `u7d-${chKey}-${startTs || Math.random()}`,
-                  type: CONTENT_TYPES.LIVE,
-                  name: prog.name || prog.title || prog.t || 'Sin título',
-                  title: prog.name || prog.title || prog.t || 'Sin título',
-                  description: prog.description || prog.desc || prog.d || '',
-                  poster: prog.poster || prog.thumbnail || prog.image?.pathHorizontal || '',
-                  channelName: chMatch?.name || chName,
-                  channelId: chKey,
-                  startTimestamp: startTs,
-                  startTime: startStr,
-                  _raw: prog,
-                })
+              } else if (isRtve) {
+                // RTVE format: { items: [{ name, begintime "YYYYMMDDHHmmss", duration "HHMMSS" }] }
+                const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
+                console.log('[TDT Spain] RTVE U7D parsed', progs.length, 'programs')
+                for (const prog of progs) {
+                  let startTs = 0, startStr = ''
+                  const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+                  if (bt) {
+                    if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                      const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                      const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                      startTs = dt.getTime() / 1000; startStr = dt.toISOString()
+                    } else {
+                      const dt = new Date(bt)
+                      if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                    }
+                  }
+                  let durationSec = 0
+                  const dur = prog.duration || prog.dur
+                  if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
+                    durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
+                  } else if (typeof dur === 'number') { durationSec = dur }
+                  items.push({
+                    id: `u7d-${chKey}-${startTs || Math.random()}`,
+                    type: CONTENT_TYPES.LIVE,
+                    name: prog.name || prog.title || 'Sin título',
+                    title: prog.name || prog.title || 'Sin título',
+                    description: prog.description || prog.desc || '',
+                    poster: prog.poster || prog.thumbnail || '',
+                    channelName: chMatch?.name || chName,
+                    channelId: chKey,
+                    startTimestamp: startTs,
+                    startTime: startStr,
+                    duration: durationSec,
+                    _raw: prog,
+                  })
+                }
+              } else {
+                // Generic format
+                const progs = progData.items || progData.programs || progData.events || progData.itemRows || (Array.isArray(progData) ? progData : [])
+                console.log('[TDT Spain] Generic U7D parsed', progs.length, 'programs')
+                for (const prog of progs) {
+                  let startTs = 0, startStr = ''
+                  const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+                  if (bt) {
+                    if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                      const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                      const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                      startTs = dt.getTime() / 1000; startStr = dt.toISOString()
+                    } else if (typeof bt === 'number' && bt > 1000000000000) {
+                      startTs = Math.floor(bt / 1000); startStr = new Date(bt).toISOString()
+                    } else {
+                      const dt = new Date(bt)
+                      if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                    }
+                  }
+                  items.push({
+                    id: `u7d-${chKey}-${startTs || Math.random()}`,
+                    type: CONTENT_TYPES.LIVE,
+                    name: prog.name || prog.title || prog.t || 'Sin título',
+                    title: prog.name || prog.title || prog.t || 'Sin título',
+                    description: prog.description || prog.desc || prog.d || '',
+                    poster: prog.poster || prog.thumbnail || prog.image?.pathHorizontal || '',
+                    channelName: chMatch?.name || chName,
+                    channelId: chKey,
+                    startTimestamp: startTs,
+                    startTime: startStr,
+                    _raw: prog,
+                  })
+                }
               }
             }
 
@@ -682,6 +669,7 @@ export const tdtSpainFactory = (config) => {
             return items.slice(skip, skip + top)
           } catch (e) {
             logWarn(`TDT Spain U7D fetch failed for ${chKey}`, String(e?.message || e))
+            console.error('[TDT Spain] U7D error for', chKey, ':', e?.message || e)
             return []
           }
         }
