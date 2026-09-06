@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Sidebar from './components/Sidebar.jsx'
+import Screensaver from './components/Screensaver.jsx'
 import Home from './pages/Home.jsx'
 import Search from './pages/Search.jsx'
 import Details from './pages/Details.jsx'
@@ -16,9 +17,54 @@ import CastReceiver from './pages/CastReceiver.jsx'
 import LiveTV from './pages/LiveTV.jsx'
 import { useStore } from './store/useStore.js'
 
+const SCREENSAVER_ENABLED_KEY = 'optopus_screensaver_enabled'
+const SCREENSAVER_TIMEOUT_KEY = 'optopus_screensaver_timeout'
+
+function useIdleScreensaver() {
+  const [active, setActive] = useState(false)
+  const timerRef = useRef(null)
+  const location = useLocation()
+
+  const enabled = localStorage.getItem(SCREENSAVER_ENABLED_KEY) !== 'false'
+  const timeoutMin = parseInt(localStorage.getItem(SCREENSAVER_TIMEOUT_KEY) || '5', 10)
+  const timeoutMs = Math.max(1, timeoutMin) * 60 * 1000
+
+  const resetTimer = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (!enabled) return
+    timerRef.current = setTimeout(() => setActive(true), timeoutMs)
+  }, [enabled, timeoutMs])
+
+  useEffect(() => {
+    if (!enabled) {
+      setActive(false)
+      return
+    }
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'touchmove', 'wheel', 'click']
+    events.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
+    resetTimer()
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetTimer))
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [resetTimer, enabled])
+
+  // Don't trigger screensaver while playing video (details page or cast)
+  useEffect(() => {
+    if (active) {
+      const onPlayerPage = location.pathname.startsWith('/details/') || location.pathname === '/cast'
+      if (onPlayerPage) setActive(false)
+    }
+  }, [active, location.pathname])
+
+  const dismiss = useCallback(() => setActive(false), [])
+  return { active, dismiss }
+}
+
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const initPlugins = useStore(s => s.initPlugins)
+  const { active: screensaverActive, dismiss: dismissScreensaver } = useIdleScreensaver()
 
   useEffect(() => {
     initPlugins()
@@ -53,6 +99,8 @@ export default function App() {
             </Routes>
           </main>
         </div>
+
+        {screensaverActive && <Screensaver onDismiss={dismissScreensaver} />}
       </div>
     </ErrorBoundary>
   )
