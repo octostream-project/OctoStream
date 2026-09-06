@@ -399,8 +399,10 @@ function createWindow() {
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     const headers = { ...details.responseHeaders }
     const url = details.url || ''
-    // For Mediaset/DAI CDN, preserve the specific origin to allow cookies (hdntl)
-    if (/mediaset|dai\.google\.com|doubleclick\.net/i.test(url)) {
+    // For Mediaset/DAI CDN streams (rawvod, link.api), preserve specific origin
+    // for cookies (hdntl). For API calls (services-ott-prod-fe), use * so the
+    // renderer can make POST requests (login, playback check) without CORS errors.
+    if (/rawvod\.mediaset|link\.api\.eu\.theplatform|dai\.google\.com|doubleclick\.net/i.test(url)) {
       headers['Access-Control-Allow-Origin'] = ['https://www.mediasetinfinity.es']
       headers['Access-Control-Allow-Credentials'] = ['true']
     } else {
