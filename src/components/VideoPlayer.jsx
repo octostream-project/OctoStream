@@ -61,6 +61,16 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     const videoEl = videoRef.current
     if (!videoEl) return
 
+    // Timeout: if manifest doesn't load in 15s, show error
+    const loadTimeout = setTimeout(() => {
+      setLoading(prev => {
+        if (prev) {
+          setError('Timeout: no se pudo cargar el stream en 15 segundos. Puede que el canal no esté disponible o requiera CORS.')
+        }
+        return false
+      })
+    }, 15000)
+
     const options = {
       controls: true,
       autoplay: true,
@@ -73,17 +83,27 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
 
       if (stream.streamType === 'hls') {
         if (Hls.isSupported()) {
-          const hls = new Hls()
+          const hlsConfig = {}
+          // Pass custom headers (User-Agent, Referer, Origin) if provided by plugin
+          if (stream.headers) {
+            hlsConfig.xhrSetup = (xhr) => {
+              for (const [key, val] of Object.entries(stream.headers)) {
+                try { xhr.setRequestHeader(key, val) } catch {}
+              }
+            }
+          }
+          const hls = new Hls(hlsConfig)
           hlsRef.current = hls
           hls.loadSource(stream.url)
           hls.attachMedia(videoEl)
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             setLoading(false)
-            videoEl.play()
+            videoEl.play().catch(() => {})
           })
           hls.on(Hls.Events.ERROR, (_, data) => {
             if (data.fatal) {
-              setError('Error al cargar el stream HLS')
+              const reason = data.details || data.type || 'unknown'
+              setError(`Error al cargar el stream HLS: ${reason}`)
               setLoading(false)
             }
           })
@@ -109,6 +129,7 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     })
 
     return () => {
+      clearTimeout(loadTimeout)
       if (hlsRef.current) {
         hlsRef.current.destroy()
         hlsRef.current = null
