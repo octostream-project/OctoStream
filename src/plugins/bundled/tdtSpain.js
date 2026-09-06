@@ -83,16 +83,32 @@ async function getEpg(cache) {
   if (cache.epg && Object.keys(cache.epg).length > 0 && Date.now() - cache.ts < CACHE_TTL_MS) return cache
   try {
     const data = await fetchGzJson(EPG_URL)
+    console.log('[TDT Spain] EPG raw data type:', typeof data, 'isArray:', Array.isArray(data))
     const m = {}
     if (Array.isArray(data)) {
+      console.log('[TDT Spain] EPG array length:', data.length, 'first item keys:', data[0] ? Object.keys(data[0]) : 'none')
       for (const ch of data) {
-        if (ch && ch.name) m[String(ch.name)] = ch.events || []
+        if (ch && ch.name) {
+          m[String(ch.name)] = ch.events || ch.programs || ch.epg || []
+        }
+      }
+    } else if (data && typeof data === 'object') {
+      // Could be an object keyed by channel name
+      console.log('[TDT Spain] EPG object keys:', Object.keys(data).slice(0, 5))
+      for (const [key, val] of Object.entries(data)) {
+        if (Array.isArray(val)) {
+          m[key] = val
+        } else if (val && Array.isArray(val.events)) {
+          m[key] = val.events
+        }
       }
     }
+    console.log('[TDT Spain] EPG parsed channels:', Object.keys(m).length)
     cache.epg = m
     saveCache(cache)
   } catch (e) {
     logWarn('TDT Spain EPG fetch failed', String(e?.message || e))
+    console.error('[TDT Spain] EPG fetch error:', e)
   }
   return cache
 }
@@ -389,6 +405,7 @@ export const tdtSpainFactory = (config) => {
       { id: 'tdtspain-all', name: 'Todos los canales', type: CONTENT_TYPES.LIVE },
       { id: 'tdtspain-live', name: 'En directo', type: CONTENT_TYPES.LIVE },
       { id: 'tdtspain-groups', name: 'Por grupo', type: CONTENT_TYPES.LIVE },
+      { id: 'u7d-tdtspain', name: 'Últimos 7 días', type: CONTENT_TYPES.LIVE },
     ],
     icon: 'tv',
   })
@@ -429,6 +446,34 @@ export const tdtSpainFactory = (config) => {
             description: `Canales del grupo ${g}`,
             genres: [g],
           }))
+        }
+
+        if (id === 'u7d-tdtspain') {
+          cache = await getU7d(cache)
+          const u7d = cache.u7d || {}
+          // U7D format: { "channels": [{ "name": "...", "programs": [...] }] }
+          // or array of channels
+          const u7dChannels = Array.isArray(u7d) ? u7d : (u7d.channels || u7d.canales || [])
+          const items = []
+          for (const u7dCh of u7dChannels) {
+            const chName = u7dCh.name || u7dCh.channel || u7dCh.title || ''
+            const programs = u7dCh.programs || u7dCh.events || u7dCh.items || []
+            for (const prog of programs) {
+              items.push({
+                id: `u7d-${chName}-${prog.start || prog.id || Math.random()}`,
+                type: CONTENT_TYPES.LIVE,
+                name: prog.title || prog.name || 'Sin título',
+                title: prog.title || prog.name || 'Sin título',
+                description: prog.description || prog.desc || chName,
+                poster: prog.poster || prog.thumbnail || '',
+                channelName: chName,
+                startTimestamp: prog.start ? new Date(prog.start).getTime() / 1000 : 0,
+                startTime: prog.start,
+                _raw: prog,
+              })
+            }
+          }
+          return items.slice(skip, skip + top)
         }
 
         // Default: all channels
@@ -507,13 +552,22 @@ export const tdtSpainFactory = (config) => {
         const channels = cache.channels || []
         const targetDate = date ? new Date(date) : new Date()
         const dayStr = targetDate.toISOString().slice(0, 10)
+        console.log('[TDT Spain] getEpg for date', dayStr, '- epg keys:', Object.keys(epg).length, 'channels:', channels.length)
+        // Log first few EPG keys for debugging
+        const epgKeys = Object.keys(epg).slice(0, 5)
+        console.log('[TDT Spain] sample epg keys:', epgKeys)
+        if (epgKeys.length > 0) {
+          const firstKey = epgKeys[0]
+          const firstEvents = epg[firstKey] || []
+          console.log('[TDT Spain] sample events for', firstKey, ':', firstEvents.slice(0, 2))
+        }
         const programs = []
         for (const ch of channels) {
           if (String(ch.ocultar || '') === 'true') continue
           const chName = String(ch.name || '')
           const events = epg[chName] || epg[normKey(chName)] || []
           for (const ev of events) {
-            const evStart = ev.start ? new Date(ev.start) : null
+            const evStart = ev.start ? new Date(ev.start) : (ev.begin ? new Date(ev.begin) : null)
             if (!evStart) continue
             if (evStart.toISOString().slice(0, 10) !== dayStr) continue
             programs.push({
@@ -523,16 +577,18 @@ export const tdtSpainFactory = (config) => {
               channelLogo: ch.logo,
               title: ev.title || ev.name || 'Sin título',
               description: ev.desc || ev.description || '',
-              start: ev.start,
-              end: ev.end || ev.stop,
+              start: ev.start || ev.begin,
+              end: ev.end || ev.stop || ev.finish,
               startTimestamp: evStart.getTime() / 1000,
               duration: ev.duration || (ev.end ? (new Date(ev.end) - evStart) / 1000 : 0),
             })
           }
         }
+        console.log('[TDT Spain] getEpg returning', programs.length, 'programs for', dayStr)
         return programs
       } catch (e) {
         logWarn('TDT Spain getEpg failed', String(e?.message || e))
+        console.error('[TDT Spain] getEpg error:', e)
         return []
       }
     },
