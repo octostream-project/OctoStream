@@ -49,6 +49,8 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   const [currentLevel, setCurrentLevel] = useState(-1) // -1 = auto
   const [hlsSubtitles, setHlsSubtitles] = useState([])
   const [activeHlsSub, setActiveHlsSub] = useState(-1) // -1 = off
+  const [nativeSubs, setNativeSubs] = useState([]) // CEA-608/708 tracks from video element
+  const [activeNativeSub, setActiveNativeSub] = useState(-1) // -1 = off
   const castSessionRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -105,7 +107,7 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           // Subtitles off by default - user can enable via UI
           subtitleDisplay: false,
           enableWebVTT: true,
-          enableCEA708Captions: false,
+          enableCEA708Captions: true,
         }
         // Configure XHR for direct (non-proxied) requests
         hlsConfig.xhrSetup = (xhr, url) => {
@@ -146,19 +148,34 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           hls.subtitleTrack = -1
           hls.subtitleDisplay = false
           setActiveHlsSub(-1)
-          // Disable all native text tracks
-          for (let i = 0; i < videoEl.textTracks.length; i++) {
-            videoEl.textTracks[i].mode = 'disabled'
-          }
-          // Watch for new text tracks being added and disable them
-          const onTrackAdded = () => {
+          // Disable all native text tracks by default but capture them for UI
+          const captureNativeTracks = () => {
+            const tracks = []
             for (let i = 0; i < videoEl.textTracks.length; i++) {
-              if (videoEl.textTracks[i].mode !== 'disabled') {
+              const tt = videoEl.textTracks[i]
+              tt.mode = 'disabled'
+              if (tt.kind === 'subtitles' || tt.kind === 'captions') {
+                tracks.push({
+                  index: i,
+                  name: tt.label || tt.language || `Track ${i + 1}`,
+                  lang: tt.language,
+                  kind: tt.kind,
+                })
+              }
+            }
+            if (tracks.length > 0) setNativeSubs(tracks)
+          }
+          captureNativeTracks()
+          // Watch for new text tracks being added (CEA-708 may arrive late)
+          videoEl.textTracks.addEventListener('addtrack', () => {
+            // Disable new tracks by default, but update the list
+            for (let i = 0; i < videoEl.textTracks.length; i++) {
+              if (videoEl.textTracks[i].mode === 'hidden') {
                 videoEl.textTracks[i].mode = 'disabled'
               }
             }
-          }
-          videoEl.textTracks.addEventListener('addtrack', onTrackAdded)
+            captureNativeTracks()
+          })
           setLoading(false)
           videoEl.play().catch(e => console.warn('[Player] play() failed:', e))
         })
@@ -419,6 +436,26 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
         videoEl.textTracks[i].mode = (subIndex >= 0 && i === subIndex) ? 'showing' : 'disabled'
       }
     }
+    // Clear native sub selection when using HLS subs
+    if (subIndex >= 0) setActiveNativeSub(-1)
+    setShowSubsPanel(false)
+  }
+
+  const handleNativeSubtitleToggle = (trackIndex) => {
+    const videoEl = videoRef.current
+    if (!videoEl) return
+    // Disable HLS subtitles when using native
+    const hls = hlsRef.current
+    if (hls) {
+      hls.subtitleTrack = -1
+      hls.subtitleDisplay = false
+      setActiveHlsSub(-1)
+    }
+    // Toggle native text tracks
+    for (let i = 0; i < videoEl.textTracks.length; i++) {
+      videoEl.textTracks[i].mode = (trackIndex >= 0 && i === trackIndex) ? 'showing' : 'disabled'
+    }
+    setActiveNativeSub(trackIndex)
     setShowSubsPanel(false)
   }
 
@@ -463,11 +500,11 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   }
 
   const searchSubs = async () => {
-    if (!meta && !title) return
+    const query = meta?.name || title || stream?.name
+    if (!query) return
     setSubsLoading(true)
     setShowSubsPanel(true)
     try {
-      const query = meta?.name || title
       const results = await openSubtitlesPlugin.searchSubtitles({
         query,
         languages: 'es,en',
@@ -663,9 +700,9 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
               {stream.quality}
             </span>
           )}
-          {activeSubtitle && (
+          {(activeSubtitle || activeHlsSub >= 0 || activeNativeSub >= 0) && (
             <span className="ml-2 text-xs bg-green-600 px-2 py-0.5 rounded">
-              SUB: {activeSubtitle.language}
+              SUB
             </span>
           )}
         </h2>
@@ -920,12 +957,12 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
             <div className="relative">
               <button
                 onClick={() => setShowSubsPanel(!showSubsPanel)}
-                className={`p-2 rounded-lg transition-colors ${activeSubtitle || activeHlsSub >= 0 ? 'text-primary-400 bg-primary-600/20' : 'text-white hover:bg-white/10'}`}
+                className={`p-2 rounded-lg transition-colors ${activeSubtitle || activeHlsSub >= 0 || activeNativeSub >= 0 ? 'text-primary-400 bg-primary-600/20' : 'text-white hover:bg-white/10'}`}
                 title="Subtítulos"
               >
                 <Captions size={22} />
               </button>
-              {(activeSubtitle || activeHlsSub >= 0) && (
+              {(activeSubtitle || activeHlsSub >= 0 || activeNativeSub >= 0) && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
               )}
 
@@ -938,7 +975,22 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
                     </button>
                   </div>
 
-                  {/* HLS subtitle tracks */}
+                  {/* No subtitles available */}
+                  {hlsSubtitles.length === 0 && nativeSubs.length === 0 && !meta && !title && (
+                    <p className="text-dark-400 text-sm text-center py-4">Sin subtítulos disponibles</p>
+                  )}
+
+                  {/* "Desactivado" button - always show when any subs exist */}
+                  {(hlsSubtitles.length > 0 || nativeSubs.length > 0) && (activeHlsSub >= 0 || activeNativeSub >= 0) && (
+                    <button
+                      onClick={() => { handleHlsSubtitleToggle(-1); handleNativeSubtitleToggle(-1) }}
+                      className="w-full text-left px-3 py-1.5 rounded text-sm transition-colors bg-primary-600 text-white mb-2"
+                    >
+                      Desactivar subtítulos
+                    </button>
+                  )}
+
+                  {/* HLS subtitle tracks (WebVTT from manifest) */}
                   {hlsSubtitles.length > 0 && (
                     <div className="mb-3">
                       <p className="text-xs text-dark-400 px-1 mb-1 font-medium">Del stream</p>
@@ -955,6 +1007,28 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
                           className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${activeHlsSub === s.index ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
                         >
                           {s.name}{s.lang ? ` (${s.lang})` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Native text tracks (CEA-608/708 embedded captions) */}
+                  {nativeSubs.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-dark-400 px-1 mb-1 font-medium">Subtítulos embebidos (TV)</p>
+                      <button
+                        onClick={() => handleNativeSubtitleToggle(-1)}
+                        className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${activeNativeSub === -1 ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
+                      >
+                        Desactivado
+                      </button>
+                      {nativeSubs.map(s => (
+                        <button
+                          key={s.index}
+                          onClick={() => handleNativeSubtitleToggle(s.index)}
+                          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${activeNativeSub === s.index ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
+                        >
+                          {s.name}{s.lang ? ` (${s.lang})` : ''}{s.kind === 'captions' ? ' [CC]' : ''}
                         </button>
                       ))}
                     </div>
