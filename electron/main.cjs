@@ -79,6 +79,7 @@ function proxyFetch(targetUrl, res) {
     if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
       const redirectUrl = proxyRes.headers.location
       const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
+      console.log('[Proxy] redirect', proxyRes.statusCode, '->', absoluteRedirect.substring(0, 100))
       res.writeHead(302, { 'Location': `/proxy?url=${encodeURIComponent(absoluteRedirect)}` })
       res.end()
       return
@@ -86,6 +87,7 @@ function proxyFetch(targetUrl, res) {
 
     const contentType = proxyRes.headers['content-type'] || ''
     const isM3u8 = /\.m3u8/i.test(targetUrl) || /mpegurl|vnd\.apple\.mpeg/i.test(contentType)
+    console.log('[Proxy] response', proxyRes.statusCode, contentType, isM3u8 ? '(m3u8)' : '', targetUrl.substring(0, 80))
 
     const respHeaders = {
       'Content-Type': contentType || 'application/octet-stream',
@@ -102,6 +104,7 @@ function proxyFetch(targetUrl, res) {
       let body = ''
       proxyRes.on('data', (chunk) => { body += chunk.toString() })
       proxyRes.on('end', () => {
+        console.log('[Proxy] m3u8 content (first 500 chars):\n', body.substring(0, 500))
         const lines = body.split('\n')
         const rewritten = lines.map(line => {
           const trimmed = line.trim()
@@ -139,6 +142,7 @@ function proxyFetch(targetUrl, res) {
           }
         })
         const rewrittenBody = rewritten.join('\n')
+        console.log('[Proxy] m3u8 rewritten (first 500 chars):\n', rewrittenBody.substring(0, 500))
         delete respHeaders['Content-Length']
         respHeaders['Content-Length'] = Buffer.byteLength(rewrittenBody)
         res.writeHead(proxyRes.statusCode || 200, respHeaders)
