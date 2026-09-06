@@ -1,11 +1,25 @@
 // Silence Fontconfig warnings (harmless on some Linux distros)
 process.env.FONTCONFIG_PATH = process.env.FONTCONFIG_PATH || '/etc/fonts'
 
-const { app, BrowserWindow, shell, session } = require('electron')
+const { app, BrowserWindow, shell, session, ipcMain } = require('electron')
 const path = require('path')
 const http = require('http')
 const https = require('https')
+const os = require('os')
 const { URL } = require('url')
+
+// Get local network IP (for Chromecast access to proxy)
+function getLocalIP() {
+  const interfaces = os.networkInterfaces()
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address
+      }
+    }
+  }
+  return '127.0.0.1'
+}
 
 // Custom HTTPS agent that ignores certificate errors.
 // Electron's Node.js (BoringSSL) requires this approach instead of
@@ -22,7 +36,10 @@ const insecureAgent = new https.Agent({
 // ignores certificate errors.
 
 const PROXY_PORT = 19588
-const PROXY_PREFIX = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
+const LOCAL_IP = getLocalIP()
+// Proxy prefix for renderer (localhost) and for Chromecast (LAN IP)
+const PROXY_PREFIX_LOCAL = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
+const PROXY_PREFIX_LAN = `http://${LOCAL_IP}:${PROXY_PORT}/proxy?url=`
 let proxyServer = null
 
 function headersForHost(host) {
@@ -47,7 +64,8 @@ function headersForHost(host) {
   return headers
 }
 
-function proxyFetch(targetUrl, res) {
+function proxyFetch(targetUrl, res, proxyPrefix) {
+  const prefix = proxyPrefix || PROXY_PREFIX_LOCAL
   console.log('[Proxy] fetching:', targetUrl.substring(0, 120))
   let target
   try {
@@ -115,7 +133,7 @@ function proxyFetch(targetUrl, res) {
               if (uriMatch) {
                 const originalUri = uriMatch[1]
                 const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
-                return trimmed.replace(uriMatch[0], `URI="${PROXY_PREFIX}${encodeURIComponent(absoluteUri)}"`)
+                return trimmed.replace(uriMatch[0], `URI="${prefix}${encodeURIComponent(absoluteUri)}"`)
               }
             }
             // Also rewrite URL= in #EXT-X-I-FRAME-STREAM-INF tags
@@ -124,19 +142,19 @@ function proxyFetch(targetUrl, res) {
               if (urlMatch) {
                 const originalUri = urlMatch[1]
                 const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
-                return trimmed.replace(urlMatch[0], `URL="${PROXY_PREFIX}${encodeURIComponent(absoluteUri)}"`)
+                return trimmed.replace(urlMatch[0], `URL="${prefix}${encodeURIComponent(absoluteUri)}"`)
               }
             }
             return line
           }
           // It's a segment URL (relative or absolute)
           if (/^https?:\/\//.test(trimmed)) {
-            return `${PROXY_PREFIX}${encodeURIComponent(trimmed)}`
+            return `${prefix}${encodeURIComponent(trimmed)}`
           }
           // Relative URL: resolve against the m3u8 base URL
           try {
             const absolute = new URL(trimmed, targetUrl).href
-            return `${PROXY_PREFIX}${encodeURIComponent(absolute)}`
+            return `${prefix}${encodeURIComponent(absolute)}`
           } catch {
             return line
           }
@@ -199,11 +217,24 @@ function startProxyServer() {
       return
     }
 
-    proxyFetch(targetUrl, res)
+    // Determine which proxy prefix to use based on client IP
+    // If request comes from localhost (renderer), use 127.0.0.1
+    // If from LAN (Chromecast), use the machine's LAN IP
+    const clientIp = req.socket.remoteAddress.replace(/^::ffff:/, '')
+    const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
+    const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
+    if (!isLocal) {
+      console.log('[Proxy] LAN request from', clientIp, '- using LAN prefix')
+    }
+
+    proxyFetch(targetUrl, res, prefix)
   })
 
-  proxyServer.listen(PROXY_PORT, '127.0.0.1', () => {
-    console.log(`[Proxy] Stream proxy running on http://127.0.0.1:${PROXY_PORT}`)
+  // Listen on all interfaces so Chromecast can reach the proxy
+  proxyServer.listen(PROXY_PORT, '0.0.0.0', () => {
+    console.log(`[Proxy] Stream proxy running on http://0.0.0.0:${PROXY_PORT}`)
+    console.log(`[Proxy] Local:    http://127.0.0.1:${PROXY_PORT}`)
+    console.log(`[Proxy] LAN:      http://${LOCAL_IP}:${PROXY_PORT}`)
   })
 
   proxyServer.on('error', (e) => {
@@ -212,6 +243,11 @@ function startProxyServer() {
 }
 
 // ─── App setup ─────────────────────────────────────────────────────────────
+
+// IPC handler: return LAN-accessible proxy URL for Chromecast
+ipcMain.handle('get-lan-proxy-url', () => {
+  return PROXY_PREFIX_LAN
+})
 
 app.whenReady().then(() => {
   startProxyServer()

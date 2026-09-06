@@ -410,8 +410,22 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
       const session = context.getCurrentSession()
       if (session) {
         castSessionRef.current = session
+        // For Chromecast, use LAN-accessible proxy URL so the cast device can reach it
+        let castUrl = stream.url
+        const isElectron = !!window.optopus?.isElectron
+        if (isElectron && /^https?:\/\//.test(castUrl) && !castUrl.includes('127.0.0.1')) {
+          try {
+            const lanProxyUrl = await window.optopus.getLanProxyUrl()
+            if (lanProxyUrl) {
+              castUrl = lanProxyUrl + encodeURIComponent(castUrl)
+              console.log('[Cast] Using LAN proxy URL for Chromecast:', castUrl.substring(0, 100))
+            }
+          } catch (e) {
+            console.warn('[Cast] Could not get LAN proxy URL, using direct URL')
+          }
+        }
         const mediaInfo = new window.chrome.cast.media.MediaInfo(
-          stream.url,
+          castUrl,
           stream.streamType === 'hls' ? 'application/vnd.apple.mpegurl' : 'video/mp4'
         )
         mediaInfo.metadata = new window.chrome.cast.media.GenericMediaMetadata()
