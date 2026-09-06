@@ -1,0 +1,17 @@
+node_modules/
+dist/
+dist-electron/
+android/
+capacitor-android/
+*.log
+.DS_Store
+.env
+.vite/
+.gradle/
+build/
+*.node
+*.lock
+*.bin
+native/**/build/
+capacitor-plugins/*/platform-android/.gradle/
+capacitor-plugins/*/platform-android/build/
