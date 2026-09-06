@@ -483,22 +483,49 @@ export const tdtSpainFactory = (config) => {
             if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
               try {
                 const progData = await fetchJson(u7dUrl)
-                // RTVE API format: { items: [{ title, start, end, ... }] }
+                // RTVE API format: { items: [{ name, begintime, duration, description }] }
+                // Other APIs: { items: [{ title, start, end }] }
                 const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
                 for (const prog of progs) {
-                  const start = prog.start || prog.begin || prog.startTime
-                  const end = prog.end || prog.finish || prog.endTime
+                  // Parse start time: RTVE uses "20260901060000" format
+                  let startTs = 0
+                  let startStr = ''
+                  const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+                  if (bt) {
+                    if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                      // RTVE format: YYYYMMDDHHmmss
+                      const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                      const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                      startTs = dt.getTime() / 1000
+                      startStr = dt.toISOString()
+                    } else {
+                      const dt = new Date(bt)
+                      if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                    }
+                  }
+                  // Parse duration: RTVE uses "006600" (HHMMSS)
+                  let durationSec = 0
+                  const dur = prog.duration || prog.dur
+                  if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
+                    durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
+                  } else if (typeof dur === 'number') {
+                    durationSec = dur
+                  }
+                  const endTs = startTs + durationSec
                   items.push({
-                    id: `u7d-${chKey}-${start || Math.random()}`,
+                    id: `u7d-${chKey}-${startTs || Math.random()}`,
                     type: CONTENT_TYPES.LIVE,
-                    name: prog.title || prog.name || prog.t || 'Sin título',
-                    title: prog.title || prog.name || prog.t || 'Sin título',
-                    description: prog.description || prog.desc || prog.d || chName,
+                    name: prog.name || prog.title || prog.t || 'Sin título',
+                    title: prog.name || prog.title || prog.t || 'Sin título',
+                    description: prog.description || prog.desc || prog.d || '',
                     poster: prog.poster || prog.thumbnail || prog.image || '',
                     channelName: chName,
                     channelId: chKey,
-                    startTimestamp: start ? new Date(start).getTime() / 1000 : 0,
-                    startTime: start,
+                    startTimestamp: startTs,
+                    startTime: startStr,
+                    endTimestamp: endTs,
+                    duration: durationSec,
                     _raw: prog,
                   })
                 }

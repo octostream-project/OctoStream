@@ -110,7 +110,7 @@ export default function LiveTV() {
         // Load U7D items for the selected channel and day
         if (u7dCatalogs.length > 0) {
           const cat = u7dCatalogs[0]
-          const allItems = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 500)
+          const allItems = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 5000)
           // Filter by channel and day
           const dayStr = u7dSelectedDay
           const filtered = allItems.filter(item => {

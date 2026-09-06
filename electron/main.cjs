@@ -105,14 +105,40 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
 
     const contentType = proxyRes.headers['content-type'] || ''
     const isM3u8 = /\.m3u8/i.test(targetUrl) || /mpegurl|vnd\.apple\.mpeg/i.test(contentType)
-    console.log('[Proxy] response', proxyRes.statusCode, contentType, isM3u8 ? '(m3u8)' : '', targetUrl.substring(0, 80))
+    const isGzJson = /\.gz$/i.test(targetUrl) || /gzip/i.test(contentType)
+    console.log('[Proxy] response', proxyRes.statusCode, contentType, isM3u8 ? '(m3u8)' : '', isGzJson ? '(gz)' : '', targetUrl.substring(0, 80))
 
     const respHeaders = {
-      'Content-Type': contentType || 'application/octet-stream',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
       'Access-Control-Allow-Headers': '*',
     }
+
+    if (isGzJson) {
+      // Decompress gzip and return as JSON
+      const chunks = []
+      proxyRes.on('data', (chunk) => chunks.push(chunk))
+      proxyRes.on('end', () => {
+        try {
+          const zlib = require('zlib')
+          const buf = Buffer.concat(chunks)
+          const decompressed = zlib.gunzipSync(buf)
+          const body = decompressed.toString('utf8')
+          respHeaders['Content-Type'] = 'application/json; charset=utf-8'
+          respHeaders['Content-Length'] = Buffer.byteLength(body)
+          res.writeHead(proxyRes.statusCode || 200, respHeaders)
+          res.end(body)
+        } catch (e) {
+          console.error('[Proxy] gzip decompress error:', e.message)
+          respHeaders['Content-Type'] = 'application/json; charset=utf-8'
+          res.writeHead(502, respHeaders)
+          res.end(JSON.stringify({ error: 'gzip decompress failed', detail: e.message }))
+        }
+      })
+      return
+    }
+
+    respHeaders['Content-Type'] = contentType || 'application/octet-stream'
     if (proxyRes.headers['content-length']) {
       respHeaders['Content-Length'] = proxyRes.headers['content-length']
     }
