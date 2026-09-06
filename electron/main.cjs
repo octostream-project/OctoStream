@@ -48,6 +48,7 @@ function headersForHost(host) {
 }
 
 function proxyFetch(targetUrl, res) {
+  console.log('[Proxy] fetching:', targetUrl.substring(0, 120))
   let target
   try {
     target = new URL(targetUrl)
@@ -105,13 +106,22 @@ function proxyFetch(targetUrl, res) {
         const rewritten = lines.map(line => {
           const trimmed = line.trim()
           if (!trimmed || trimmed.startsWith('#')) {
-            // Rewrite URI= in #EXT-X-KEY and #EXT-X-MAP tags
-            if (/^#EXT-X-(KEY|MAP)/.test(trimmed) && /URI="([^"]+)"/.test(trimmed)) {
+            // Rewrite URI= in #EXT-X-KEY, #EXT-X-MAP, #EXT-X-MEDIA and #EXT-X-SESSION-DATA tags
+            if (/^#EXT-X-(KEY|MAP|MEDIA|SESSION-DATA)/.test(trimmed) && /URI="([^"]+)"/.test(trimmed)) {
               const uriMatch = trimmed.match(/URI="([^"]+)"/)
               if (uriMatch) {
                 const originalUri = uriMatch[1]
                 const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
                 return trimmed.replace(uriMatch[0], `URI="${PROXY_PREFIX}${encodeURIComponent(absoluteUri)}"`)
+              }
+            }
+            // Also rewrite URL= in #EXT-X-I-FRAME-STREAM-INF tags
+            if (/^#EXT-X-I-FRAME-STREAM-INF/.test(trimmed) && /URL="([^"]+)"/.test(trimmed)) {
+              const urlMatch = trimmed.match(/URL="([^"]+)"/)
+              if (urlMatch) {
+                const originalUri = urlMatch[1]
+                const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
+                return trimmed.replace(urlMatch[0], `URL="${PROXY_PREFIX}${encodeURIComponent(absoluteUri)}"`)
               }
             }
             return line
@@ -121,8 +131,12 @@ function proxyFetch(targetUrl, res) {
             return `${PROXY_PREFIX}${encodeURIComponent(trimmed)}`
           }
           // Relative URL: resolve against the m3u8 base URL
-          const absolute = new URL(trimmed, targetUrl).href
-          return `${PROXY_PREFIX}${encodeURIComponent(absolute)}`
+          try {
+            const absolute = new URL(trimmed, targetUrl).href
+            return `${PROXY_PREFIX}${encodeURIComponent(absolute)}`
+          } catch {
+            return line
+          }
         })
         const rewrittenBody = rewritten.join('\n')
         delete respHeaders['Content-Length']
