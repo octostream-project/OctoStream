@@ -350,6 +350,152 @@ async function resolveMediasetLive(ch, streamTypes) {
   return { url: manifest, streamType: 'hls', quality: 'LIVE', headers: hdr }
 }
 
+// ─── U7D stream resolution ──────────────────────────────────────────────────
+
+async function resolveU7dStream(itemId, cache) {
+  // itemId format: u7d-{channelKey}-{startTimestamp}
+  // We need to find which channel and item this is, then resolve stream
+  const parts = itemId.match(/^u7d-(.+?)-(\d+(?:\.\d+)?)$/)
+  if (!parts) return null
+  const chKey = parts[1]
+  const startTs = parseFloat(parts[2])
+
+  cache = await getU7d(cache)
+  const u7d = cache.u7d || {}
+  const u7dConf = u7d.U7dConf || {}
+  const chData = u7dConf[chKey]
+  if (!chData) return null
+  const u7dtype = chData.u7dtype || ''
+
+  console.log('[TDT Spain] U7D stream resolve:', chKey, 'type:', u7dtype, 'ts:', startTs)
+
+  if (u7dtype === 'stream1') {
+    // RTVE: resolve via ztnr.rtve.es using idAsset
+    // We need to re-fetch the programs to find the one matching this timestamp
+    const u7dUrl = chData.u7ddata || ''
+    if (!u7dUrl) return null
+    try {
+      const progData = await fetchJson(u7dUrl)
+      const items = progData.items || []
+      // Find program by timestamp
+      let program = null
+      for (const it of items) {
+        const bt = it.begintime || ''
+        if (bt && /^\d{14}$/.test(bt)) {
+          const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+          const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+          const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+          const ts = Math.floor(dt.getTime() / 1000)
+          if (ts === Math.floor(startTs)) {
+            program = it
+            break
+          }
+        }
+      }
+      if (!program) {
+        console.warn('[TDT Spain] U7D RTVE: program not found for ts', startTs)
+        return null
+      }
+      const idAsset = program.idAsset || program.idPrograma
+      if (!idAsset) {
+        console.warn('[TDT Spain] U7D RTVE: no idAsset/idPrograma for', program.name)
+        return null
+      }
+      // RTVE U7D: ztnr redirects to HLS (works for both DRM and non-DRM)
+      const hlsUrl = `https://ztnr.rtve.es/ztnr/${idAsset}.m3u8`
+      console.log('[TDT Spain] U7D RTVE stream:', hlsUrl)
+      return {
+        name: program.name || 'RTVE',
+        url: hlsUrl,
+        streamType: 'hls',
+        quality: 'VOD',
+        headers: { 'User-Agent': UA, Origin: 'https://www.rtve.es', Referer: 'https://www.rtve.es/' },
+      }
+    } catch (e) {
+      console.error('[TDT Spain] U7D RTVE resolve error:', e?.message)
+      return null
+    }
+  }
+
+  if (u7dtype === 'stream11') {
+    // Atresplayer U7D: items have link.href -> resolve like VOD
+    const u7dUrl = chData.u7ddata || ''
+    if (!u7dUrl) return null
+    try {
+      const progData = await fetchJson(u7dUrl)
+      const progs = progData.itemRows || progData.items || []
+      let program = null
+      for (const p of progs) {
+        const pTs = Math.floor((p.startTime || 0) / 1000)
+        if (pTs === Math.floor(startTs)) {
+          program = p
+          break
+        }
+      }
+      if (!program) {
+        console.warn('[TDT Spain] U7D Atresplayer: program not found for ts', startTs)
+        return null
+      }
+      // Get the video link from the program
+      const link = program.link?.href || program.link?.url || program.href || ''
+      if (!link) {
+        console.warn('[TDT Spain] U7D Atresplayer: no link for', program.title)
+        return null
+      }
+      const hdr = { 'User-Agent': UA, Origin: 'https://www.atresplayer.com', Referer: 'https://www.atresplayer.com/' }
+      // Atresplayer VOD: resolve through same API chain as live
+      const fullUrl = link.startsWith('http') ? link : `https://api.atresplayer.com${link}`
+      const r1 = await fetchJson(fullUrl, hdr)
+      const urlVideo = r1?.urlVideo || ''
+      if (!urlVideo) {
+        // Try page -> urlVideo flow
+        const pageHref = r1?.href || ''
+        if (pageHref) {
+          const r2 = await fetchJson(pageHref, hdr)
+          const uv = r2?.urlVideo || ''
+          if (uv) {
+            const player = await fetchJson(uv + '?usp=true&device=desktop&NODRM=true', hdr)
+            const sources = player?.sources || player?.sourcesLive || []
+            for (const src of sources) {
+              const t = String(src.type || '')
+              const u = String(src.src || '')
+              if (u && (/mpegurl/.test(t) || /hls/.test(t) || u.endsWith('.m3u8'))) {
+                return { name: program.title || 'Atresplayer', url: u, streamType: 'hls', quality: 'VOD', headers: hdr }
+              }
+            }
+          }
+        }
+        return null
+      }
+      const player = await fetchJson(urlVideo + '?usp=true&device=desktop&NODRM=true', hdr)
+      const sources = player?.sources || player?.sourcesLive || []
+      for (const src of sources) {
+        const t = String(src.type || '')
+        const u = String(src.src || '')
+        if (u && (/mpegurl/.test(t) || /hls/.test(t) || u.endsWith('.m3u8'))) {
+          console.log('[TDT Spain] U7D Atresplayer stream:', u.substring(0, 80))
+          return { name: program.title || 'Atresplayer', url: u, streamType: 'hls', quality: 'VOD', headers: hdr }
+        }
+      }
+      return null
+    } catch (e) {
+      console.error('[TDT Spain] U7D Atresplayer resolve error:', e?.message)
+      return null
+    }
+  }
+
+  if (u7dtype === 'stream10') {
+    // Mediaset U7D: programs listed from EPG feed, but individual VOD streams
+    // are typically behind DRM/login, similar to live
+    // For now, try the same live stream resolution approach
+    console.warn('[TDT Spain] U7D Mediaset: VOD playback not yet supported')
+    return null
+  }
+
+  console.warn('[TDT Spain] U7D: unknown type', u7dtype, 'for', chKey)
+  return null
+}
+
 // ─── Stream resolution ──────────────────────────────────────────────────────
 
 async function resolveLiveStream(ch, cache) {
@@ -617,10 +763,13 @@ export const tdtSpainFactory = (config) => {
                   })
                 }
               } else if (isRtve) {
-                // RTVE format: { items: [{ name, begintime "YYYYMMDDHHmmss", duration "HHMMSS" }] }
+                // RTVE format: { items: [{ name, begintime "YYYYMMDDHHmmss", duration, idAsset, idPrograma }] }
                 const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
                 console.log('[TDT Spain] RTVE U7D parsed', progs.length, 'programs')
                 for (const prog of progs) {
+                  // Only include programs with idAsset (otherwise no VOD)
+                  const idAsset = prog.idAsset || prog.idPrograma || ''
+                  if (!idAsset) continue
                   let startTs = 0, startStr = ''
                   const bt = prog.begintime || prog.start || prog.begin || prog.startTime
                   if (bt) {
@@ -651,6 +800,7 @@ export const tdtSpainFactory = (config) => {
                     startTimestamp: startTs,
                     startTime: startStr,
                     duration: durationSec,
+                    idAsset: String(idAsset),
                     _raw: prog,
                   })
                 }
@@ -713,6 +863,19 @@ export const tdtSpainFactory = (config) => {
         let cache = loadCache()
         cache = await getChannels(cache)
         cache = await getEpg(cache)
+
+        // U7D program meta
+        if (id.startsWith('u7d-')) {
+          return {
+            id,
+            type: CONTENT_TYPES.LIVE,
+            name: 'Programa U7D',
+            title: 'Programa U7D',
+            description: 'Contenido de los últimos 7 días',
+            isU7d: true,
+          }
+        }
+
         const chId = id.replace(/^tdtspain-/, '')
         const ch = cache.channels?.find(c => String(c.id) === chId)
         if (!ch) return null
@@ -727,6 +890,17 @@ export const tdtSpainFactory = (config) => {
       try {
         let cache = loadCache()
         cache = await getChannels(cache)
+
+        // U7D program stream resolution
+        if (id.startsWith('u7d-')) {
+          const stream = await resolveU7dStream(id, cache)
+          if (stream) {
+            return [{ name: stream.name || 'U7D', url: stream.url, streamType: stream.streamType || 'hls', quality: stream.quality || 'VOD', headers: stream.headers }]
+          }
+          return []
+        }
+
+        // Live channel stream resolution
         const chId = id.replace(/^tdtspain-/, '')
         const ch = cache.channels?.find(c => String(c.id) === chId)
         if (!ch) return []
