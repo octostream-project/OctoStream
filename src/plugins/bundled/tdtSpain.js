@@ -480,6 +480,8 @@ export const tdtSpainFactory = (config) => {
           for (const [chKey, chData] of Object.entries(u7dConf)) {
             const chName = chData.idchannel || chKey
             const u7dUrl = chData.u7ddata || ''
+            // Skip Mediaset channels - their API is currently broken/inaccessible
+            if (u7dUrl && /mediaset/.test(u7dUrl)) continue
             if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
               // Find matching channel from channels list for logo
               const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
@@ -514,46 +516,117 @@ export const tdtSpainFactory = (config) => {
           const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
           try {
             const progData = await fetchJson(u7dUrl)
-            const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
             const items = []
-            for (const prog of progs) {
-              let startTs = 0
-              let startStr = ''
-              const bt = prog.begintime || prog.start || prog.begin || prog.startTime
-              if (bt) {
-                if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
-                  const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
-                  const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
-                  const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
-                  startTs = dt.getTime() / 1000
-                  startStr = dt.toISOString()
-                } else {
-                  const dt = new Date(bt)
-                  if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+
+            // Detect format by URL or data structure
+            const isAtresplayer = /atresplayer/.test(u7dUrl)
+            const isMediaset = /mediaset/.test(u7dUrl)
+            const isRtve = /rtve/.test(u7dUrl)
+
+            if (isAtresplayer) {
+              // Atresmedia format: { itemRows: [{ title, startTime (ms), image: { pathHorizontal } }] }
+              const progs = progData.itemRows || progData.items || []
+              for (const prog of progs) {
+                const startMs = prog.startTime || 0
+                const startTs = Math.floor(startMs / 1000)
+                items.push({
+                  id: `u7d-${chKey}-${startTs || Math.random()}`,
+                  type: CONTENT_TYPES.LIVE,
+                  name: prog.title || 'Sin título',
+                  title: prog.title || 'Sin título',
+                  description: prog.description || prog.stickerU7D || '',
+                  poster: prog.image?.pathHorizontal ? prog.image.pathHorizontal + '640x360.jpg' : '',
+                  channelName: chMatch?.name || chName,
+                  channelId: chKey,
+                  startTimestamp: startTs,
+                  startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
+                  _raw: prog,
+                })
+              }
+            } else if (isRtve) {
+              // RTVE format: { items: [{ name, begintime "YYYYMMDDHHmmss", duration "HHMMSS" }] }
+              const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
+              for (const prog of progs) {
+                let startTs = 0
+                let startStr = ''
+                const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+                if (bt) {
+                  if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                    const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                    const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                    const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                    startTs = dt.getTime() / 1000
+                    startStr = dt.toISOString()
+                  } else {
+                    const dt = new Date(bt)
+                    if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                  }
                 }
+                let durationSec = 0
+                const dur = prog.duration || prog.dur
+                if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
+                  durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
+                } else if (typeof dur === 'number') {
+                  durationSec = dur
+                }
+                items.push({
+                  id: `u7d-${chKey}-${startTs || Math.random()}`,
+                  type: CONTENT_TYPES.LIVE,
+                  name: prog.name || prog.title || prog.t || 'Sin título',
+                  title: prog.name || prog.title || prog.t || 'Sin título',
+                  description: prog.description || prog.desc || prog.d || '',
+                  poster: prog.poster || prog.thumbnail || prog.image || '',
+                  channelName: chMatch?.name || chName,
+                  channelId: chKey,
+                  startTimestamp: startTs,
+                  startTime: startStr,
+                  duration: durationSec,
+                  _raw: prog,
+                })
               }
-              let durationSec = 0
-              const dur = prog.duration || prog.dur
-              if (typeof dur === 'string' && /^\d{6}$/.test(dur)) {
-                durationSec = parseInt(dur.slice(0,2))*3600 + parseInt(dur.slice(2,4))*60 + parseInt(dur.slice(4,6))
-              } else if (typeof dur === 'number') {
-                durationSec = dur
+            } else if (isMediaset) {
+              // Mediaset API requires byListingTime param - currently broken/inaccessible
+              // Return empty with a note
+              console.warn('[TDT Spain] Mediaset U7D API not available for', chKey)
+            } else {
+              // Generic format: try common fields
+              const progs = progData.items || progData.programs || progData.events || progData.itemRows || (Array.isArray(progData) ? progData : [])
+              for (const prog of progs) {
+                let startTs = 0
+                let startStr = ''
+                const bt = prog.begintime || prog.start || prog.begin || prog.startTime
+                if (bt) {
+                  if (typeof bt === 'string' && /^\d{14}$/.test(bt)) {
+                    const y = bt.slice(0,4), mo = bt.slice(4,6), d = bt.slice(6,8)
+                    const h = bt.slice(8,10), mi = bt.slice(10,12), s = bt.slice(12,14)
+                    const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`)
+                    startTs = dt.getTime() / 1000
+                    startStr = dt.toISOString()
+                  } else if (typeof bt === 'number' && bt > 1000000000000) {
+                    // Milliseconds
+                    startTs = Math.floor(bt / 1000)
+                    startStr = new Date(bt).toISOString()
+                  } else {
+                    const dt = new Date(bt)
+                    if (!isNaN(dt)) { startTs = dt.getTime() / 1000; startStr = dt.toISOString() }
+                  }
+                }
+                items.push({
+                  id: `u7d-${chKey}-${startTs || Math.random()}`,
+                  type: CONTENT_TYPES.LIVE,
+                  name: prog.name || prog.title || prog.t || 'Sin título',
+                  title: prog.name || prog.title || prog.t || 'Sin título',
+                  description: prog.description || prog.desc || prog.d || '',
+                  poster: prog.poster || prog.thumbnail || prog.image?.pathHorizontal || '',
+                  channelName: chMatch?.name || chName,
+                  channelId: chKey,
+                  startTimestamp: startTs,
+                  startTime: startStr,
+                  _raw: prog,
+                })
               }
-              items.push({
-                id: `u7d-${chKey}-${startTs || Math.random()}`,
-                type: CONTENT_TYPES.LIVE,
-                name: prog.name || prog.title || prog.t || 'Sin título',
-                title: prog.name || prog.title || prog.t || 'Sin título',
-                description: prog.description || prog.desc || prog.d || '',
-                poster: prog.poster || prog.thumbnail || prog.image || '',
-                channelName: chMatch?.name || chName,
-                channelId: chKey,
-                startTimestamp: startTs,
-                startTime: startStr,
-                duration: durationSec,
-                _raw: prog,
-              })
             }
+
             items.sort((a, b) => (b.startTimestamp || 0) - (a.startTimestamp || 0))
             return items.slice(skip, skip + top)
           } catch (e) {
