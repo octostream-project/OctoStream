@@ -913,10 +913,8 @@ export const tdtSpainFactory = (config) => {
                       // Determine if content is free (AVOD) or paid (SVOD-only)
                       const rights = prog['mediasetprogram$channelsRights'] || []
                       const isFree = hasVod && rights.includes('AVOD')
-                      // Skip SVOD-only programs (require paid subscription, return LicenseNotGranted)
-                      if (hasVod && !isFree) continue
-                      // Skip programs without VOD
-                      if (!hasVod) continue
+                      // Show ALL programs like the APK does (no filtering)
+                      // The UI will dim non-playable items and prevent clicking them
                       // Use thumbnail from program data
                       const thumbs = prog.thumbnails || {}
                       const poster = thumbs['image_keyframe_poster']?.url || thumbs['image_horizontal_cover']?.url || ''
@@ -934,6 +932,7 @@ export const tdtSpainFactory = (config) => {
                         endTimestamp: Math.floor(endMs / 1000),
                         hasVod,
                         isFree,
+                        playable: isFree, // only AVOD content is actually playable
                         vodUrl,
                         guid,
                         _raw: listing,
