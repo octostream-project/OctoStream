@@ -7,6 +7,7 @@ import {
   Monitor, Captions, Settings, Download, ExternalLink,
   Subtitles, ChevronUp, ChevronDown, RotateCcw, Gauge,
   Cast, Tv, Smartphone, Wifi, Copy, Check,
+  Play, Pause, SkipBack, SkipForward,
 } from 'lucide-react'
 
 function srtToVtt(srt) {
@@ -49,6 +50,14 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   const [hlsSubtitles, setHlsSubtitles] = useState([])
   const [activeHlsSub, setActiveHlsSub] = useState(-1) // -1 = off
   const castSessionRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [seekable, setSeekable] = useState(false)
+  const [showControls, setShowControls] = useState(true)
+  const hideControlsTimer = useRef(null)
+  const seekBarRef = useRef(null)
+  const [isSeeking, setIsSeeking] = useState(false)
 
   useEffect(() => {
     if (!stream) return
@@ -184,6 +193,62 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     }
   }, [stream])
 
+  // Track playback state, time, duration
+  useEffect(() => {
+    const videoEl = videoRef.current
+    if (!videoEl) return
+    const onPlay = () => setPlaying(true)
+    const onPause = () => setPlaying(false)
+    const onTimeUpdate = () => {
+      if (!isSeeking) setCurrentTime(videoEl.currentTime)
+    }
+    const onDurationChange = () => {
+      const dur = videoEl.duration
+      setDuration(isFinite(dur) ? dur : 0)
+      setSeekable(isFinite(dur) && dur > 0)
+    }
+    const onLoadedMetadata = () => {
+      const dur = videoEl.duration
+      setDuration(isFinite(dur) ? dur : 0)
+      setSeekable(isFinite(dur) && dur > 0)
+    }
+    videoEl.addEventListener('play', onPlay)
+    videoEl.addEventListener('pause', onPause)
+    videoEl.addEventListener('timeupdate', onTimeUpdate)
+    videoEl.addEventListener('durationchange', onDurationChange)
+    videoEl.addEventListener('loadedmetadata', onLoadedMetadata)
+    return () => {
+      videoEl.removeEventListener('play', onPlay)
+      videoEl.removeEventListener('pause', onPause)
+      videoEl.removeEventListener('timeupdate', onTimeUpdate)
+      videoEl.removeEventListener('durationchange', onDurationChange)
+      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata)
+    }
+  }, [isSeeking])
+
+  // Auto-hide controls after inactivity
+  useEffect(() => {
+    const resetTimer = () => {
+      setShowControls(true)
+      clearTimeout(hideControlsTimer.current)
+      hideControlsTimer.current = setTimeout(() => {
+        if (playing) setShowControls(false)
+      }, 3000)
+    }
+    const container = containerRef.current
+    if (!container) return
+    container.addEventListener('mousemove', resetTimer)
+    container.addEventListener('mousedown', resetTimer)
+    container.addEventListener('touchstart', resetTimer)
+    resetTimer()
+    return () => {
+      clearTimeout(hideControlsTimer.current)
+      container.removeEventListener('mousemove', resetTimer)
+      container.removeEventListener('mousedown', resetTimer)
+      container.removeEventListener('touchstart', resetTimer)
+    }
+  }, [playing])
+
   useEffect(() => {
     const handleFsChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
@@ -192,12 +257,90 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     return () => document.removeEventListener('fullscreenchange', handleFsChange)
   }, [])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault()
+          togglePlayPause()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          seekTo(currentTime - 10)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          seekTo(currentTime + 10)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          handleVolumeChange(Math.min(1, volume + 0.1))
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          handleVolumeChange(Math.max(0, volume - 0.1))
+          break
+        case 'f':
+          e.preventDefault()
+          toggleFullscreen()
+          break
+        case 'm':
+          e.preventDefault()
+          toggleMute()
+          break
+        case 'Escape':
+          if (document.fullscreenElement) {
+            document.exitFullscreen()
+          } else {
+            onClose?.()
+          }
+          break
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [currentTime, volume, playing])
+
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       document.exitFullscreen()
     } else {
       containerRef.current?.requestFullscreen()
     }
+  }
+
+  const togglePlayPause = () => {
+    const videoEl = videoRef.current
+    if (!videoEl) return
+    if (videoEl.paused) videoEl.play().catch(() => {})
+    else videoEl.pause()
+  }
+
+  const seekTo = (time) => {
+    const videoEl = videoRef.current
+    if (!videoEl || !isFinite(time)) return
+    videoEl.currentTime = Math.max(0, Math.min(time, duration))
+  }
+
+  const skipForward = () => seekTo(currentTime + 10)
+  const skipBackward = () => seekTo(currentTime - 10)
+
+  const handleSeekBarChange = (e) => {
+    const val = parseFloat(e.target.value)
+    setCurrentTime(val)
+    seekTo(val)
+  }
+
+  const formatTime = (s) => {
+    if (!isFinite(s) || s < 0) return '0:00'
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    const sec = Math.floor(s % 60)
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    return `${m}:${String(sec).padStart(2, '0')}`
   }
 
   const isEmbed = stream && (stream.streamType === 'embed' || stream.streamType === 'iframe')
@@ -501,9 +644,9 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center"
+      className={`fixed inset-0 z-50 bg-black flex items-center justify-center ${!showControls ? 'cursor-none' : ''}`}
     >
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent">
+      <div className={`absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <h2 className="text-white text-lg font-medium truncate max-w-[60%]">
           {title}
           {stream?.quality && (
@@ -625,20 +768,85 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
       )}
 
       {!isEmbed && !error && (
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full flex items-center justify-center" onClick={togglePlayPause}>
           <video
             ref={videoRef}
             className="w-full h-full"
             autoPlay
             playsInline
           />
+          {/* Play/Pause overlay icon */}
+          {!loading && !playing && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="bg-black/50 rounded-full p-5">
+                <Play size={48} className="text-white ml-1" />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Barra inferior de iconos sueltos */}
+      {/* Barra inferior de controles */}
       {!isEmbed && !error && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent pb-4 pt-12">
+        <div className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent pb-3 pt-12 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+
+          {/* Seek bar */}
+          {seekable && (
+            <div className="px-4 mb-2">
+              <div className="flex items-center gap-3">
+                <span className="text-white text-xs font-mono min-w-[40px] text-right">{formatTime(currentTime)}</span>
+                <input
+                  ref={seekBarRef}
+                  type="range"
+                  min="0"
+                  max={duration || 0}
+                  step="0.1"
+                  value={currentTime}
+                  onChange={handleSeekBarChange}
+                  onMouseDown={() => setIsSeeking(true)}
+                  onMouseUp={() => setIsSeeking(false)}
+                  onTouchStart={() => setIsSeeking(true)}
+                  onTouchEnd={() => setIsSeeking(false)}
+                  className="flex-1 h-1.5 accent-primary-500 cursor-pointer appearance-none bg-dark-600 rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:bg-primary-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-primary-400"
+                  style={{ background: duration > 0 ? `linear-gradient(to right, rgb(var(--color-primary-500)) ${(currentTime / duration) * 100}%, rgb(55 65 81) ${(currentTime / duration) * 100}%)` : undefined }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="text-dark-400 text-xs font-mono min-w-[40px]">{formatTime(duration)}</span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-center gap-1 sm:gap-2">
+
+            {/* Play/Pause */}
+            <button
+              onClick={(e) => { e.stopPropagation(); togglePlayPause() }}
+              className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors"
+              title={playing ? 'Pausa' : 'Reproducir'}
+            >
+              {playing ? <Pause size={24} /> : <Play size={24} className="ml-0.5" />}
+            </button>
+
+            {/* Skip backward 10s */}
+            <button
+              onClick={(e) => { e.stopPropagation(); skipBackward() }}
+              className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors"
+              title="Retroceder 10s"
+            >
+              <SkipBack size={20} />
+            </button>
+
+            {/* Skip forward 10s */}
+            <button
+              onClick={(e) => { e.stopPropagation(); skipForward() }}
+              className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors"
+              title="Avanzar 10s"
+            >
+              <SkipForward size={20} />
+            </button>
+
+            {/* Separador */}
+            <div className="w-px h-6 bg-dark-600 mx-1" />
 
             {/* Volumen */}
             <div
