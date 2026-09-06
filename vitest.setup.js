@@ -1,5 +1,3 @@
-import '@testing-library/jest-dom'
-
 // Mock localStorage
 const store = new Map()
 const localStorageMock = {
