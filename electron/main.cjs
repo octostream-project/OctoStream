@@ -47,18 +47,22 @@ function headersForHost(host) {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
     'Accept': '*/*',
   }
-  if (/rtve\./i.test(host)) {
+  if (/rtve/i.test(host)) {
     headers['Origin'] = 'https://www.rtve.es'
     headers['Referer'] = 'https://www.rtve.es/'
-  } else if (/atresplayer\.|atresmedia\./i.test(host)) {
+  } else if (/atresplayer|atresmedia|atres-live|nogeovod/i.test(host)) {
     headers['Origin'] = 'https://www.atresplayer.com'
     headers['Referer'] = 'https://www.atresplayer.com/'
-  } else if (/mediaset\./i.test(host)) {
+  } else if (/mediaset/i.test(host)) {
     headers['Origin'] = 'https://www.mediasetinfinity.es'
     headers['Referer'] = 'https://www.mediasetinfinity.es/'
-  } else if (/tdtchannels\./i.test(host)) {
+  } else if (/doubleclick\.net/i.test(host)) {
+    // Google DAI streams used by Mediaset
+    headers['Origin'] = 'https://www.mediasetinfinity.es'
+    headers['Referer'] = 'https://www.mediasetinfinity.es/'
+  } else if (/tdtchannels/i.test(host)) {
     headers['Referer'] = 'https://www.tdtchannels.com/'
-  } else if (/tdtspain\./i.test(host)) {
+  } else if (/tdtspain/i.test(host)) {
     headers['Referer'] = 'https://www.tdtspain.com/'
   }
   return headers
@@ -307,20 +311,20 @@ app.whenReady().then(() => {
   // Inject custom headers for API calls (not proxied streams)
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const url = details.url
-    if (/rtve\.|atresplayer\.|mediaset\.|tdtchannels\.|tdtspain\./i.test(url) && !url.includes('127.0.0.1')) {
+    if (/rtve|atresplayer|atresmedia|mediaset|doubleclick\.net\/ssai|tdtchannels|tdtspain/i.test(url) && !url.includes('127.0.0.1')) {
       if (!details.requestHeaders['User-Agent']) {
         details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
       }
-      if (/rtve\./i.test(url)) {
+      if (/rtve/i.test(url)) {
         details.requestHeaders['Origin'] = 'https://www.rtve.es'
         details.requestHeaders['Referer'] = 'https://www.rtve.es/'
-      } else if (/atresplayer\./i.test(url)) {
+      } else if (/atresplayer|atresmedia/i.test(url)) {
         details.requestHeaders['Origin'] = 'https://www.atresplayer.com'
         details.requestHeaders['Referer'] = 'https://www.atresplayer.com/'
-      } else if (/mediaset\./i.test(url)) {
+      } else if (/mediaset|doubleclick\.net\/ssai/i.test(url)) {
         details.requestHeaders['Origin'] = 'https://www.mediasetinfinity.es'
         details.requestHeaders['Referer'] = 'https://www.mediasetinfinity.es/'
-      } else if (/tdtchannels\./i.test(url)) {
+      } else if (/tdtchannels/i.test(url)) {
         details.requestHeaders['Referer'] = 'https://www.tdtchannels.com/'
       }
     }
@@ -370,7 +374,7 @@ function createWindow() {
     if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
       headers['Origin'] = 'https://www.atresplayer.com'
       headers['Referer'] = 'https://www.atresplayer.com/'
-    } else if (/mediaset\.net|mediasetinfinity|mediasetstream/i.test(url)) {
+    } else if (/mediaset|doubleclick\.net\/ssai/i.test(url)) {
       headers['Origin'] = 'https://www.mediasetinfinity.es'
       headers['Referer'] = 'https://www.mediasetinfinity.es/'
     } else if (/rtve\.es|rtvelivestream/i.test(url)) {
