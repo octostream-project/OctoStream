@@ -1,4 +1,4 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 
 const SERVER_URL =
   (import.meta.env && import.meta.env.VITE_REPELIS_SERVER_URL) ||

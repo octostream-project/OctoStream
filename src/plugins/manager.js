@@ -1,7 +1,7 @@
 import { esLanguagePlugin } from './languages/es.js'
 import { enLanguagePlugin } from './languages/en.js'
 import { builtInPlugins } from './builtIn/index.js'
-import { createExternalPlugin, fetchManifest } from './externalAdapter.js'
+import { createExternalPlugin, fetchManifest } from './external/externalAdapter.js'
 import { logError, logWarn } from '../utils/logger.js'
 
 const META_TIMEOUT_MS = 8000

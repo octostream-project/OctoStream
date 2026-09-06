@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Search, Heart, Puzzle, Radio, Film, Tv, Clock, Clapperboard, Link2, Settings as SettingsIcon } from 'lucide-react'
+import { Home, Search, Heart, Puzzle, Radio, Film, Tv, Clock, Clapperboard, Link2, Settings as SettingsIcon, Antenna } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { pluginManager } from '../plugins/manager.js'
 
@@ -10,6 +10,7 @@ export default function Sidebar({ open, onClose }) {
 
   const navItems = [
     { to: '/', icon: Home, label: 'Inicio' },
+    { to: '/live-tv', icon: Antenna, label: 'TV en vivo' },
     { to: '/search', icon: Search, label: 'Buscar' },
     { to: '/favorites', icon: Heart, label: 'Favoritos', badge: favorites.length },
     { to: '/history', icon: Clock, label: 'Historial', badge: watchHistory.length },

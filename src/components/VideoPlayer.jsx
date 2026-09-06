@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import videojs from 'video.js'
 import Hls from 'hls.js'
-import { openSubtitlesPlugin } from '../plugins/openSubtitles.js'
+import { openSubtitlesPlugin } from '../plugins/builtIn/index.js'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import {
   X, Maximize, Minimize, Loader2, Volume2, VolumeX, Volume1,

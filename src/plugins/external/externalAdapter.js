@@ -1,6 +1,6 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
-import { logError, logWarn } from '../utils/logger.js'
-import { sanitizeUrl } from '../utils/sanitizeUrl.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
+import { logError, logWarn } from '../../utils/logger.js'
+import { sanitizeUrl } from '../../utils/sanitizeUrl.js'
 
 const STREMIO_TO_CONTENT_TYPE = {
   movie: CONTENT_TYPES.MOVIE,

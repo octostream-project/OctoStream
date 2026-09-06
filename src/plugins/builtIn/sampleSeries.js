@@ -1,4 +1,4 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 
 const series = [
   {
