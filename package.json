@@ -29,7 +29,8 @@
     "zustand": "^4.5.4",
     "axios": "^1.7.2",
     "video.js": "^8.17.0",
-    "hls.js": "^1.5.13"
+    "hls.js": "^1.5.13",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
