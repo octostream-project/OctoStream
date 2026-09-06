@@ -87,10 +87,12 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     if (stream.streamType === 'hls') {
       if (Hls.isSupported()) {
         const hlsConfig = {
-          // Enable verbose logging for debugging
           debug: false,
-          // Start loading immediately
           startLoading: true,
+          // Subtitles off by default - user can enable via UI
+          subtitleDisplay: false,
+          enableWebVTT: true,
+          enableCEA708Captions: false,
         }
         // When NOT using the proxy, pass custom headers
         if (stream.headers && !streamUrl.includes('127.0.0.1')) {
@@ -124,11 +126,21 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           })))
           // Disable all subtitles by default
           hls.subtitleTrack = -1
+          hls.subtitleDisplay = false
           setActiveHlsSub(-1)
-          // Also disable any native text tracks
+          // Disable all native text tracks
           for (let i = 0; i < videoEl.textTracks.length; i++) {
             videoEl.textTracks[i].mode = 'disabled'
           }
+          // Watch for new text tracks being added and disable them
+          const onTrackAdded = () => {
+            for (let i = 0; i < videoEl.textTracks.length; i++) {
+              if (videoEl.textTracks[i].mode !== 'disabled') {
+                videoEl.textTracks[i].mode = 'disabled'
+              }
+            }
+          }
+          videoEl.textTracks.addEventListener('addtrack', onTrackAdded)
           setLoading(false)
           videoEl.play().catch(e => console.warn('[Player] play() failed:', e))
         })
@@ -242,9 +254,18 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   }
 
   const handleHlsSubtitleToggle = (subIndex) => {
-    if (hlsRef.current) {
-      hlsRef.current.subtitleTrack = subIndex
+    const hls = hlsRef.current
+    const videoEl = videoRef.current
+    if (hls) {
+      hls.subtitleTrack = subIndex
+      hls.subtitleDisplay = subIndex >= 0
       setActiveHlsSub(subIndex)
+    }
+    // Also toggle native text tracks
+    if (videoEl) {
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        videoEl.textTracks[i].mode = (subIndex >= 0 && i === subIndex) ? 'showing' : 'disabled'
+      }
     }
     setShowSubsPanel(false)
   }
