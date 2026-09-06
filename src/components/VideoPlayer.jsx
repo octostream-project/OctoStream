@@ -44,6 +44,10 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   const [casting, setCasting] = useState(false)
   const [castDevice, setCastDevice] = useState(null)
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [hlsLevels, setHlsLevels] = useState([])
+  const [currentLevel, setCurrentLevel] = useState(-1) // -1 = auto
+  const [hlsSubtitles, setHlsSubtitles] = useState([])
+  const [activeHlsSub, setActiveHlsSub] = useState(-1) // -1 = off
   const castSessionRef = useRef(null)
 
   useEffect(() => {
@@ -102,6 +106,29 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
         hls.attachMedia(videoEl)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log('[Player] HLS manifest parsed, starting playback')
+          // Capture quality levels
+          setHlsLevels(hls.levels.map((l, i) => ({
+            index: i,
+            height: l.height,
+            bitrate: l.bitrate,
+            label: l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}kbps`,
+          })))
+          // Auto quality by default
+          hls.currentLevel = -1
+          setCurrentLevel(-1)
+          // Capture subtitle tracks from HLS
+          setHlsSubtitles(hls.subtitleTracks.map((t, i) => ({
+            index: i,
+            name: t.name || t.lang || `Track ${i + 1}`,
+            lang: t.lang,
+          })))
+          // Disable all subtitles by default
+          hls.subtitleTrack = -1
+          setActiveHlsSub(-1)
+          // Also disable any native text tracks
+          for (let i = 0; i < videoEl.textTracks.length; i++) {
+            videoEl.textTracks[i].mode = 'disabled'
+          }
           setLoading(false)
           videoEl.play().catch(e => console.warn('[Player] play() failed:', e))
         })
@@ -205,6 +232,22 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     }
     setShowBoostMenu(false)
   }, [volume, initAudioBoost])
+
+  const handleQualityChange = (levelIndex) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = levelIndex
+      setCurrentLevel(levelIndex)
+    }
+    setShowSettings(false)
+  }
+
+  const handleHlsSubtitleToggle = (subIndex) => {
+    if (hlsRef.current) {
+      hlsRef.current.subtitleTrack = subIndex
+      setActiveHlsSub(subIndex)
+    }
+    setShowSubsPanel(false)
+  }
 
   const toggleMute = () => {
     const newMuted = !muted
@@ -551,7 +594,6 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           <video
             ref={videoRef}
             className="w-full h-full"
-            controls
             autoPlay
             playsInline
           />
@@ -625,60 +667,88 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
             {/* Subtitulos */}
             <div className="relative">
               <button
-                onClick={() => activeSubtitle ? removeSubtitles() : searchSubs()}
-                className={`p-2 rounded-lg transition-colors ${activeSubtitle ? 'text-primary-400 bg-primary-600/20' : 'text-white hover:bg-white/10'}`}
+                onClick={() => setShowSubsPanel(!showSubsPanel)}
+                className={`p-2 rounded-lg transition-colors ${activeSubtitle || activeHlsSub >= 0 ? 'text-primary-400 bg-primary-600/20' : 'text-white hover:bg-white/10'}`}
                 title="Subtítulos"
               >
                 <Captions size={22} />
               </button>
-              {activeSubtitle && (
+              {(activeSubtitle || activeHlsSub >= 0) && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
               )}
-            </div>
 
-            {/* Panel de subtítulos */}
-            {showSubsPanel && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-dark-800 rounded-xl p-3 shadow-2xl border border-dark-700 w-80 max-h-72 overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-white font-medium text-sm">Subtítulos - OpenSubtitles</h3>
-                  <button onClick={() => setShowSubsPanel(false)} className="text-dark-400 hover:text-white">
-                    <X size={16} />
-                  </button>
-                </div>
-                {subsLoading ? (
-                  <div className="flex items-center justify-center py-6">
-                    <Loader2 className="animate-spin text-primary-500" size={24} />
+              {showSubsPanel && (
+                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-dark-800 rounded-xl p-3 shadow-2xl border border-dark-700 w-80 max-h-80 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-white font-medium text-sm">Subtítulos</h3>
+                    <button onClick={() => setShowSubsPanel(false)} className="text-dark-400 hover:text-white">
+                      <X size={16} />
+                    </button>
                   </div>
-                ) : subtitles.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-dark-400 text-sm">No se encontraron subtítulos</p>
-                    <p className="text-dark-500 text-xs mt-1">Configura tu API key en Settings</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {subtitles.map(sub => (
+
+                  {/* HLS subtitle tracks */}
+                  {hlsSubtitles.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-dark-400 px-1 mb-1 font-medium">Del stream</p>
                       <button
-                        key={sub.id}
-                        onClick={() => applySubtitle(sub)}
-                        className="w-full text-left p-2 rounded-lg hover:bg-dark-700 transition-colors"
+                        onClick={() => handleHlsSubtitleToggle(-1)}
+                        className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${activeHlsSub === -1 ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-white text-sm font-medium">
-                            {sub.language === 'es' ? '🇪🇸 Español' :
-                             sub.language === 'en' ? '🇬🇧 Inglés' : sub.language}
-                          </span>
-                          {sub.hearingImpaired && (
-                            <span className="text-xs text-primary-400">SDH</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-dark-500 truncate">{sub.releaseName}</p>
-                        <p className="text-xs text-dark-600">↓ {sub.downloads}</p>
+                        Desactivado
                       </button>
-                    ))}
+                      {hlsSubtitles.map(s => (
+                        <button
+                          key={s.index}
+                          onClick={() => handleHlsSubtitleToggle(s.index)}
+                          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${activeHlsSub === s.index ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
+                        >
+                          {s.name}{s.lang ? ` (${s.lang})` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* OpenSubtitles */}
+                  <div className="border-t border-dark-700 pt-2">
+                    <p className="text-xs text-dark-400 px-1 mb-1 font-medium">OpenSubtitles</p>
+                    {activeSubtitle && (
+                      <button
+                        onClick={removeSubtitles}
+                        className="w-full text-left px-3 py-1.5 rounded text-sm text-dark-300 hover:bg-dark-700 transition-colors mb-1"
+                      >
+                        Quitar subtítulo actual
+                      </button>
+                    )}
+                    {subsLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="animate-spin text-primary-500" size={20} />
+                      </div>
+                    ) : subtitles.length === 0 ? (
+                      <button
+                        onClick={searchSubs}
+                        className="w-full text-left px-3 py-1.5 rounded text-sm text-dark-300 hover:bg-dark-700 transition-colors"
+                      >
+                        Buscar en OpenSubtitles...
+                      </button>
+                    ) : (
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {subtitles.map(sub => (
+                          <button
+                            key={sub.id}
+                            onClick={() => applySubtitle(sub)}
+                            className="w-full text-left p-2 rounded-lg hover:bg-dark-700 transition-colors"
+                          >
+                            <span className="text-white text-sm font-medium">
+                              {sub.language === 'es' ? '🇪🇸' : '🇬🇧'} {sub.language}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
 
             {/* Velocidad de reproducción */}
             <div className="relative">
@@ -690,7 +760,28 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
                 <Settings size={22} />
               </button>
               {showSettings && (
-                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-dark-800 rounded-xl p-2 shadow-2xl border border-dark-700 min-w-[120px]">
+                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-dark-800 rounded-xl p-2 shadow-2xl border border-dark-700 min-w-[140px] max-h-[300px] overflow-y-auto">
+                  {hlsLevels.length > 0 && (
+                    <>
+                      <p className="text-xs text-dark-400 px-2 py-1 font-medium">Calidad</p>
+                      <button
+                        onClick={() => handleQualityChange(-1)}
+                        className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${currentLevel === -1 ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
+                      >
+                        Auto
+                      </button>
+                      {hlsLevels.map(l => (
+                        <button
+                          key={l.index}
+                          onClick={() => handleQualityChange(l.index)}
+                          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${currentLevel === l.index ? 'bg-primary-600 text-white' : 'text-dark-300 hover:bg-dark-700'}`}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                      <div className="h-px bg-dark-700 my-1" />
+                    </>
+                  )}
                   <p className="text-xs text-dark-400 px-2 py-1 font-medium">Velocidad</p>
                   {speedLevels.map(rate => (
                     <button
