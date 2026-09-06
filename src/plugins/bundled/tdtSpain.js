@@ -87,19 +87,23 @@ async function getEpg(cache) {
     const m = {}
     if (Array.isArray(data)) {
       console.log('[TDT Spain] EPG array length:', data.length, 'first item keys:', data[0] ? Object.keys(data[0]) : 'none')
+      console.log('[TDT Spain] EPG first channel:', data[0]?.name, 'first event:', JSON.stringify(data[0]?.events?.[0]).substring(0, 200))
       for (const ch of data) {
         if (ch && ch.name) {
-          m[String(ch.name)] = ch.events || ch.programs || ch.epg || []
-        }
-      }
-    } else if (data && typeof data === 'object') {
-      // Could be an object keyed by channel name
-      console.log('[TDT Spain] EPG object keys:', Object.keys(data).slice(0, 5))
-      for (const [key, val] of Object.entries(data)) {
-        if (Array.isArray(val)) {
-          m[key] = val
-        } else if (val && Array.isArray(val.events)) {
-          m[key] = val.events
+          // Normalize events to common format with start/end as ISO strings
+          const events = (ch.events || ch.programs || ch.epg || []).map(ev => ({
+            title: ev.t || ev.title || ev.name || '',
+            description: ev.d || ev.desc || ev.description || '',
+            start: ev.hi ? new Date(ev.hi * 1000).toISOString() : (ev.start || null),
+            end: ev.hf ? new Date(ev.hf * 1000).toISOString() : (ev.end || ev.stop || null),
+            startTimestamp: ev.hi || null,
+            endTimestamp: ev.hf || null,
+            duration: ev.hi && ev.hf ? (ev.hf - ev.hi) : (ev.duration || 0),
+            genre: ev.g || ev.genre || '',
+          }))
+          m[String(ch.name)] = events
+          // Also store by normalized key for fuzzy matching
+          m[normKey(ch.name)] = events
         }
       }
     }
@@ -358,11 +362,20 @@ async function resolveLiveStream(ch, cache) {
 // ─── Normalization ──────────────────────────────────────────────────────────
 
 function currentEvent(epg, epgId) {
-  const events = epg[String(epgId || '')] || []
+  // Try exact match, then normalized key
+  let events = epg[String(epgId || '')] || epg[normKey(epgId || '')] || []
+  // Also try with .TV suffix
+  if (events.length === 0 && epgId) {
+    const variants = [String(epgId) + '.TV', normKey(epgId) + '.tv']
+    for (const v of variants) {
+      if (epg[v]) { events = epg[v]; break }
+      if (epg[normKey(v)]) { events = epg[normKey(v)]; break }
+    }
+  }
   const now = Math.floor(Date.now() / 1000)
   for (const ev of events) {
-    const hi = parseInt(ev.hi || 0)
-    const hf = parseInt(ev.hf || 0)
+    const hi = ev.startTimestamp || parseInt(ev.hi || 0)
+    const hf = ev.endTimestamp || parseInt(ev.hf || 0)
     if (hi <= now && now < hf) return ev
   }
   return null
@@ -461,28 +474,41 @@ export const tdtSpainFactory = (config) => {
         if (id === 'u7d-tdtspain') {
           cache = await getU7d(cache)
           const u7d = cache.u7d || {}
-          // U7D format: { "channels": [{ "name": "...", "programs": [...] }] }
-          // or array of channels
-          const u7dChannels = Array.isArray(u7d) ? u7d : (u7d.channels || u7d.canales || [])
+          const u7dConf = u7d.U7dConf || {}
           const items = []
-          for (const u7dCh of u7dChannels) {
-            const chName = u7dCh.name || u7dCh.channel || u7dCh.title || ''
-            const programs = u7dCh.programs || u7dCh.events || u7dCh.items || []
-            for (const prog of programs) {
-              items.push({
-                id: `u7d-${chName}-${prog.start || prog.id || Math.random()}`,
-                type: CONTENT_TYPES.LIVE,
-                name: prog.title || prog.name || 'Sin título',
-                title: prog.title || prog.name || 'Sin título',
-                description: prog.description || prog.desc || chName,
-                poster: prog.poster || prog.thumbnail || '',
-                channelName: chName,
-                startTimestamp: prog.start ? new Date(prog.start).getTime() / 1000 : 0,
-                startTime: prog.start,
-                _raw: prog,
-              })
+          for (const [chKey, chData] of Object.entries(u7dConf)) {
+            const chName = chData.idchannel || chKey
+            const u7dUrl = chData.u7ddata || ''
+            // u7ddata is a URL to fetch the actual programs
+            if (u7dUrl && /^https?:\/\//.test(u7dUrl)) {
+              try {
+                const progData = await fetchJson(u7dUrl)
+                // RTVE API format: { items: [{ title, start, end, ... }] }
+                const progs = progData.items || progData.programs || progData.events || (Array.isArray(progData) ? progData : [])
+                for (const prog of progs) {
+                  const start = prog.start || prog.begin || prog.startTime
+                  const end = prog.end || prog.finish || prog.endTime
+                  items.push({
+                    id: `u7d-${chKey}-${start || Math.random()}`,
+                    type: CONTENT_TYPES.LIVE,
+                    name: prog.title || prog.name || prog.t || 'Sin título',
+                    title: prog.title || prog.name || prog.t || 'Sin título',
+                    description: prog.description || prog.desc || prog.d || chName,
+                    poster: prog.poster || prog.thumbnail || prog.image || '',
+                    channelName: chName,
+                    channelId: chKey,
+                    startTimestamp: start ? new Date(start).getTime() / 1000 : 0,
+                    startTime: start,
+                    _raw: prog,
+                  })
+                }
+              } catch (e) {
+                logWarn(`TDT Spain U7D fetch failed for ${chKey}`, String(e?.message || e))
+              }
             }
           }
+          // Sort by start time, most recent first
+          items.sort((a, b) => (b.startTimestamp || 0) - (a.startTimestamp || 0))
           return items.slice(skip, skip + top)
         }
 
@@ -563,34 +589,35 @@ export const tdtSpainFactory = (config) => {
         const targetDate = date ? new Date(date) : new Date()
         const dayStr = targetDate.toISOString().slice(0, 10)
         console.log('[TDT Spain] getEpg for date', dayStr, '- epg keys:', Object.keys(epg).length, 'channels:', channels.length)
-        // Log first few EPG keys for debugging
-        const epgKeys = Object.keys(epg).slice(0, 5)
-        console.log('[TDT Spain] sample epg keys:', epgKeys)
-        if (epgKeys.length > 0) {
-          const firstKey = epgKeys[0]
-          const firstEvents = epg[firstKey] || []
-          console.log('[TDT Spain] sample events for', firstKey, ':', firstEvents.slice(0, 2))
-        }
         const programs = []
         for (const ch of channels) {
           if (String(ch.ocultar || '') === 'true') continue
           const chName = String(ch.name || '')
-          const events = epg[chName] || epg[normKey(chName)] || []
+          // Try exact match, then normalized key match
+          let events = epg[chName] || epg[normKey(chName)] || []
+          // Also try with .TV suffix variants
+          if (events.length === 0) {
+            const variants = [chName + '.TV', chName.replace(/\s+/g, '') + '.TV', normKey(chName) + '.tv']
+            for (const v of variants) {
+              if (epg[v]) { events = epg[v]; break }
+              if (epg[normKey(v)]) { events = epg[normKey(v)]; break }
+            }
+          }
           for (const ev of events) {
-            const evStart = ev.start ? new Date(ev.start) : (ev.begin ? new Date(ev.begin) : null)
-            if (!evStart) continue
+            if (!ev.start) continue
+            const evStart = new Date(ev.start)
             if (evStart.toISOString().slice(0, 10) !== dayStr) continue
             programs.push({
               id: `${ch.id}-${evStart.getTime()}`,
               channelId: ch.id,
               channelName: ch.name,
               channelLogo: ch.logo,
-              title: ev.title || ev.name || 'Sin título',
-              description: ev.desc || ev.description || '',
-              start: ev.start || ev.begin,
-              end: ev.end || ev.stop || ev.finish,
-              startTimestamp: evStart.getTime() / 1000,
-              duration: ev.duration || (ev.end ? (new Date(ev.end) - evStart) / 1000 : 0),
+              title: ev.title || 'Sin título',
+              description: ev.description || '',
+              start: ev.start,
+              end: ev.end,
+              startTimestamp: ev.startTimestamp || evStart.getTime() / 1000,
+              duration: ev.duration || 0,
             })
           }
         }
