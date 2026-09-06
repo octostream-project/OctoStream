@@ -7,11 +7,9 @@
 // 2. Export a factory function that receives the config and returns a Plugin
 // 3. Register it in the bundledPlugins map below
 
-import { bundledPlugins as tdtChannelsPlugins } from './tdtChannels.js'
 import { tdtSpainFactory } from './tdtSpain.js'
 
 export const bundledPlugins = {
-  ...tdtChannelsPlugins,
   tdtspain: tdtSpainFactory,
 }
 
