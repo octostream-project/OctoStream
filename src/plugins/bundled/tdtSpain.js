@@ -439,13 +439,23 @@ export const tdtSpainFactory = (config) => {
             if (g) groups.add(g)
           }
           return [...groups].sort().map(g => ({
-            id: `group-${g}`,
+            id: `tdtspain-group-${g}`,
             type: CONTENT_TYPES.LIVE,
             name: g,
             title: g,
             description: `Canales del grupo ${g}`,
             genres: [g],
+            isGroup: true,
           }))
+        }
+
+        if (id.startsWith('tdtspain-group-')) {
+          const groupName = id.replace('tdtspain-group-', '')
+          const groupChannels = visible.filter(ch => {
+            const g = String(ch.group || '').split(';')[0].trim()
+            return g === groupName
+          })
+          return groupChannels.slice(skip, skip + top).map(ch => normalizeChannel(ch, cache.epg))
         }
 
         if (id === 'u7d-tdtspain') {
