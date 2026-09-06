@@ -98,4 +98,15 @@ export const useStore = create((set, get) => ({
     localStorage.setItem('optopus_history', JSON.stringify(updated))
     set({ watchHistory: updated })
   },
+
+  removeFromHistory: (id, type) => {
+    const updated = get().watchHistory.filter(h => !(h.id === id && h.type === type))
+    localStorage.setItem('optopus_history', JSON.stringify(updated))
+    set({ watchHistory: updated })
+  },
+
+  clearHistory: () => {
+    localStorage.setItem('optopus_history', JSON.stringify([]))
+    set({ watchHistory: [] })
+  },
 }))
