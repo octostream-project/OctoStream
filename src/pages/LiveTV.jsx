@@ -4,7 +4,7 @@ import { pluginManager } from '../plugins/manager.js'
 import { CONTENT_TYPES } from '../plugins/base.js'
 import EpgGrid from '../components/EpgGrid.jsx'
 import { useTranslation } from '../i18n/index.js'
-import { Loader2, Tv, Play, AlertCircle, LayoutGrid, Calendar, Clock } from 'lucide-react'
+import { Loader2, Tv, Play, AlertCircle, LayoutGrid, Calendar, Clock, ArrowLeft } from 'lucide-react'
 
 export default function LiveTV() {
   const { t } = useTranslation()
@@ -116,6 +116,16 @@ export default function LiveTV() {
   }, [activeU7dCat])
 
   const handlePlayChannel = (channel) => {
+    // If it's a group, load its channels instead of navigating to details
+    if (channel.isGroup || channel.id?.startsWith('tdtspain-group-')) {
+      setActiveCat({
+        id: channel.id,
+        name: channel.name,
+        type: CONTENT_TYPES.LIVE,
+        pluginId: 'tdtspain',
+      })
+      return
+    }
     navigate(`/details/${channel.type}/${channel.id}`)
   }
 
@@ -228,6 +238,15 @@ export default function LiveTV() {
                 {cat.name}
               </button>
             ))}
+            {/* Show "Volver a grupos" button when inside a group */}
+            {activeCat?.id?.startsWith('tdtspain-group-') && (
+              <button
+                onClick={() => setActiveCat(tvCatalogs.find(c => c.id === 'tdtspain-groups'))}
+                className="px-3 py-1.5 rounded-full text-sm whitespace-nowrap bg-primary-600/20 text-primary-400 hover:bg-primary-600/30 transition-colors flex items-center gap-1"
+              >
+                <ArrowLeft size={14} /> Volver a grupos
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
