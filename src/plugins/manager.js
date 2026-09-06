@@ -2,6 +2,7 @@ import { esLanguagePlugin } from './languages/es.js'
 import { enLanguagePlugin } from './languages/en.js'
 import { builtInPlugins } from './builtIn/index.js'
 import { createExternalPlugin, fetchManifest } from './external/externalAdapter.js'
+import { getBundledPlugin, isBundledPlugin } from './bundled/index.js'
 import { logError, logWarn } from '../utils/logger.js'
 
 const META_TIMEOUT_MS = 8000
@@ -15,6 +16,20 @@ function withTimeout(promise, ms, pluginId) {
       setTimeout(() => reject(new Error(`Plugin ${pluginId} getMeta timed out after ${ms}ms`)), ms)
     ),
   ])
+}
+
+// Create a plugin from an external config. If the config is marked as `bundled`,
+// use the internal implementation instead of the REST/Stremio adapter.
+function createPluginFromConfig(config) {
+  if (isBundledPlugin(config)) {
+    const manifest = config.manifest || config
+    const factory = getBundledPlugin(manifest.id)
+    if (factory) {
+      return factory(config)
+    }
+    throw new Error(`Bundled plugin "${manifest.id}" is not available in this build`)
+  }
+  return createExternalPlugin(config)
 }
 
 class PluginManager {
@@ -40,12 +55,12 @@ class PluginManager {
     return this.builtInPlugins.some(p => p.id === pluginId)
   }
 
-  // External plugins (Stremio-style) ----------------------------------------
+  // External plugins (Stremio-style or bundled) -------------------------------
   loadExternalPlugins() {
     this.externalPlugins = []
     for (const config of this.externalPluginConfigs) {
       try {
-        const plugin = createExternalPlugin(config)
+        const plugin = createPluginFromConfig(config)
         this.externalPlugins.push(plugin)
       } catch (e) {
         logError('Failed to load external plugin', String(e?.message || e))
@@ -68,13 +83,18 @@ class PluginManager {
   }
 
   addExternalPlugin(config) {
-    const plugin = createExternalPlugin(config)
+    const plugin = createPluginFromConfig(config)
     if (this.externalPlugins.some(p => p.id === plugin.id)) {
       throw new Error(`External plugin ${plugin.id} is already installed`)
     }
     this.externalPlugins.push(plugin)
     this.externalPluginConfigs.push(config)
     this.saveExternalPlugins()
+    // Auto-install bundled plugins so they appear immediately.
+    if (plugin.isBundled) {
+      this.installedPluginIds.add(plugin.id)
+      localStorage.setItem(INSTALLED_PLUGINS_KEY, JSON.stringify([...this.installedPluginIds]))
+    }
     this.loadInstalled()
     return plugin
   }
