@@ -514,7 +514,6 @@ async function resolveU7dStream(itemId, cache) {
       let guid = ''
       let hasVod = false
       let isFree = false
-      let programTitle = ''
       const entries = dayData.response?.entries || []
       for (const entry of entries) {
         for (const listing of (entry.listings || [])) {
@@ -525,47 +524,19 @@ async function resolveU7dStream(itemId, cache) {
             hasVod = !!prog['mediasetprogram$hasVod']
             const rights = prog['mediasetprogram$channelsRights'] || []
             isFree = rights.includes('AVOD')
-            programTitle = listing['mediasetlisting$epgTitle'] || prog.title || ''
             break
           }
         }
         if (guid) break
       }
 
-      // If the program doesn't have VOD on this channel, try to find it on T5 (Telecinco)
-      // which has VOD rights for most Mediaset content
-      if (!hasVod && programTitle) {
-        const t5Url = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=T5&byListingTime=${dayStart}~${dayEnd}`
-        const t5Data = await fetchJson(t5Url).catch(() => null)
-        if (t5Data) {
-          const t5Entries = t5Data.response?.entries || []
-          for (const entry of t5Entries) {
-            for (const listing of (entry.listings || [])) {
-              const lTitle = listing['mediasetlisting$epgTitle'] || ''
-              if (lTitle.toLowerCase() === programTitle.toLowerCase()) {
-                const prog = listing.program || {}
-                const t5HasVod = !!prog['mediasetprogram$hasVod']
-                const t5Rights = prog['mediasetprogram$channelsRights'] || []
-                const t5IsFree = t5Rights.includes('AVOD')
-                if (t5HasVod && t5IsFree) {
-                  guid = prog.guid || guid
-                  hasVod = true
-                  isFree = true
-                  console.log('[TDT Spain] U7D Mediaset: found VOD on T5 for', programTitle, 'guid=', guid)
-                  break
-                }
-              }
-            }
-            if (hasVod) break
-          }
-        }
-      }
-
-      if (!guid || !hasVod) {
-        console.warn('[TDT Spain] U7D Mediaset: no VOD for this program', chKey, startTs)
+      if (!guid) {
+        console.warn('[TDT Spain] U7D Mediaset: no GUID for this program', chKey, startTs)
         return null
       }
-      if (!isFree) {
+      // Like the APK: attempt playback regardless of hasVod flag
+      // The API will return an error if the content is not available
+      if (!isFree && hasVod) {
         console.warn('[TDT Spain] U7D Mediaset: SVOD content (requires subscription)', guid)
         return null
       }
@@ -926,40 +897,9 @@ export const tdtSpainFactory = (config) => {
                   const dayUrl = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${callSign}&byListingTime=${start}~${end}`
                   dayFetches.push(fetchJson(dayUrl).catch(() => null))
                 }
-                // If this is not T5, also fetch T5 to cross-reference VOD availability
-                if (callSign !== 'T5') {
-                  for (let d = 0; d < 7; d++) {
-                    const end = now - d * ONE_DAY
-                    const start = end - ONE_DAY
-                    const t5Url = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=T5&byListingTime=${start}~${end}`
-                    dayFetches.push(fetchJson(t5Url).catch(() => null))
-                  }
-                }
-                console.log('[TDT Spain] Mediaset U7D fetching 7 days for', callSign, callSign !== 'T5' ? '+ T5 cross-ref' : '')
+                console.log('[TDT Spain] Mediaset U7D fetching 7 days for', callSign)
                 const dayResults = await Promise.all(dayFetches)
-                // Build a title→VOD info map from T5 data (last 7 entries if cross-referenced)
-                const t5VodMap = new Map()
-                if (callSign !== 'T5') {
-                  for (let i = 7; i < dayResults.length; i++) {
-                    const t5Data = dayResults[i]
-                    if (!t5Data) continue
-                    const t5Entries = t5Data.response?.entries || []
-                    for (const entry of t5Entries) {
-                      for (const listing of (entry.listings || [])) {
-                        const prog = listing.program || {}
-                        if (prog['mediasetprogram$hasVod']) {
-                          const rights = prog['mediasetprogram$channelsRights'] || []
-                          if (rights.includes('AVOD')) {
-                            const title = (listing['mediasetlisting$epgTitle'] || '').toLowerCase()
-                            if (title) t5VodMap.set(title, prog.guid || '')
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-                for (let i = 0; i < 7 && i < dayResults.length; i++) {
-                  const mediasetData = dayResults[i]
+                for (const mediasetData of dayResults) {
                   if (!mediasetData) continue
                   const entries = mediasetData.response?.entries || mediasetData.entry || []
                   for (const entry of entries) {
@@ -975,10 +915,9 @@ export const tdtSpainFactory = (config) => {
                       // Determine if content is free (AVOD) or paid (SVOD-only)
                       const rights = prog['mediasetprogram$channelsRights'] || []
                       const isFree = hasVod && rights.includes('AVOD')
-                      // Check if this program is available as VOD on T5 (cross-reference)
-                      const title = (listing['mediasetlisting$epgTitle'] || '').toLowerCase()
-                      const t5VodGuid = t5VodMap.get(title)
-                      const playable = isFree || !!t5VodGuid
+                      // Like the APK: show all programs, mark playable based on VOD+AVOD
+                      // The resolver will attempt playback and fail gracefully if not available
+                      const playable = isFree
                       // Use thumbnail from program data
                       const thumbs = prog.thumbnails || {}
                       const poster = thumbs['image_keyframe_poster']?.url || thumbs['image_horizontal_cover']?.url || ''
@@ -999,13 +938,12 @@ export const tdtSpainFactory = (config) => {
                         playable,
                         vodUrl,
                         guid,
-                        t5VodGuid: t5VodGuid || null,
                         _raw: listing,
                       })
                     }
                   }
                 }
-                console.log('[TDT Spain] Mediaset U7D parsed', items.length, 'programs for', callSign, 't5VodMap:', t5VodMap.size)
+                console.log('[TDT Spain] Mediaset U7D parsed', items.length, 'programs for', callSign)
               }
             } else {
               // For RTVE, Atresplayer, and others: fetch the URL directly
