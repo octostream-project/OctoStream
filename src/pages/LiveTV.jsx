@@ -430,27 +430,36 @@ export default function LiveTV() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {u7dItems.map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => handlePlayChannel(item)}
-                      className="card group p-3 flex flex-col gap-2 text-left"
-                    >
-                      {item.poster ? (
-                        <img src={item.poster} alt={item.title} className="w-full aspect-video object-cover rounded-lg" />
-                      ) : (
-                        <div className="w-full aspect-video bg-primary-600/20 rounded-lg flex items-center justify-center">
-                          <Tv className="text-primary-400" size={32} />
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
-                        {item.description && (
-                          <p className="text-primary-400 text-xs mt-1 line-clamp-2">{item.description}</p>
+                  {u7dItems.map(item => {
+                    const ts = item.startTimestamp || (item.startTime ? new Date(item.startTime).getTime() / 1000 : 0)
+                    const timeStr = ts ? new Date(ts * 1000).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''
+                    const noVod = item.hasVod === false
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => !noVod && handlePlayChannel(item)}
+                        className={`card group p-3 flex flex-col gap-2 text-left ${noVod ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {item.poster ? (
+                          <img src={item.poster} alt={item.title} className="w-full aspect-video object-cover rounded-lg" />
+                        ) : (
+                          <div className="w-full aspect-video bg-primary-600/20 rounded-lg flex items-center justify-center">
+                            <Tv className="text-primary-400" size={32} />
+                          </div>
                         )}
-                      </div>
-                    </button>
-                  ))}
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            {timeStr && <span className="text-dark-500 text-xs">{timeStr}</span>}
+                            {item.hasVod && <span className="text-[10px] bg-green-600/30 text-green-400 px-1 rounded">VOD</span>}
+                          </div>
+                          <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
+                          {item.description && (
+                            <p className="text-primary-400 text-xs mt-1 line-clamp-2">{item.description}</p>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </>
