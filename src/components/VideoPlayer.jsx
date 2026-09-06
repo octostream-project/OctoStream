@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import videojs from 'video.js'
 import Hls from 'hls.js'
 import { openSubtitlesPlugin } from '../plugins/builtIn/index.js'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
@@ -79,62 +78,60 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
       })
     }, 15000)
 
-    const options = {
-      controls: true,
-      autoplay: true,
-      fluid: true,
-      preload: 'auto',
-    }
+    videoEl.disableRemotePlayback = true
 
-    playerRef.current = videojs(videoEl, options, () => {
-      videoEl.disableRemotePlayback = true
-
-      if (stream.streamType === 'hls') {
-        if (Hls.isSupported()) {
-          const hlsConfig = {}
-          // When using the proxy, no custom headers needed (proxy handles it)
-          if (stream.headers && !streamUrl.includes('127.0.0.1')) {
-            hlsConfig.xhrSetup = (xhr) => {
-              for (const [key, val] of Object.entries(stream.headers)) {
-                try { xhr.setRequestHeader(key, val) } catch {}
-              }
+    if (stream.streamType === 'hls') {
+      if (Hls.isSupported()) {
+        const hlsConfig = {
+          // Enable verbose logging for debugging
+          debug: false,
+          // Start loading immediately
+          startLoading: true,
+        }
+        // When NOT using the proxy, pass custom headers
+        if (stream.headers && !streamUrl.includes('127.0.0.1')) {
+          hlsConfig.xhrSetup = (xhr) => {
+            for (const [key, val] of Object.entries(stream.headers)) {
+              try { xhr.setRequestHeader(key, val) } catch {}
             }
           }
-          const hls = new Hls(hlsConfig)
-          hlsRef.current = hls
-          hls.loadSource(streamUrl)
-          hls.attachMedia(videoEl)
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            setLoading(false)
-            videoEl.play().catch(() => {})
-          })
-          hls.on(Hls.Events.ERROR, (_, data) => {
-            if (data.fatal) {
-              const reason = data.details || data.type || 'unknown'
-              setError(`Error al cargar el stream HLS: ${reason}`)
-              setLoading(false)
-            }
-          })
-        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-          videoEl.src = streamUrl
-          videoEl.addEventListener('loadedmetadata', () => setLoading(false))
-          videoEl.addEventListener('error', () => {
-            setError('Error al cargar el stream')
-            setLoading(false)
-          })
         }
-      } else if (stream.streamType === 'mp4') {
+        const hls = new Hls(hlsConfig)
+        hlsRef.current = hls
+        hls.loadSource(streamUrl)
+        hls.attachMedia(videoEl)
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('[Player] HLS manifest parsed, starting playback')
+          setLoading(false)
+          videoEl.play().catch(e => console.warn('[Player] play() failed:', e))
+        })
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          console.error('[Player] HLS error:', data.type, data.details, data.fatal ? '(FATAL)' : '(non-fatal)')
+          if (data.fatal) {
+            const reason = data.details || data.type || 'unknown'
+            setError(`Error al cargar el stream HLS: ${reason}`)
+            setLoading(false)
+          }
+        })
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = streamUrl
         videoEl.addEventListener('loadedmetadata', () => setLoading(false))
         videoEl.addEventListener('error', () => {
-          setError('Error al cargar el video')
+          setError('Error al cargar el stream')
           setLoading(false)
         })
-      } else {
-        videoEl.src = streamUrl
-        videoEl.addEventListener('loadedmetadata', () => setLoading(false))
       }
-    })
+    } else if (stream.streamType === 'mp4') {
+      videoEl.src = streamUrl
+      videoEl.addEventListener('loadedmetadata', () => setLoading(false))
+      videoEl.addEventListener('error', () => {
+        setError('Error al cargar el video')
+        setLoading(false)
+      })
+    } else {
+      videoEl.src = streamUrl
+      videoEl.addEventListener('loadedmetadata', () => setLoading(false))
+    }
 
     return () => {
       clearTimeout(loadTimeout)
@@ -142,10 +139,9 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
         hlsRef.current.destroy()
         hlsRef.current = null
       }
-      if (playerRef.current) {
-        playerRef.current.dispose()
-        playerRef.current = null
-      }
+      // Clean up video element
+      videoEl.removeAttribute('src')
+      videoEl.load()
     }
   }, [stream])
 
@@ -552,7 +548,13 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
 
       {!isEmbed && !error && (
         <div className="w-full h-full flex items-center justify-center">
-          <div ref={videoRef} className="video-js vjs-default-skin w-full h-full" />
+          <video
+            ref={videoRef}
+            className="w-full h-full"
+            controls
+            autoPlay
+            playsInline
+          />
         </div>
       )}
 
