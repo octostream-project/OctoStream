@@ -51,6 +51,8 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   const [activeHlsSub, setActiveHlsSub] = useState(-1) // -1 = off
   const [nativeSubs, setNativeSubs] = useState([]) // CEA-608/708 tracks from video element
   const [activeNativeSub, setActiveNativeSub] = useState(-1) // -1 = off
+  const [subDelay, setSubDelay] = useState(0) // subtitle delay in seconds (positive = later, negative = earlier)
+  const [showSubSync, setShowSubSync] = useState(false)
   const castSessionRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -291,6 +293,31 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     }
   }, [])
 
+  // Apply subtitle delay to active text tracks
+  useEffect(() => {
+    const videoEl = videoRef.current
+    if (!videoEl) return
+    for (let i = 0; i < videoEl.textTracks.length; i++) {
+      const tt = videoEl.textTracks[i]
+      if (tt.mode === 'showing' || tt.mode === 'hidden') {
+        const cues = tt.cues
+        if (!cues) continue
+        // Store original times on first access
+        if (!tt._origCues) {
+          tt._origCues = []
+          for (let c = 0; c < cues.length; c++) {
+            tt._origCues.push({ start: cues[c].startTime, end: cues[c].endTime })
+          }
+        }
+        // Apply delay
+        for (let c = 0; c < cues.length && c < tt._origCues.length; c++) {
+          cues[c].startTime = Math.max(0, tt._origCues[c].start + subDelay)
+          cues[c].endTime = Math.max(0, tt._origCues[c].end + subDelay)
+        }
+      }
+    }
+  }, [subDelay])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e) => {
@@ -461,6 +488,13 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
         setActiveSubtitle(null)
       }
     }
+    // Reset subtitle delay cache so it re-applies to new track
+    const videoEl = videoRef.current
+    if (videoEl) {
+      for (let i = 0; i < videoEl.textTracks.length; i++) {
+        videoEl.textTracks[i]._origCues = null
+      }
+    }
     setShowSubsPanel(false)
   }
 
@@ -477,6 +511,7 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     // Toggle native text tracks
     for (let i = 0; i < videoEl.textTracks.length; i++) {
       videoEl.textTracks[i].mode = (trackIndex >= 0 && i === trackIndex) ? 'showing' : 'disabled'
+      videoEl.textTracks[i]._origCues = null
     }
     setActiveNativeSub(trackIndex)
     // Also clear OpenSubtitles
@@ -1057,6 +1092,50 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
                           {s.name}{s.lang ? ` (${s.lang})` : ''}{s.kind === 'captions' ? ' [CC]' : ''}
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Subtitle sync control - show when any subtitle is active */}
+                  {(activeHlsSub >= 0 || activeNativeSub >= 0 || activeSubtitle) && (
+                    <div className="border-t border-dark-700 pt-2 mb-2">
+                      <div className="flex items-center justify-between px-1 mb-1">
+                        <p className="text-xs text-dark-400 font-medium">Sincronización</p>
+                        <span className="text-xs text-primary-400 font-mono">
+                          {subDelay > 0 ? '+' : ''}{subDelay.toFixed(1)}s
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 px-1">
+                        <button
+                          onClick={() => setSubDelay(d => Math.max(-30, +(d - 0.5).toFixed(1)))}
+                          className="p-1 rounded text-dark-300 hover:bg-dark-700 transition-colors"
+                          title="Adelantar 0.5s"
+                        >
+                          <SkipBack size={16} />
+                        </button>
+                        <input
+                          type="range"
+                          min="-30"
+                          max="30"
+                          step="0.5"
+                          value={subDelay}
+                          onChange={e => setSubDelay(parseFloat(e.target.value))}
+                          className="flex-1 accent-primary-500"
+                        />
+                        <button
+                          onClick={() => setSubDelay(d => Math.min(30, +(d + 0.5).toFixed(1)))}
+                          className="p-1 rounded text-dark-300 hover:bg-dark-700 transition-colors"
+                          title="Retrasar 0.5s"
+                        >
+                          <SkipForward size={16} />
+                        </button>
+                        <button
+                          onClick={() => setSubDelay(0)}
+                          className="text-xs text-dark-400 hover:text-white px-2 py-1 rounded hover:bg-dark-700 transition-colors"
+                          title="Resetear"
+                        >
+                          0s
+                        </button>
+                      </div>
                     </div>
                   )}
 
