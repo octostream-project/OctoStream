@@ -22,6 +22,9 @@ export default function LiveTV() {
   const [u7dCatalogs, setU7dCatalogs] = useState([])
   const [u7dItems, setU7dItems] = useState([])
   const [activeU7dCat, setActiveU7dCat] = useState(null)
+  const [u7dSelectedChannel, setU7dSelectedChannel] = useState(null)
+  const [u7dSelectedDay, setU7dSelectedDay] = useState(null)
+  const [u7dChannels, setU7dChannels] = useState([])
 
   useEffect(() => {
     const load = async () => {
@@ -90,21 +93,41 @@ export default function LiveTV() {
 
   useEffect(() => {
     if (viewMode !== 'u7d') return
+    // Load all channels for U7D selection
     const load = async () => {
-      if (u7dCatalogs.length === 0) return
-      const first = u7dCatalogs[0]
-      setActiveU7dCat(first)
+      if (allChannels.length > 0) {
+        setU7dChannels(allChannels.filter(ch => ch.type === CONTENT_TYPES.LIVE || ch.type === CONTENT_TYPES.CHANNEL))
+      }
     }
     load()
-  }, [viewMode, u7dCatalogs])
+  }, [viewMode, allChannels])
 
   useEffect(() => {
-    if (!activeU7dCat) return
+    if (viewMode !== 'u7d' || !u7dSelectedChannel || !u7dSelectedDay) return
     const load = async () => {
       setLoading(true)
       try {
-        const items = await pluginManager.getCatalogContent(activeU7dCat.pluginId, activeU7dCat.id, activeU7dCat.type, 0, 500)
-        setU7dItems(items)
+        // Load U7D items for the selected channel and day
+        if (u7dCatalogs.length > 0) {
+          const cat = u7dCatalogs[0]
+          const allItems = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 500)
+          // Filter by channel and day
+          const dayStr = u7dSelectedDay
+          const filtered = allItems.filter(item => {
+            // Match channel: try channelId, channelName, and normalized variants
+            const chId = String(u7dSelectedChannel.id || '').replace(/^tdtspain-/, '')
+            const chName = String(u7dSelectedChannel.name || '')
+            const itemChId = String(item.channelId || '')
+            const itemChName = String(item.channelName || '')
+            const matchesChannel = itemChId === chId || itemChId === u7dSelectedChannel.id ||
+              itemChName === chName || itemChName === chId ||
+              itemChId === chName
+            const ts = item.startTimestamp || (item.startTime ? new Date(item.startTime).getTime() / 1000 : 0)
+            const itemDay = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : ''
+            return matchesChannel && itemDay === dayStr
+          })
+          setU7dItems(filtered)
+        }
       } catch (e) {
         console.error('[LiveTV] U7D error', e)
         setU7dItems([])
@@ -113,7 +136,7 @@ export default function LiveTV() {
       }
     }
     load()
-  }, [activeU7dCat])
+  }, [viewMode, u7dSelectedChannel, u7dSelectedDay, u7dCatalogs])
 
   const handlePlayChannel = (channel) => {
     // If it's a group, load its channels instead of navigating to details
@@ -150,6 +173,19 @@ export default function LiveTV() {
     const d = new Date(dayStr + 'T00:00:00')
     const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
     return days[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1)
+  }
+
+  const getLast7Days = () => {
+    const result = []
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+    for (let i = 0; i < 7; i++) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+      const value = d.toISOString().slice(0, 10)
+      const label = (i === 0 ? 'Hoy' : i === 1 ? 'Ayer' : days[d.getDay()]) + ' ' + d.getDate() + '/' + (d.getMonth() + 1)
+      result.push({ value, label })
+    }
+    return result
   }
 
   if (loading) {
@@ -291,68 +327,122 @@ export default function LiveTV() {
         <>
           <div className="bg-dark-800/50 rounded-xl p-4 border border-dark-700/50 text-sm text-dark-300 flex items-start gap-3">
             <Clock size={18} className="text-primary-400 mt-0.5 flex-shrink-0" />
-            <p>Contenido de los últimos 7 días. Selecciona un canal para ver sus programas disponibles, ordenados por día y hora de emisión.</p>
+            <p>Contenido de los últimos 7 días. Selecciona un canal y un día para ver sus programas disponibles.</p>
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-            {u7dCatalogs.map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveU7dCat(cat)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors ${activeU7dCat?.id === cat.id ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'}`}
-              >
-                {cat.channelLogo ? (
-                  <img src={cat.channelLogo} alt={cat.channelName} className="w-5 h-5 object-contain rounded bg-white/10" />
-                ) : (
-                  <Tv size={14} />
-                )}
-                {cat.name}
-              </button>
-            ))}
-          </div>
+          {/* Step 1: Select channel */}
+          {!u7dSelectedChannel && (
+            <>
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Tv size={18} className="text-primary-400" />
+                Selecciona un canal
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {u7dChannels.map(ch => (
+                  <button
+                    key={ch.id}
+                    onClick={() => { setU7dSelectedChannel(ch); setU7dSelectedDay(null); setU7dItems([]) }}
+                    className="card group p-4 flex flex-col items-center gap-3 text-center"
+                  >
+                    {ch.logo ? (
+                      <img src={ch.logo} alt={ch.name} className="w-12 h-12 object-contain rounded bg-white/10" />
+                    ) : (
+                      <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                        <Tv className="text-primary-400" size={24} />
+                      </div>
+                    )}
+                    <p className="text-white font-medium text-sm">{ch.name}</p>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
-          {loading ? (
-            <div className="flex items-center justify-center min-h-[40vh]">
-              <Loader2 className="animate-spin text-primary-500" size={48} />
-            </div>
-          ) : u7dItems.length === 0 ? (
-            <div className="flex items-center justify-center min-h-[40vh]">
-              <p className="text-dark-400">No hay contenido disponible</p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {groupU7dByDay(u7dItems).map(([day, items]) => (
-                <div key={day} className="space-y-3">
-                  <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                    <Calendar size={18} className="text-primary-400" />
-                    {formatU7dDay(day)}
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                    {items.map(item => (
-                      <button
-                        key={item.id}
-                        onClick={() => handlePlayChannel(item)}
-                        className="card group p-3 flex flex-col gap-2 text-left"
-                      >
-                        {item.poster ? (
-                          <img src={item.poster} alt={item.title} className="w-full aspect-video object-cover rounded-lg" />
-                        ) : (
-                          <div className="w-full aspect-video bg-primary-600/20 rounded-lg flex items-center justify-center">
-                            <Tv className="text-primary-400" size={32} />
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
-                          {item.description && (
-                            <p className="text-primary-400 text-xs mt-1">{item.description}</p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+          {/* Step 2: Select day */}
+          {u7dSelectedChannel && !u7dSelectedDay && (
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <button
+                  onClick={() => { setU7dSelectedChannel(null); setU7dItems([]) }}
+                  className="btn-ghost p-2"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <div className="flex items-center gap-2">
+                  {u7dSelectedChannel.logo && (
+                    <img src={u7dSelectedChannel.logo} alt={u7dSelectedChannel.name} className="w-8 h-8 object-contain rounded bg-white/10" />
+                  )}
+                  <h3 className="text-lg font-semibold text-white">{u7dSelectedChannel.name}</h3>
                 </div>
-              ))}
-            </div>
+              </div>
+              <h4 className="text-sm text-dark-400 mb-3">Selecciona un día</h4>
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                {getLast7Days().map(day => (
+                  <button
+                    key={day.value}
+                    onClick={() => setU7dSelectedDay(day.value)}
+                    className="px-4 py-2 rounded-lg text-sm whitespace-nowrap bg-dark-800 text-dark-300 hover:bg-dark-700 transition-colors"
+                  >
+                    {day.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Step 3: Show programs */}
+          {u7dSelectedChannel && u7dSelectedDay && (
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <button
+                  onClick={() => { setU7dSelectedDay(null); setU7dItems([]) }}
+                  className="btn-ghost p-2"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <div className="flex items-center gap-2">
+                  {u7dSelectedChannel.logo && (
+                    <img src={u7dSelectedChannel.logo} alt={u7dSelectedChannel.name} className="w-8 h-8 object-contain rounded bg-white/10" />
+                  )}
+                  <h3 className="text-lg font-semibold text-white">{u7dSelectedChannel.name}</h3>
+                  <span className="text-dark-400 text-sm">· {formatU7dDay(u7dSelectedDay)}</span>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center min-h-[40vh]">
+                  <Loader2 className="animate-spin text-primary-500" size={48} />
+                </div>
+              ) : u7dItems.length === 0 ? (
+                <div className="flex items-center justify-center min-h-[40vh]">
+                  <p className="text-dark-400">No hay contenido disponible para este día</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                  {u7dItems.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => handlePlayChannel(item)}
+                      className="card group p-3 flex flex-col gap-2 text-left"
+                    >
+                      {item.poster ? (
+                        <img src={item.poster} alt={item.title} className="w-full aspect-video object-cover rounded-lg" />
+                      ) : (
+                        <div className="w-full aspect-video bg-primary-600/20 rounded-lg flex items-center justify-center">
+                          <Tv className="text-primary-400" size={32} />
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
+                        {item.description && (
+                          <p className="text-primary-400 text-xs mt-1 line-clamp-2">{item.description}</p>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}

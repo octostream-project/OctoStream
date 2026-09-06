@@ -220,12 +220,12 @@ class PluginManager {
     return results
   }
 
-  async getEpg(date) {
+  async getEpg(date, channelId) {
     const allPrograms = []
     for (const plugin of this.plugins) {
       try {
         if (typeof plugin.getEpg === 'function') {
-          const programs = await plugin.getEpg({ date })
+          const programs = await plugin.getEpg({ date, channelId })
           if (programs && programs.length > 0) {
             programs.forEach(p => allPrograms.push({ ...p, pluginId: plugin.id, pluginName: plugin.name }))
           }
