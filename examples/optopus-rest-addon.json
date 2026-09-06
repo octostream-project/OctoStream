@@ -1,0 +1,18 @@
+{
+  "id": "demo-rest-addon",
+  "name": "Demo REST Addon",
+  "version": "1.0.0",
+  "description": "Ejemplo de plugin externo compatible con Optopus usando endpoints REST.",
+  "types": ["movie", "series"],
+  "icon": "film",
+  "catalogs": [
+    { "id": "new", "name": "Novedades", "type": "movie" }
+  ],
+  "api": {
+    "baseUrl": "https://mi-servidor.example.com",
+    "catalog": "/catalog/{type}/{id}?skip={skip}&top={top}",
+    "meta": "/meta/{type}/{id}",
+    "streams": "/streams/{type}/{id}",
+    "search": "/search?q={query}"
+  }
+}

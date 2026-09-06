@@ -52,10 +52,12 @@ export class Plugin {
 
 export function createPlugin(manifest, handlers) {
   const plugin = new Plugin(manifest)
-  // Copy all provided handlers onto the plugin so plugins can expose
-  // custom methods (e.g. getLanguagePack, resolveEmbed, searchSubtitles).
-  for (const [key, fn] of Object.entries(handlers)) {
-    if (typeof fn === 'function') plugin[key] = fn
+  // Copy all provided handlers/properties onto the plugin so plugins can expose
+  // custom methods and metadata (e.g. getLanguagePack, isStremio, baseUrl).
+  const reservedKeys = new Set(['id', 'name', 'manifest'])
+  for (const [key, value] of Object.entries(handlers)) {
+    if (reservedKeys.has(key)) continue
+    plugin[key] = value
   }
   return plugin
 }

@@ -1,12 +1,12 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
-import { tmdbPlugin } from './tmdb.js'
-import { embedStreamPlugin } from './embedStream.js'
-import { openSubtitlesPlugin } from './openSubtitles.js'
 import { esLanguagePlugin } from './languages/es.js'
 import { enLanguagePlugin } from './languages/en.js'
+import { builtInPlugins } from './builtIn/index.js'
+import { createExternalPlugin, fetchManifest } from './externalAdapter.js'
 import { logError, logWarn } from '../utils/logger.js'
 
 const META_TIMEOUT_MS = 8000
+const EXTERNAL_PLUGINS_KEY = 'optopus_external_plugins'
+const INSTALLED_PLUGINS_KEY = 'optopus_installed_plugins'
 
 function withTimeout(promise, ms, pluginId) {
   return Promise.race([
@@ -19,42 +19,110 @@ function withTimeout(promise, ms, pluginId) {
 
 class PluginManager {
   constructor() {
-    this.availablePlugins = []
-    this.languagePlugins = []
     this.installedPluginIds = new Set(
-      JSON.parse(localStorage.getItem('optopus_installed_plugins') || '["tmdb","embed-stream"]')
+      JSON.parse(localStorage.getItem(INSTALLED_PLUGINS_KEY) || '["tmdb","embed-stream"]')
     )
+    this.externalPluginConfigs = JSON.parse(localStorage.getItem(EXTERNAL_PLUGINS_KEY) || '[]')
+    this.externalPlugins = []
     this.plugins = []
-    this.registerAvailable()
+    this.languagePlugins = [esLanguagePlugin, enLanguagePlugin]
+    this.builtInPlugins = builtInPlugins
+    this.loadExternalPlugins()
     this.loadInstalled()
   }
 
-  registerAvailable() {
-    this.availablePlugins = [
-      tmdbPlugin,
-      embedStreamPlugin,
-      openSubtitlesPlugin,
-    ]
-    this.languagePlugins = [
-      esLanguagePlugin,
-      enLanguagePlugin,
-    ]
+  // Built-in plugins (Kodi-style repository) ----------------------------------
+  getBuiltInPlugins() {
+    return this.builtInPlugins
   }
 
-  loadInstalled() {
-    this.plugins = this.availablePlugins.filter(p =>
-      this.installedPluginIds.has(p.manifest.id)
-    )
+  isBuiltInPlugin(pluginId) {
+    return this.builtInPlugins.some(p => p.id === pluginId)
+  }
+
+  // External plugins (Stremio-style) ----------------------------------------
+  loadExternalPlugins() {
+    this.externalPlugins = []
+    for (const config of this.externalPluginConfigs) {
+      try {
+        const plugin = createExternalPlugin(config)
+        this.externalPlugins.push(plugin)
+      } catch (e) {
+        logError('Failed to load external plugin', String(e?.message || e))
+      }
+    }
+  }
+
+  saveExternalPlugins() {
+    localStorage.setItem(EXTERNAL_PLUGINS_KEY, JSON.stringify(this.externalPluginConfigs))
+  }
+
+  getExternalPlugins() {
+    return this.externalPlugins
+  }
+
+  async addExternalPluginByUrl(manifestUrl) {
+    const manifest = await fetchManifest(manifestUrl)
+    const config = { manifestUrl, manifest, baseUrl: manifestUrl.replace(/\/manifest\.json$/, '') }
+    return this.addExternalPlugin(config)
+  }
+
+  addExternalPlugin(config) {
+    const plugin = createExternalPlugin(config)
+    if (this.externalPlugins.some(p => p.id === plugin.id)) {
+      throw new Error(`External plugin ${plugin.id} is already installed`)
+    }
+    this.externalPlugins.push(plugin)
+    this.externalPluginConfigs.push(config)
+    this.saveExternalPlugins()
+    this.loadInstalled()
+    return plugin
+  }
+
+  removeExternalPlugin(pluginId) {
+    this.externalPlugins = this.externalPlugins.filter(p => p.id !== pluginId)
+    this.externalPluginConfigs = this.externalPluginConfigs.filter(c => (c.manifest?.id || c.id) !== pluginId)
+    this.installedPluginIds.delete(pluginId)
+    this.saveExternalPlugins()
+    localStorage.setItem(INSTALLED_PLUGINS_KEY, JSON.stringify([...this.installedPluginIds]))
+    this.loadInstalled()
+  }
+
+  // All plugins --------------------------------------------------------------
+  getAllAvailablePlugins() {
+    return [...this.builtInPlugins, ...this.externalPlugins]
   }
 
   getPlugins() {
-    return this.availablePlugins
+    return this.getAllAvailablePlugins()
+  }
+
+  loadInstalled() {
+    this.plugins = this.getAllAvailablePlugins().filter(p =>
+      this.installedPluginIds.has(p.id)
+    )
   }
 
   getInstalledPlugins() {
     return this.plugins
   }
 
+  installPlugin(pluginId) {
+    if (!this.getAllAvailablePlugins().some(p => p.id === pluginId)) {
+      throw new Error(`Plugin ${pluginId} not found`)
+    }
+    this.installedPluginIds.add(pluginId)
+    localStorage.setItem(INSTALLED_PLUGINS_KEY, JSON.stringify([...this.installedPluginIds]))
+    this.loadInstalled()
+  }
+
+  uninstallPlugin(pluginId) {
+    this.installedPluginIds.delete(pluginId)
+    localStorage.setItem(INSTALLED_PLUGINS_KEY, JSON.stringify([...this.installedPluginIds]))
+    this.loadInstalled()
+  }
+
+  // Language packs -----------------------------------------------------------
   getLanguagePlugins() {
     return this.languagePlugins
   }
@@ -65,18 +133,7 @@ class PluginManager {
     return plugin.getLanguagePack()
   }
 
-  installPlugin(pluginId) {
-    this.installedPluginIds.add(pluginId)
-    localStorage.setItem('optopus_installed_plugins', JSON.stringify([...this.installedPluginIds]))
-    this.loadInstalled()
-  }
-
-  uninstallPlugin(pluginId) {
-    this.installedPluginIds.delete(pluginId)
-    localStorage.setItem('optopus_installed_plugins', JSON.stringify([...this.installedPluginIds]))
-    this.loadInstalled()
-  }
-
+  // Catalogs / content -------------------------------------------------------
   getAllCatalogs() {
     const catalogs = []
     this.plugins.forEach(plugin => {

@@ -1,17 +1,148 @@
+import { useState } from 'react'
 import { useStore } from '../store/useStore.js'
-import { Puzzle, Check, Download, Trash2, Film, Tv, Radio, Play } from 'lucide-react'
+import {
+  Puzzle, Check, Download, Trash2, Film, Tv, Radio, Play,
+  Globe, Plus, Link, FileJson, AlertCircle,
+} from 'lucide-react'
 
 const iconMap = {
   film: Film,
   tv: Tv,
   radio: Radio,
   play: Play,
+  globe: Globe,
 }
 
+const LOCAL_STORAGE_KEY = 'optopus_external_plugins'
+
 export default function Plugins() {
-  const { plugins, installedPlugins, installPlugin, uninstallPlugin } = useStore()
+  const {
+    plugins,
+    installedPlugins,
+    externalPlugins,
+    installPlugin,
+    uninstallPlugin,
+    addExternalPlugin,
+    addExternalPluginByUrl,
+    removeExternalPlugin,
+  } = useStore()
+
+  const [activeTab, setActiveTab] = useState('repository')
+  const [manifestUrl, setManifestUrl] = useState('')
+  const [jsonInput, setJsonInput] = useState('')
+  const [formError, setFormError] = useState(null)
+  const [formSuccess, setFormSuccess] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isInstalled = (pluginId) => installedPlugins.some(p => p.id === pluginId)
+
+  const handleInstallExternalByUrl = async (e) => {
+    e.preventDefault()
+    setFormError(null)
+    setFormSuccess(null)
+    if (!manifestUrl.trim()) return
+    setIsSubmitting(true)
+    try {
+      const plugin = await addExternalPluginByUrl(manifestUrl.trim())
+      setFormSuccess(`Plugin "${plugin.manifest.name}" añadido e instalado`)
+      setManifestUrl('')
+    } catch (err) {
+      setFormError(err?.message || 'Error al añadir el plugin')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleInstallExternalByJson = async (e) => {
+    e.preventDefault()
+    setFormError(null)
+    setFormSuccess(null)
+    if (!jsonInput.trim()) return
+    setIsSubmitting(true)
+    try {
+      const config = JSON.parse(jsonInput)
+      const plugin = await addExternalPlugin(config)
+      setFormSuccess(`Plugin "${plugin.manifest.name}" añadido e instalado`)
+      setJsonInput('')
+    } catch (err) {
+      setFormError(err?.message || 'JSON inválido')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const pluginCard = (plugin, isExternal = false) => {
+    const Icon = iconMap[plugin.manifest.icon] || Puzzle
+    const installed = isInstalled(plugin.id)
+    return (
+      <div
+        key={plugin.id}
+        className="bg-dark-800 rounded-xl p-5 border border-dark-700 hover:border-primary-500/50 transition-colors"
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex-shrink-0 w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
+            <Icon className="text-primary-400" size={24} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-white font-bold text-lg">{plugin.manifest.name}</h3>
+              <span className="text-xs text-dark-500">v{plugin.manifest.version}</span>
+              {isExternal && (
+                <span className="text-xs bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded">Externo</span>
+              )}
+              {!isExternal && (
+                <span className="text-xs bg-purple-600/20 text-purple-400 px-2 py-0.5 rounded">Incluido</span>
+              )}
+            </div>
+            <p className="text-dark-400 text-sm mt-1">{plugin.manifest.description}</p>
+
+            {plugin.manifest.types && plugin.manifest.types.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {plugin.manifest.types.map(t => (
+                  <span key={t} className="text-xs bg-dark-700 text-dark-300 px-2 py-0.5 rounded">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {plugin.manifest.catalogs && plugin.manifest.catalogs.length > 0 && (
+              <p className="text-xs text-dark-500 mt-2">
+                {plugin.manifest.catalogs.length} catálogo{plugin.manifest.catalogs.length !== 1 ? 's' : ''} disponible{plugin.manifest.catalogs.length !== 1 ? 's' : ''}
+              </p>
+            )}
+
+            <div className="mt-4">
+              {installed ? (
+                <button
+                  onClick={() => isExternal ? removeExternalPlugin(plugin.id) : uninstallPlugin(plugin.id)}
+                  className="btn-secondary text-sm text-red-400 hover:text-red-300 inline-flex items-center gap-2"
+                >
+                  <Trash2 size={16} />
+                  {isExternal ? 'Eliminar' : 'Desinstalar'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => installPlugin(plugin.id)}
+                  className="btn-primary text-sm inline-flex items-center gap-2"
+                >
+                  <Download size={16} />
+                  Instalar
+                </button>
+              )}
+            </div>
+          </div>
+          {installed && (
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+                <Check className="text-green-400" size={18} />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 lg:p-6">
@@ -21,89 +152,117 @@ export default function Plugins() {
       </div>
 
       <p className="text-dark-400 text-sm mb-6">
-        Los plugins extienden la funcionalidad de Optopus Stream. Instala o desinstálalos según tus necesidades.
+        Los plugins extienden la funcionalidad de Optopus Stream. Activa los incluidos o añade servidores externos al estilo Stremio.
       </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {plugins.map(plugin => {
-          const Icon = iconMap[plugin.manifest.icon] || Puzzle
-          const installed = isInstalled(plugin.id)
-          return (
-            <div
-              key={plugin.id}
-              className="bg-dark-800 rounded-xl p-5 border border-dark-700 hover:border-primary-500/50 transition-colors"
-            >
-              <div className="flex items-start gap-4">
-                <div className="flex-shrink-0 w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                  <Icon className="text-primary-400" size={24} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-white font-bold text-lg">{plugin.manifest.name}</h3>
-                    <span className="text-xs text-dark-500">v{plugin.manifest.version}</span>
-                  </div>
-                  <p className="text-dark-400 text-sm mt-1">{plugin.manifest.description}</p>
-
-                  {plugin.manifest.types && plugin.manifest.types.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {plugin.manifest.types.map(t => (
-                        <span key={t} className="text-xs bg-dark-700 text-dark-300 px-2 py-0.5 rounded">
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {plugin.manifest.catalogs && plugin.manifest.catalogs.length > 0 && (
-                    <p className="text-xs text-dark-500 mt-2">
-                      {plugin.manifest.catalogs.length} catálogo{plugin.manifest.catalogs.length !== 1 ? 's' : ''} disponible{plugin.manifest.catalogs.length !== 1 ? 's' : ''}
-                    </p>
-                  )}
-
-                  <div className="mt-4">
-                    {installed ? (
-                      <button
-                        onClick={() => uninstallPlugin(plugin.id)}
-                        className="btn-secondary text-sm text-red-400 hover:text-red-300"
-                      >
-                        <Trash2 size={16} />
-                        Desinstalar
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => installPlugin(plugin.id)}
-                        className="btn-primary text-sm"
-                      >
-                        <Download size={16} />
-                        Instalar
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {installed && (
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
-                      <Check className="text-green-400" size={18} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
+      <div className="flex gap-2 mb-6 border-b border-dark-800">
+        <button
+          onClick={() => setActiveTab('repository')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'repository'
+              ? 'text-primary-400 border-primary-500'
+              : 'text-dark-400 border-transparent hover:text-white'
+          }`}
+        >
+          Repositorio
+        </button>
+        <button
+          onClick={() => setActiveTab('external')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'external'
+              ? 'text-primary-400 border-primary-500'
+              : 'text-dark-400 border-transparent hover:text-white'
+          }`}
+        >
+          Externos
+        </button>
       </div>
 
+      {activeTab === 'repository' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {plugins.filter(p => !externalPlugins.some(ep => ep.id === p.id)).map(plugin => pluginCard(plugin, false))}
+        </div>
+      )}
+
+      {activeTab === 'external' && (
+        <div className="space-y-6">
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <h3 className="text-white font-bold mb-2 flex items-center gap-2">
+              <Link size={18} className="text-primary-400" />
+              Añadir plugin externo
+            </h3>
+            <p className="text-dark-400 text-sm mb-4">
+              Soporta manifest JSON propio o manifest Stremio (terminado en <code>/manifest.json</code>).
+            </p>
+            <form onSubmit={handleInstallExternalByUrl} className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                value={manifestUrl}
+                onChange={e => setManifestUrl(e.target.value)}
+                placeholder="https://ejemplo.com/manifest.json"
+                className="flex-1 bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500"
+              />
+              <button
+                type="submit"
+                disabled={isSubmitting || !manifestUrl.trim()}
+                className="btn-primary text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Plus size={16} />
+                {isSubmitting ? 'Añadiendo...' : 'Añadir e instalar'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <h3 className="text-white font-bold mb-2 flex items-center gap-2">
+              <FileJson size={18} className="text-primary-400" />
+              Pegar configuración JSON
+            </h3>
+            <p className="text-dark-400 text-sm mb-4">
+              También puedes pegar el JSON completo del plugin (manifest + api.baseUrl).
+            </p>
+            <form onSubmit={handleInstallExternalByJson} className="space-y-2">
+              <textarea
+                value={jsonInput}
+                onChange={e => setJsonInput(e.target.value)}
+                placeholder='{ &quot;manifest&quot;: { ... }, &quot;baseUrl&quot;: &quot;https://...&quot; }'
+                rows={5}
+                className="w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500 font-mono"
+              />
+              <button
+                type="submit"
+                disabled={isSubmitting || !jsonInput.trim()}
+                className="btn-primary text-sm inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <Plus size={16} />
+                Instalar desde JSON
+              </button>
+            </form>
+          </div>
+
+          {(formError || formSuccess) && (
+            <div className={`rounded-xl p-4 flex items-start gap-3 ${formError ? 'bg-red-900/20 border border-red-800' : 'bg-green-900/20 border border-green-800'}`}>
+              {formError ? <AlertCircle className="text-red-400 flex-shrink-0" size={20} /> : <Check className="text-green-400 flex-shrink-0" size={20} />}
+              <p className={`text-sm ${formError ? 'text-red-200' : 'text-green-200'}`}>{formError || formSuccess}</p>
+            </div>
+          )}
+
+          {externalPlugins.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {externalPlugins.map(plugin => pluginCard(plugin, true))}
+            </div>
+          ) : (
+            <p className="text-dark-500 text-sm">No tienes plugins externos instalados.</p>
+          )}
+        </div>
+      )}
+
       <div className="mt-8 bg-dark-800/50 rounded-xl p-5 border border-dark-700">
-        <h3 className="text-white font-bold mb-2">Desarrollar plugins personalizados</h3>
+        <h3 className="text-white font-bold mb-2">Desarrollar plugins</h3>
         <p className="text-dark-400 text-sm">
-          Optopus Stream soporta plugins personalizados. Crea un plugin extendiendo la clase
-          <code className="text-primary-400 mx-1">Plugin</code>
-          e implementando los métodos
-          <code className="text-primary-400 mx-1">getCatalog</code>,
-          <code className="text-primary-400 mx-1">getStreams</code>,
-          <code className="text-primary-400 mx-1">getMeta</code>
-          y
-          <code className="text-primary-400 mx-1">search</code>.
+          <strong>Internos:</strong> añade un archivo en <code className="text-primary-400">src/plugins/builtIn/</code> y regístralo en el índice.
+          <br />
+          <strong>Externos:</strong> crea un servidor REST con endpoints <code className="text-primary-400">catalog</code>, <code className="text-primary-400">meta</code>, <code className="text-primary-400">streams</code> y <code className="text-primary-400">search</code>, o usa el formato Stremio.
         </p>
       </div>
     </div>
