@@ -1,3 +1,9 @@
+// Bundled external plugin: TDT Channels.
+// This plugin is installed from an external manifest JSON but its implementation
+// is bundled inside the app (no external server required). The manager detects
+// the `bundled: true` flag in the manifest and uses this implementation instead
+// of the REST/Stremio adapter.
+
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 import { logError, logWarn } from '../../utils/logger.js'
 
@@ -110,63 +116,81 @@ function normalizeStream(channel) {
   }
 }
 
-const manifest = new PluginManifest({
-  id: 'tdtchannels',
-  name: 'TDT Channels',
-  version: '1.0.0',
-  description: 'Canales de TDT española desde tdtchannels.com',
-  types: [CONTENT_TYPES.LIVE, CONTENT_TYPES.CHANNEL],
-  catalogs: [{ id: 'tdt-channels', name: 'Canales TDT', type: CONTENT_TYPES.LIVE }],
-  icon: 'tv',
-})
+// Registry of bundled external plugin implementations.
+// Keyed by manifest id. The manager checks here before falling back to the
+// REST/Stremio adapter.
+export const bundledPlugins = {
+  tdtchannels: (config) => {
+    const manifest = new PluginManifest({
+      id: 'tdtchannels',
+      name: config.manifest?.name || 'TDT Channels',
+      version: config.manifest?.version || '1.0.0',
+      description: config.manifest?.description || 'Canales de TDT española desde tdtchannels.com',
+      types: [CONTENT_TYPES.LIVE, CONTENT_TYPES.CHANNEL],
+      catalogs: [{ id: 'tdt-channels', name: 'Canales TDT', type: CONTENT_TYPES.LIVE }],
+      icon: 'tv',
+    })
 
-export const tdtChannelsPlugin = createPlugin(manifest, {
-  async getCatalog({ type, skip = 0, top = 50 }) {
-    try {
-      const channels = await fetchChannels()
-      return channels.slice(skip, skip + top).map(normalizeChannel)
-    } catch (e) {
-      logWarn('TDT Channels getCatalog failed', String(e?.message || e))
-      return []
-    }
+    return createPlugin(manifest, {
+      isExternal: true,
+      isBundled: true,
+      originalManifest: config.manifest,
+
+      async getCatalog({ type, skip = 0, top = 50 }) {
+        try {
+          const channels = await fetchChannels()
+          return channels.slice(skip, skip + top).map(normalizeChannel)
+        } catch (e) {
+          logWarn('TDT Channels getCatalog failed', String(e?.message || e))
+          return []
+        }
+      },
+
+      async getMeta({ id }) {
+        try {
+          const channels = await fetchChannels()
+          const channel = channels.find(ch => ch.id === id)
+          if (!channel) return null
+          return normalizeChannel(channel)
+        } catch (e) {
+          logWarn('TDT Channels getMeta failed', String(e?.message || e))
+          return null
+        }
+      },
+
+      async getStreams({ id }) {
+        try {
+          const channels = await fetchChannels()
+          const channel = channels.find(ch => ch.id === id)
+          if (!channel) return []
+          return [normalizeStream(channel)]
+        } catch (e) {
+          logWarn('TDT Channels getStreams failed', String(e?.message || e))
+          return []
+        }
+      },
+
+      async search({ query }) {
+        try {
+          const q = (query || '').toLowerCase()
+          const channels = await fetchChannels()
+          return channels
+            .filter(ch => ch.name.toLowerCase().includes(q))
+            .map(normalizeChannel)
+        } catch (e) {
+          logWarn('TDT Channels search failed', String(e?.message || e))
+          return []
+        }
+      },
+    })
   },
+}
 
-  async getMeta({ id }) {
-    try {
-      const channels = await fetchChannels()
-      const channel = channels.find(ch => ch.id === id)
-      if (!channel) return null
-      return normalizeChannel(channel)
-    } catch (e) {
-      logWarn('TDT Channels getMeta failed', String(e?.message || e))
-      return null
-    }
-  },
+export function getBundledPlugin(pluginId) {
+  return bundledPlugins[pluginId] || null
+}
 
-  async getStreams({ id }) {
-    try {
-      const channels = await fetchChannels()
-      const channel = channels.find(ch => ch.id === id)
-      if (!channel) return []
-      return [normalizeStream(channel)]
-    } catch (e) {
-      logWarn('TDT Channels getStreams failed', String(e?.message || e))
-      return []
-    }
-  },
-
-  async search({ query }) {
-    try {
-      const q = (query || '').toLowerCase()
-      const channels = await fetchChannels()
-      return channels
-        .filter(ch => ch.name.toLowerCase().includes(q))
-        .map(normalizeChannel)
-    } catch (e) {
-      logWarn('TDT Channels search failed', String(e?.message || e))
-      return []
-    }
-  },
-})
-
-export default tdtChannelsPlugin
+export function isBundledPlugin(config) {
+  const manifest = config.manifest || config
+  return manifest.bundled === true || config.bundled === true
+}
