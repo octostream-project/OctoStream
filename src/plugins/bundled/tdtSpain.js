@@ -600,6 +600,65 @@ async function resolveU7dStream(itemId, cache) {
 
 // ─── Stream resolution ──────────────────────────────────────────────────────
 
+// Stream types we can resolve. Channels with types not in this set are filtered out.
+const RESOLVABLE_TYPES = new Set(['', 'hls', 'stream1', 'stream10', 'stream11', 'stream12', 'geturl', 'posturl'])
+
+async function resolveGetUrl(url) {
+  // Fetch the page/API and extract an HLS URL
+  try {
+    const res = await fetch(proxied(url), {
+      headers: { 'User-Agent': UA, Origin: new URL(url).origin, Referer: new URL(url).origin + '/' },
+    })
+    if (!res.ok) {
+      console.warn('[TDT Spain] geturl fetch failed:', res.status, url.substring(0, 80))
+      return null
+    }
+    const text = await res.text()
+    // Try JSON first (some APIs return JSON with stream URL)
+    try {
+      const json = JSON.parse(text)
+      // Look for m3u8 URL in JSON values
+      const jsonStr = JSON.stringify(json)
+      const m = jsonStr.match(/https?:\/\/[^"'\\ ]*\.m3u8[^"'\\ ]*/)
+      if (m) return { url: m[0], streamType: 'hls', quality: 'LIVE' }
+    } catch {}
+    // Extract m3u8 from HTML
+    const m = text.match(/https?:\/\/[^"'\s<>]*\.m3u8[^"'\s<>]*/)
+    if (m) return { url: m[0], streamType: 'hls', quality: 'LIVE' }
+    // Look for dailymotion CDN URLs
+    const dm = text.match(/https?:\/\/[^"'\s<>]*dailymotion\.com\/cdn\/live\/video\/[^"'\s<>]*\.m3u8[^"'\s<>]*/)
+    if (dm) return { url: dm[0], streamType: 'hls', quality: 'LIVE' }
+    console.warn('[TDT Spain] geturl: no m3u8 found in response from', url.substring(0, 80))
+    return null
+  } catch (e) {
+    console.warn('[TDT Spain] geturl error:', e?.message, url.substring(0, 80))
+    return null
+  }
+}
+
+async function resolvePostUrl(url) {
+  // POST to the URL to get a stream manifest (DAI-style)
+  try {
+    const res = await fetch(proxied(url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+      body: 'ppid=' + Date.now() + '&vpa=auto&wta=1&vpmute=0',
+    })
+    if (!res.ok) {
+      console.warn('[TDT Spain] posturl fetch failed:', res.status, url.substring(0, 80))
+      return null
+    }
+    const data = await res.json().catch(() => null)
+    const manifest = data?.stream_manifest
+    if (manifest) return { url: manifest, streamType: 'hls', quality: 'LIVE' }
+    console.warn('[TDT Spain] posturl: no stream_manifest in response from', url.substring(0, 80))
+    return null
+  } catch (e) {
+    console.warn('[TDT Spain] posturl error:', e?.message, url.substring(0, 80))
+    return null
+  }
+}
+
 async function resolveLiveStream(ch, cache) {
   const st = String(ch.streamtype || '')
   const url = String(ch.url || '')
@@ -636,6 +695,12 @@ async function resolveLiveStream(ch, cache) {
     } catch (e) {
       logWarn('TDT Spain Dailymotion resolve failed', String(e?.message || e))
     }
+  }
+  if (st === 'geturl') {
+    if (/^https?:\/\//.test(url)) return await resolveGetUrl(url)
+  }
+  if (st === 'posturl') {
+    if (/^https?:\/\//.test(url)) return await resolvePostUrl(url)
   }
   if (/^https?:\/\//.test(url) && (/\.m3u8/.test(url) || /\/hls/.test(url))) {
     return { url, streamType: 'hls', quality: 'LIVE' }
@@ -721,10 +786,10 @@ export const tdtSpainFactory = (config) => {
         const visible = channels.filter(ch => String(ch.ocultar || '') !== 'true')
 
         if (id === 'tdtspain-live') {
+          // Only show channels with resolvable stream types
           const live = visible.filter(ch => {
             const st = String(ch.streamtype || '')
-            const url = String(ch.url || '')
-            return st === '' || st === 'hls' || (/^https?:\/\//.test(url) && /\.m3u8/.test(url))
+            return RESOLVABLE_TYPES.has(st)
           })
           return live.slice(skip, skip + top).map(ch => normalizeChannel(ch, cache.epg))
         }
@@ -732,6 +797,7 @@ export const tdtSpainFactory = (config) => {
         if (id === 'tdtspain-groups') {
           const groups = new Set()
           for (const ch of visible) {
+            if (!RESOLVABLE_TYPES.has(String(ch.streamtype || ''))) continue
             const g = String(ch.group || '').split(';')[0].trim()
             if (g) groups.add(g)
           }
@@ -750,7 +816,7 @@ export const tdtSpainFactory = (config) => {
           const groupName = id.replace('tdtspain-group-', '')
           const groupChannels = visible.filter(ch => {
             const g = String(ch.group || '').split(';')[0].trim()
-            return g === groupName
+            return g === groupName && RESOLVABLE_TYPES.has(String(ch.streamtype || ''))
           })
           return groupChannels.slice(skip, skip + top).map(ch => normalizeChannel(ch, cache.epg))
         }
@@ -967,8 +1033,9 @@ export const tdtSpainFactory = (config) => {
           }
         }
 
-        // Default: all channels
-        return visible.slice(skip, skip + top).map(ch => normalizeChannel(ch, cache.epg))
+        // Default: all channels (only resolvable types)
+        const resolvable = visible.filter(ch => RESOLVABLE_TYPES.has(String(ch.streamtype || '')))
+        return resolvable.slice(skip, skip + top).map(ch => normalizeChannel(ch, cache.epg))
       } catch (e) {
         logWarn('TDT Spain getCatalog failed', String(e?.message || e))
         return []
