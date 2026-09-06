@@ -61,6 +61,14 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
     const videoEl = videoRef.current
     if (!videoEl) return
 
+    // In Electron, route stream through local proxy to avoid CORS/SSL issues
+    const proxyUrl = window.optopus?.proxyUrl
+    const isElectron = !!window.optopus?.isElectron
+    let streamUrl = stream.url
+    if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1')) {
+      streamUrl = proxyUrl + encodeURIComponent(streamUrl)
+    }
+
     // Timeout: if manifest doesn't load in 15s, show error
     const loadTimeout = setTimeout(() => {
       setLoading(prev => {
@@ -84,8 +92,8 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
       if (stream.streamType === 'hls') {
         if (Hls.isSupported()) {
           const hlsConfig = {}
-          // Pass custom headers (User-Agent, Referer, Origin) if provided by plugin
-          if (stream.headers) {
+          // When using the proxy, no custom headers needed (proxy handles it)
+          if (stream.headers && !streamUrl.includes('127.0.0.1')) {
             hlsConfig.xhrSetup = (xhr) => {
               for (const [key, val] of Object.entries(stream.headers)) {
                 try { xhr.setRequestHeader(key, val) } catch {}
@@ -94,7 +102,7 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           }
           const hls = new Hls(hlsConfig)
           hlsRef.current = hls
-          hls.loadSource(stream.url)
+          hls.loadSource(streamUrl)
           hls.attachMedia(videoEl)
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             setLoading(false)
@@ -108,7 +116,7 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
             }
           })
         } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-          videoEl.src = stream.url
+          videoEl.src = streamUrl
           videoEl.addEventListener('loadedmetadata', () => setLoading(false))
           videoEl.addEventListener('error', () => {
             setError('Error al cargar el stream')
@@ -116,14 +124,14 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           })
         }
       } else if (stream.streamType === 'mp4') {
-        videoEl.src = stream.url
+        videoEl.src = streamUrl
         videoEl.addEventListener('loadedmetadata', () => setLoading(false))
         videoEl.addEventListener('error', () => {
           setError('Error al cargar el video')
           setLoading(false)
         })
       } else {
-        videoEl.src = stream.url
+        videoEl.src = streamUrl
         videoEl.addEventListener('loadedmetadata', () => setLoading(false))
       }
     })

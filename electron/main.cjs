@@ -1,13 +1,304 @@
 const { app, BrowserWindow, shell, session } = require('electron')
 const path = require('path')
+const http = require('http')
+const https = require('https')
+const { URL } = require('url')
 
-// Inject custom headers (User-Agent, Referer, Origin) for HLS stream requests.
-// TDT Spain streams from RTVE/Atresplayer/Mediaset require these headers.
+// ─── Local stream proxy ────────────────────────────────────────────────────
+// Solves CORS + SSL issues: fetches streams server-side (Node) and serves
+// them to the renderer via http://localhost:PROXY_PORT/proxy?url=...
+// The proxy injects correct headers (User-Agent, Referer, Origin) and
+// ignores certificate errors.
+
+const PROXY_PORT = 19588
+let proxyServer = null
+
+function startProxyServer() {
+  if (proxyServer) return
+
+  proxyServer = http.createServer((req, res) => {
+    const parsed = new URL(req.url, `http://localhost:${PROXY_PORT}`)
+
+    if (parsed.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ status: 'ok' }))
+      return
+    }
+
+    // Handle direct HLS sub-path requests (relative segment URLs resolved against proxy)
+    // Format: /hls/<base64-or-raw-host>/<path>
+    if (parsed.pathname.startsWith('/hls/')) {
+      // Extract the real URL from the path: /hls/HOST/remaining/path
+      const hlsPath = parsed.pathname.slice(5) // remove /hls/
+      const slashIdx = hlsPath.indexOf('/')
+      if (slashIdx === -1) {
+        res.writeHead(400)
+        res.end('Invalid hls path')
+        return
+      }
+      const host = hlsPath.slice(0, slashIdx)
+      const rest = hlsPath.slice(slashIdx)
+      const targetUrl = `https://${host}${rest}${parsed.search || ''}`
+      proxyFetch(targetUrl, res)
+      return
+    }
+
+    if (parsed.pathname !== '/proxy') {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+
+    const targetUrl = parsed.searchParams.get('url')
+    if (!targetUrl) {
+      res.writeHead(400)
+      res.end('Missing url param')
+      return
+    }
+
+    proxyFetch(targetUrl, res)
+  })
+
+    let target
+    try {
+      target = new URL(targetUrl)
+    } catch {
+      res.writeHead(400)
+      res.end('Invalid url')
+      return
+    }
+
+    // Determine headers based on target domain
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+    }
+
+    const host = target.hostname
+    if (/rtve\./i.test(host)) {
+      headers['Origin'] = 'https://www.rtve.es'
+      headers['Referer'] = 'https://www.rtve.es/'
+    } else if (/atresplayer\.|atresmedia\./i.test(host)) {
+      headers['Origin'] = 'https://www.atresplayer.com'
+      headers['Referer'] = 'https://www.atresplayer.com/'
+    } else if (/mediaset\./i.test(host)) {
+      headers['Origin'] = 'https://www.mediasetinfinity.es'
+      headers['Referer'] = 'https://www.mediasetinfinity.es/'
+    } else if (/tdtchannels\./i.test(host)) {
+      headers['Referer'] = 'https://www.tdtchannels.com/'
+    } else if (/tdtspain\./i.test(host)) {
+      headers['Referer'] = 'https://www.tdtspain.com/'
+    }
+
+    const isHttps = target.protocol === 'https:'
+    const options = {
+      hostname: target.hostname,
+      port: target.port || (isHttps ? 443 : 80),
+      path: target.pathname + target.search,
+      method: 'GET',
+      headers,
+      // Ignore SSL certificate errors for stream endpoints
+      rejectUnauthorized: false,
+    }
+
+    const lib = isHttps ? https : http
+
+    const proxyReq = lib.request(options, (proxyRes) => {
+      // Handle redirects (common for HLS CDNs)
+      if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+        const redirectUrl = proxyRes.headers.location
+        const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
+        res.writeHead(302, { 'Location': `/proxy?url=${encodeURIComponent(absoluteRedirect)}` })
+        res.end()
+        return
+      }
+
+      // Forward content type and other relevant headers
+      const respHeaders = {
+        'Content-Type': proxyRes.headers['content-type'] || 'application/octet-stream',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      }
+      if (proxyRes.headers['content-length']) {
+        respHeaders['Content-Length'] = proxyRes.headers['content-length']
+      }
+
+      res.writeHead(proxyRes.statusCode || 200, respHeaders)
+      proxyRes.pipe(res)
+    })
+
+    proxyReq.on('error', (e) => {
+      console.error('[Proxy] error fetching', targetUrl, e.message)
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: e.message, url: targetUrl }))
+      }
+    })
+
+    proxyReq.setTimeout(15000, () => {
+      proxyReq.destroy()
+      if (!res.headersSent) {
+        res.writeHead(504, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Gateway timeout', url: targetUrl }))
+      }
+    })
+
+    proxyReq.end()
+  })
+
+  proxyServer.listen(PROXY_PORT, '127.0.0.1', () => {
+    console.log(`[Proxy] Stream proxy running on http://127.0.0.1:${PROXY_PORT}`)
+  })
+
+  proxyServer.on('error', (e) => {
+    console.error('[Proxy] failed to start:', e.message)
+  })
+}
+
+function proxyFetch(targetUrl, res) {
+  let target
+  try {
+    target = new URL(targetUrl)
+  } catch {
+    if (!res.headersSent) { res.writeHead(400); res.end('Invalid url') }
+    return
+  }
+
+  // Determine headers based on target domain
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+  }
+
+  const host = target.hostname
+  if (/rtve\./i.test(host)) {
+    headers['Origin'] = 'https://www.rtve.es'
+    headers['Referer'] = 'https://www.rtve.es/'
+  } else if (/atresplayer\.|atresmedia\./i.test(host)) {
+    headers['Origin'] = 'https://www.atresplayer.com'
+    headers['Referer'] = 'https://www.atresplayer.com/'
+  } else if (/mediaset\./i.test(host)) {
+    headers['Origin'] = 'https://www.mediasetinfinity.es'
+    headers['Referer'] = 'https://www.mediasetinfinity.es/'
+  } else if (/tdtchannels\./i.test(host)) {
+    headers['Referer'] = 'https://www.tdtchannels.com/'
+  } else if (/tdtspain\./i.test(host)) {
+    headers['Referer'] = 'https://www.tdtspain.com/'
+  }
+
+  const isHttps = target.protocol === 'https:'
+  const options = {
+    hostname: target.hostname,
+    port: target.port || (isHttps ? 443 : 80),
+    path: target.pathname + target.search,
+    method: 'GET',
+    headers,
+    rejectUnauthorized: false,
+  }
+
+  const lib = isHttps ? https : http
+
+  const proxyReq = lib.request(options, (proxyRes) => {
+    // Handle redirects
+    if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+      const redirectUrl = proxyRes.headers.location
+      const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
+      res.writeHead(302, { 'Location': `/proxy?url=${encodeURIComponent(absoluteRedirect)}` })
+      res.end()
+      return
+    }
+
+    const contentType = proxyRes.headers['content-type'] || ''
+    const isM3u8 = /\.m3u8/i.test(targetUrl) || /mpegurl|vnd\.apple\.mpeg/i.test(contentType)
+
+    const respHeaders = {
+      'Content-Type': contentType || 'application/octet-stream',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
+    }
+    if (proxyRes.headers['content-length']) {
+      respHeaders['Content-Length'] = proxyRes.headers['content-length']
+    }
+
+    if (isM3u8) {
+      // Rewrite m3u8: convert relative/absolute segment URLs to proxy URLs
+      let body = ''
+      proxyRes.on('data', (chunk) => { body += chunk.toString() })
+      proxyRes.on('end', () => {
+        const lines = body.split('\n')
+        const rewritten = lines.map(line => {
+          const trimmed = line.trim()
+          if (!trimmed || trimmed.startsWith('#')) {
+            // Rewrite URI= in #EXT-X-KEY and #EXT-X-MAP tags
+            if (/^#EXT-X-(KEY|MAP)/.test(trimmed) && /URI="([^"]+)"/.test(trimmed)) {
+              const uriMatch = trimmed.match(/URI="([^"]+)"/)
+              if (uriMatch) {
+                const originalUri = uriMatch[1]
+                const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
+                return trimmed.replace(uriMatch[0], `URI="${PROXY_PREFIX}${encodeURIComponent(absoluteUri)}"`)
+              }
+            }
+            return line
+          }
+          // It's a segment URL (relative or absolute)
+          if (/^https?:\/\//.test(trimmed)) {
+            return `${PROXY_PREFIX}${encodeURIComponent(trimmed)}`
+          }
+          // Relative URL: resolve against the m3u8 base URL
+          const absolute = new URL(trimmed, targetUrl).href
+          return `${PROXY_PREFIX}${encodeURIComponent(absolute)}`
+        })
+        const rewrittenBody = rewritten.join('\n')
+        delete respHeaders['Content-Length']
+        respHeaders['Content-Length'] = Buffer.byteLength(rewrittenBody)
+        res.writeHead(proxyRes.statusCode || 200, respHeaders)
+        res.end(rewrittenBody)
+      })
+    } else {
+      // Binary content (TS segments, keys, etc.) - pipe directly
+      res.writeHead(proxyRes.statusCode || 200, respHeaders)
+      proxyRes.pipe(res)
+    }
+  })
+
+  proxyReq.on('error', (e) => {
+    console.error('[Proxy] error fetching', targetUrl, e.message)
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, url: targetUrl }))
+    }
+  })
+
+  proxyReq.setTimeout(15000, () => {
+    proxyReq.destroy()
+    if (!res.headersSent) {
+      res.writeHead(504, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Gateway timeout', url: targetUrl }))
+    }
+  })
+
+  proxyReq.end()
+}
+
+const PROXY_PREFIX = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
+
+// ─── App setup ─────────────────────────────────────────────────────────────
+
 app.whenReady().then(() => {
+  // Start the stream proxy
+  startProxyServer()
+
+  // Ignore certificate errors for all requests
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    callback(0) // Accept all certificates
+  })
+
+  // Inject custom headers for API calls (not proxied streams)
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const url = details.url
-    // Only modify media/stream requests to known TDT domains
-    if (/rtve\.|atresplayer\.|mediaset\.|tdtchannels\.|tdtspain\.|doubleclick\.net/i.test(url)) {
+    if (/rtve\.|atresplayer\.|mediaset\.|tdtchannels\.|tdtspain\./i.test(url) && !url.includes('127.0.0.1')) {
       if (!details.requestHeaders['User-Agent']) {
         details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
       }
@@ -26,6 +317,8 @@ app.whenReady().then(() => {
     }
     callback({ requestHeaders: details.requestHeaders })
   })
+
+  createWindow()
 })
 
 function createWindow() {
@@ -46,9 +339,7 @@ function createWindow() {
     },
   })
 
-  // Prevent the renderer from opening arbitrary windows. External/custom-protocol
-  // links (vlc://, mpv://, https://) are delegated to the OS handler so the app
-  // never spawns uncontrolled BrowserWindows.
+  // Prevent the renderer from opening arbitrary windows.
   win.webContents.setWindowOpenHandler(({ url }) => {
     const parsed = (() => { try { return new URL(url) } catch { return null } })()
     const allowed = ['http:', 'https:', 'vlc:', 'mpv:', 'magnet:']
@@ -58,7 +349,7 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  // Block navigation to unknown origins (defends against redirects to file:/data:).
+  // Block navigation to unknown origins
   win.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http://localhost:5173') || url.startsWith('file://')) return
     event.preventDefault()
@@ -74,17 +365,17 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
-  })
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+  }
 })
 
 app.on('window-all-closed', () => {
+  if (proxyServer) {
+    proxyServer.close()
+    proxyServer = null
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }
