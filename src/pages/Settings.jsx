@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor } from 'lucide-react'
 
 export default function Settings() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('optopus_tmdb_key') || '')
@@ -8,6 +8,19 @@ export default function Settings() {
   const [osApiKey, setOsApiKey] = useState(localStorage.getItem('optopus_opensubs_apikey') || '')
   const [osSaved, setOsSaved] = useState(false)
   const [osError, setOsError] = useState('')
+
+  // Screensaver settings
+  const [ssEnabled, setSsEnabled] = useState(localStorage.getItem('optopus_screensaver_enabled') !== 'false')
+  const [ssTimeout, setSsTimeout] = useState(parseInt(localStorage.getItem('optopus_screensaver_timeout') || '5', 10))
+
+  const handleScreensaverSave = () => {
+    localStorage.setItem('optopus_screensaver_enabled', ssEnabled ? 'true' : 'false')
+    localStorage.setItem('optopus_screensaver_timeout', String(ssTimeout))
+    setSsSaved(true)
+    setTimeout(() => setSsSaved(false), 2000)
+  }
+
+  const [ssSaved, setSsSaved] = useState(false)
 
   const handleSave = async () => {
     setError('')
@@ -191,6 +204,62 @@ export default function Settings() {
             Ir a opensubtitles.com
             <ExternalLink size={14} />
           </a>
+        </div>
+      </div>
+
+      <div className="bg-dark-800 rounded-xl p-5 border border-dark-700 mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+            <Monitor className="text-primary-400" size={22} />
+          </div>
+          <div>
+            <h3 className="text-white font-bold">Salvapantallas</h3>
+            <p className="text-dark-400 text-sm">
+              Se activa tras un periodo de inactividad mostrando el logo animado
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-dark-300">Activar salvapantallas automático</span>
+            <button
+              onClick={() => setSsEnabled(!ssEnabled)}
+              className={`relative w-12 h-6 rounded-full transition-colors ${ssEnabled ? 'bg-primary-600' : 'bg-dark-700'}`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${ssEnabled ? 'translate-x-6' : ''}`}
+              />
+            </button>
+          </label>
+
+          {ssEnabled && (
+            <div>
+              <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                Tiempo de inactividad (minutos)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="60"
+                value={ssTimeout}
+                onChange={e => setSsTimeout(Math.max(1, parseInt(e.target.value) || 5))}
+                className="input w-24"
+              />
+            </div>
+          )}
+
+          {ssSaved && (
+            <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
+              <Check size={16} />
+              Configuración guardada correctamente
+            </div>
+          )}
+
+          <button onClick={handleScreensaverSave} className="btn-primary">
+            <Check size={18} />
+            Guardar
+          </button>
         </div>
       </div>
 
