@@ -261,66 +261,92 @@ async function resolveMediasetLive(ch, streamTypes) {
   const hdr = { 'User-Agent': UA, Origin: 'https://www.mediasetinfinity.es', Referer: 'https://www.mediasetinfinity.es/' }
 
   const page = String(ch.url || '')
-  const initUrl = attrs.initUrl || 'https://services-ott-prod-fe.mediaset.net/esp/static/nownext/v3.0/nownext.json'
-  const nn = await fetchJson(initUrl, hdr)
-  const stations = nn?.response?.stations || {}
-  let callSign = null
-  for (const st of Object.values(stations)) {
-    if (!st || typeof st !== 'object') continue
-    const vpu = String(st.mediasetstation$videoPageUrl || st.videoPageUrl || '')
-    if (vpu && page) {
-      if (vpu === page || /directo\/([^/]+)/.exec(vpu)?.[1] && page.includes(RegExp.$1)) {
-        callSign = st.callSign
-        break
+  const pageSlug = page.match(/\/directo\/([^/]+)/)?.[1] || ''
+
+  // Slug -> callSign mapping (from nownext.json observation)
+  const slugMap = {
+    telecinco: 'T5', cuatro: 'CT', fdf: 'FD', energy: 'EN', divinity: 'DV',
+    bemad: 'BM', boing: 'BO', 'mitele-comedia': 'MC', 'mitele-viajes': 'MV',
+    'mitele-en-la-calle': 'ME', 'mitele-top-series': 'MS', 'mtmad-24h': 'MT',
+    'mitele-plus-lqsa': 'ML', acontraplus: 'AC', 'fight-sports': 'FS',
+  }
+
+  let callSign = slugMap[pageSlug] || null
+
+  // If not in map, try nownext.json lookup
+  if (!callSign) {
+    try {
+      const initUrl = attrs.initUrl || 'https://services-ott-prod-fe.mediaset.net/esp/static/nownext/v3.0/nownext.json'
+      const nn = await fetchJson(initUrl, hdr)
+      const stations = nn?.response?.stations || {}
+      for (const st of Object.values(stations)) {
+        if (!st || typeof st !== 'object') continue
+        const vpu = String(st['mediasetstation$videoPageUrl'] || st.videoPageUrl || '')
+        if (vpu && pageSlug) {
+          const vpuSlug = vpu.match(/\/directo\/([^/]+)/)?.[1] || ''
+          if (vpuSlug === pageSlug) {
+            callSign = st.callSign
+            break
+          }
+        }
       }
+    } catch (e) {
+      console.warn('[TDT Spain] Mediaset nownext fetch failed:', e?.message)
     }
   }
   if (!callSign) {
-    const slug = page.match(/\/directo\/([^/]+)/)?.[1] || ''
-    const mp = { telecinco: 'T5', cuatro: 'C4', fdf: 'FD', energy: 'EN', divinity: 'DV', bemad: 'BM', boing: 'BOING' }
-    callSign = mp[slug]
+    console.warn('[TDT Spain] Mediaset: no callSign found for', pageSlug)
+    return null
   }
-  if (!callSign) return null
+  console.log('[TDT Spain] Mediaset resolving:', pageSlug, '-> callSign:', callSign)
 
-  // Anonymous login
+  // Anonymous login (POST only)
   const appname = attrs.appname || 'web//mediasetplay-web/1.2.1-d1b2024'
   const urlToken = attrs.urltoken || 'https://services-ott-prod-fe.mediaset.net/esp/idm/v3.0/anonymous/login'
   const clientId = String(Date.now() % 1000000000) + '-' + String(Math.floor(Math.random() * 900000) + 100000)
-  const login = await fetchJson(urlToken, {
-    ...hdr,
-    'Content-Type': 'application/json',
-  })
-  // POST not available via fetch GET; use a different approach
   const loginRes = await fetch(urlToken, {
     method: 'POST',
     headers: { ...hdr, 'Content-Type': 'application/json' },
     body: JSON.stringify({ appName: appname, client_id: clientId }),
-  }).then(r => r.json()).catch(() => null)
+  }).then(r => r.json()).catch(e => { console.error('[TDT Spain] Mediaset login failed:', e?.message); return null })
 
   const sid = loginRes?.response?.sid
   const beToken = loginRes?.response?.beToken
-  if (!sid || !beToken) return null
+  if (!sid || !beToken) {
+    console.warn('[TDT Spain] Mediaset login: no sid/beToken', JSON.stringify(loginRes)?.substring(0, 200))
+    return null
+  }
+  console.log('[TDT Spain] Mediaset login OK, sid:', sid.substring(0, 12) + '...')
 
-  const checkTmpl = attrs.mediaSelector || 'https://services-ott-prod-fe.mediaset.net/esp/playback/v3.0/check?sid=${token.clave}'
-  const checkUrl = checkTmpl.replace('${token.clave}', sid).replace('$token.clave', sid)
+  // Playback check
+  const checkUrl = `https://services-ott-prod-fe.mediaset.net/esp/playback/v3.0/check?sid=${sid}`
   const chkRes = await fetch(checkUrl, {
     method: 'POST',
     headers: { ...hdr, Authorization: 'Bearer ' + beToken, 'Content-Type': 'application/json' },
     body: JSON.stringify({ channelCode: callSign, streamType: 'LIVE' }),
-  }).then(r => r.json()).catch(() => null)
+  }).then(r => r.json()).catch(e => { console.error('[TDT Spain] Mediaset check failed:', e?.message); return null })
 
   const dai = chkRes?.response?.dai?.assetKey
-  if (!dai) return null
+  if (!dai) {
+    console.warn('[TDT Spain] Mediaset: no DAI assetKey', JSON.stringify(chkRes)?.substring(0, 200))
+    return null
+  }
+  console.log('[TDT Spain] Mediaset DAI assetKey:', dai)
 
+  // Get DAI stream manifest
   const daiUrl = 'https://pubads.g.doubleclick.net/ssai/event/' + dai + '/streams'
   const daiRes = await fetch(daiUrl, {
     method: 'POST',
-    headers: { ...hdr, 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
     body: 'ppid=' + clientId + '&vpa=auto&wta=1&vpmute=0',
-  }).then(r => r.json()).catch(() => null)
+  }).then(r => r.json()).catch(e => { console.error('[TDT Spain] Mediaset DAI failed:', e?.message); return null })
 
   const manifest = daiRes?.stream_manifest
-  if (!manifest) return null
+  if (!manifest) {
+    console.warn('[TDT Spain] Mediaset: no stream_manifest', JSON.stringify(daiRes)?.substring(0, 200))
+    return null
+  }
+  console.log('[TDT Spain] Mediaset stream OK:', manifest.substring(0, 80))
   return { url: manifest, streamType: 'hls', quality: 'LIVE', headers: hdr }
 }
 
