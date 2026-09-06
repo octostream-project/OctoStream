@@ -1,4 +1,4 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 
 const CINEMETA_BASE = 'https://cinemeta-catalogs.strem.io/top'
 

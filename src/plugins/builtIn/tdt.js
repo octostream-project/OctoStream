@@ -1,5 +1,5 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
-import { getItemSync } from '../utils/storage.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
+import { getItemSync } from '../../utils/storage.js'
 
 const TDT_URL = 'https://www.tdtspain.com/canales/canalesv2.json'
 const EPG_URL = 'https://www.tdtspain.com/epg/TV.json.gz'

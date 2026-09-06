@@ -1,4 +1,4 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p'

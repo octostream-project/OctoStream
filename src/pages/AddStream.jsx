@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
-import { embedStreamPlugin } from '../plugins/embedStream.js'
+import { embedStreamPlugin } from '../plugins/builtIn/index.js'
 import { Play, Link2, Plus, Trash2, Clapperboard } from 'lucide-react'
 
 const STORAGE_KEY = 'optopus_custom_streams'

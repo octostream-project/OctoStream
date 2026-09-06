@@ -1,5 +1,5 @@
-import { createPlugin, PluginManifest, CONTENT_TYPES } from './base.js'
-import { unpack as jsunpack } from '../lib/jsunpack.js'
+import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
+import { unpack as jsunpack } from '../../lib/jsunpack.js'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import Plugins from './pages/Plugins.jsx'
 import AddStream from './pages/AddStream.jsx'
 import Settings from './pages/Settings.jsx'
 import CastReceiver from './pages/CastReceiver.jsx'
+import LiveTV from './pages/LiveTV.jsx'
 import { useStore } from './store/useStore.js'
 
 export default function App() {
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/add-stream" element={<AddStream />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/cast" element={<CastReceiver />} />
+              <Route path="/live-tv" element={<LiveTV />} />
               <Route path="/catalog/:pluginId/:catalogId/:type" element={<Catalog />} />
               <Route path="/details/:type/:id" element={<Details />} />
             </Routes>

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import {
   Puzzle, Check, Download, Trash2, Film, Tv, Radio, Play,
-  Globe, Plus, Link, FileJson, AlertCircle,
+  Globe, Plus, Link, FileJson, AlertCircle, Upload, Cloud, Loader2,
 } from 'lucide-react'
 
 const iconMap = {
@@ -12,8 +12,6 @@ const iconMap = {
   play: Play,
   globe: Globe,
 }
-
-const LOCAL_STORAGE_KEY = 'optopus_external_plugins'
 
 export default function Plugins() {
   const {
@@ -33,6 +31,13 @@ export default function Plugins() {
   const [formError, setFormError] = useState(null)
   const [formSuccess, setFormSuccess] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Remote repository state
+  const [repoUrl, setRepoUrl] = useState('')
+  const [repoItems, setRepoItems] = useState([])
+  const [repoLoading, setRepoLoading] = useState(false)
+  const [repoError, setRepoError] = useState(null)
+  const fileInputRef = useRef(null)
 
   const isInstalled = (pluginId) => installedPlugins.some(p => p.id === pluginId)
 
@@ -66,6 +71,66 @@ export default function Plugins() {
       setJsonInput('')
     } catch (err) {
       setFormError(err?.message || 'JSON inválido')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFormError(null)
+    setFormSuccess(null)
+    setIsSubmitting(true)
+    try {
+      const text = await file.text()
+      const config = JSON.parse(text)
+      const plugin = await addExternalPlugin(config)
+      setFormSuccess(`Plugin "${plugin.manifest.name}" añadido e instalado`)
+    } catch (err) {
+      setFormError(err?.message || 'Archivo JSON inválido')
+    } finally {
+      setIsSubmitting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleLoadRepository = async (e) => {
+    e.preventDefault()
+    setRepoError(null)
+    if (!repoUrl.trim()) return
+    setRepoLoading(true)
+    setRepoItems([])
+    try {
+      const res = await fetch(repoUrl.trim())
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const items = Array.isArray(data) ? data : (data.addons || data.plugins || [])
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('El repositorio no contiene addons')
+      }
+      setRepoItems(items)
+    } catch (err) {
+      setRepoError(err?.message || 'Error al cargar el repositorio')
+    } finally {
+      setRepoLoading(false)
+    }
+  }
+
+  const handleInstallFromRepo = async (item) => {
+    setFormError(null)
+    setFormSuccess(null)
+    setIsSubmitting(true)
+    try {
+      let plugin
+      if (item.manifestUrl) {
+        plugin = await addExternalPluginByUrl(item.manifestUrl)
+      } else {
+        plugin = await addExternalPlugin(item)
+      }
+      setFormSuccess(`Plugin "${plugin.manifest.name}" añadido e instalado`)
+    } catch (err) {
+      setFormError(err?.message || 'Error al instalar el addon')
     } finally {
       setIsSubmitting(false)
     }
@@ -238,6 +303,91 @@ export default function Plugins() {
                 Instalar desde JSON
               </button>
             </form>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <h3 className="text-white font-bold mb-2 flex items-center gap-2">
+              <Upload size={18} className="text-primary-400" />
+              Cargar archivo JSON
+            </h3>
+            <p className="text-dark-400 text-sm mb-4">
+              Selecciona un archivo <code>.json</code> con la configuración del plugin desde tu dispositivo.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleFileUpload}
+              disabled={isSubmitting}
+              className="block w-full text-sm text-dark-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary-600 file:text-white file:cursor-pointer hover:file:bg-primary-500"
+            />
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <h3 className="text-white font-bold mb-2 flex items-center gap-2">
+              <Cloud size={18} className="text-primary-400" />
+              Repositorio remoto de addons
+            </h3>
+            <p className="text-dark-400 text-sm mb-4">
+              Carga una lista de addons desde una URL (JSON con un array de <code>manifestUrl</code> o configuraciones completas).
+            </p>
+            <form onSubmit={handleLoadRepository} className="flex flex-col sm:flex-row gap-2 mb-4">
+              <input
+                type="url"
+                value={repoUrl}
+                onChange={e => setRepoUrl(e.target.value)}
+                placeholder="https://repositorio.example.com/addons.json"
+                className="flex-1 bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500"
+              />
+              <button
+                type="submit"
+                disabled={repoLoading || !repoUrl.trim()}
+                className="btn-primary text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {repoLoading ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+                {repoLoading ? 'Cargando...' : 'Cargar lista'}
+              </button>
+            </form>
+
+            {repoError && (
+              <div className="rounded-lg p-3 mb-3 bg-red-900/20 border border-red-800 flex items-start gap-2">
+                <AlertCircle className="text-red-400 flex-shrink-0" size={18} />
+                <p className="text-sm text-red-200">{repoError}</p>
+              </div>
+            )}
+
+            {repoItems.length > 0 && (
+              <div className="space-y-2">
+                {repoItems.map((item, idx) => {
+                  const itemId = item.manifest?.id || item.id || `repo-${idx}`
+                  const itemName = item.manifest?.name || item.name || item.manifestUrl || 'Addon'
+                  const itemDesc = item.manifest?.description || item.description || ''
+                  const installed = isInstalled(itemId) || externalPlugins.some(ep => ep.id === itemId)
+                  return (
+                    <div key={idx} className="flex items-center gap-3 bg-dark-900 rounded-lg p-3 border border-dark-700">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{itemName}</p>
+                        {itemDesc && <p className="text-dark-400 text-xs truncate">{itemDesc}</p>}
+                      </div>
+                      {installed ? (
+                        <span className="text-xs text-green-400 inline-flex items-center gap-1">
+                          <Check size={14} /> Instalado
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleInstallFromRepo(item)}
+                          disabled={isSubmitting}
+                          className="btn-primary text-xs inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Download size={14} />
+                          Instalar
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {(formError || formSuccess) && (
