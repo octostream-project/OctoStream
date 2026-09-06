@@ -767,6 +767,92 @@ function normalizeChannel(ch, epg) {
   }
 }
 
+// ─── U7D search ─────────────────────────────────────────────────────────────
+
+async function searchU7d(query, cache) {
+  const q = (query || '').toLowerCase()
+  if (!q) return []
+  try {
+    cache = await getU7d(cache)
+    const u7d = cache.u7d || {}
+    const u7dConf = u7d.U7dConf || {}
+    const results = []
+    const now = Date.now()
+    const ONE_DAY = 24 * 60 * 60 * 1000
+
+    // Fetch all Mediaset channels in parallel (7 days each)
+    const mediasetChannels = []
+    for (const [chKey, chData] of Object.entries(u7dConf)) {
+      const u7dUrl = chData.u7ddata || ''
+      if (!u7dUrl || !/^https?:\/\//.test(u7dUrl)) continue
+      const isMediaset = /mediaset/.test(u7dUrl)
+      if (!isMediaset) continue
+      const callSignMatch = u7dUrl.match(/byCallSign=([^&]+)/)
+      const callSign = callSignMatch ? callSignMatch[1] : ''
+      if (!callSign) continue
+      const chName = chData.idchannel || chKey
+      const chMatch = cache.channels?.find(c => c.id === chKey || c.epgid === chKey)
+      mediasetChannels.push({ chKey, callSign, chName, chMatch })
+    }
+
+    // Fetch 7 days for each Mediaset channel
+    const fetches = []
+    for (const mc of mediasetChannels) {
+      for (let d = 0; d < 7; d++) {
+        const end = now - d * ONE_DAY
+        const start = end - ONE_DAY
+        const url = `https://services-ott-prod-fe.mediaset.net/esp/feed/v3.0/allListingFeedEpg?byCallSign=${mc.callSign}&byListingTime=${start}~${end}`
+        fetches.push({ mc, d, url, promise: fetchJson(url).catch(() => null) })
+      }
+    }
+    const responses = await Promise.all(fetches.map(f => f.promise))
+
+    for (let i = 0; i < fetches.length; i++) {
+      const { mc } = fetches[i]
+      const data = responses[i]
+      if (!data) continue
+      const entries = data.response?.entries || []
+      for (const entry of entries) {
+        for (const listing of (entry.listings || [])) {
+          const title = listing['mediasetlisting$epgTitle'] || ''
+          const desc = listing.description || ''
+          if (!title.toLowerCase().includes(q) && !desc.toLowerCase().includes(q)) continue
+          const prog = listing.program || {}
+          const startMs = listing.startTime || 0
+          const startTs = Math.floor(startMs / 1000)
+          const hasVod = !!prog['mediasetprogram$hasVod']
+          const rights = prog['mediasetprogram$channelsRights'] || []
+          const isFree = hasVod && rights.includes('AVOD')
+          const thumbs = prog.thumbnails || {}
+          const poster = thumbs['image_keyframe_poster']?.url || thumbs['image_horizontal_cover']?.url || ''
+          results.push({
+            id: `u7d-${mc.chKey}-${startTs}`,
+            type: CONTENT_TYPES.LIVE,
+            name: title,
+            title,
+            description: desc,
+            poster,
+            channelName: mc.chMatch?.name || mc.chName,
+            channelId: mc.chKey,
+            startTimestamp: startTs,
+            startTime: startTs ? new Date(startTs * 1000).toISOString() : '',
+            endTimestamp: Math.floor((listing.endTime || 0) / 1000),
+            hasVod,
+            isFree,
+            playable: isFree,
+            guid: prog.guid || '',
+          })
+        }
+      }
+    }
+    console.log('[TDT Spain] U7D search for', query, ':', results.length, 'results')
+    return results
+  } catch (e) {
+    logWarn('TDT Spain U7D search failed', String(e?.message || e))
+    return []
+  }
+}
+
 // ─── Plugin factory ─────────────────────────────────────────────────────────
 
 export const tdtSpainFactory = (config) => {
@@ -1136,7 +1222,7 @@ export const tdtSpainFactory = (config) => {
         cache = await getEpg(cache)
         const q = (query || '').toLowerCase()
         const channels = cache.channels || []
-        return channels
+        const channelResults = channels
           .filter(ch => {
             const name = String(ch.name || '').toLowerCase()
             const cid = String(ch.id || '').toLowerCase()
@@ -1145,6 +1231,11 @@ export const tdtSpainFactory = (config) => {
           })
           .filter(ch => String(ch.ocultar || '') !== 'true')
           .map(ch => normalizeChannel(ch, cache.epg))
+
+        // Also search in U7D programs (Mediaset, Atresplayer, RTVE)
+        const u7dResults = await searchU7d(query, cache)
+
+        return [...channelResults, ...u7dResults]
       } catch (e) {
         logWarn('TDT Spain search failed', String(e?.message || e))
         return []
