@@ -219,6 +219,23 @@ class PluginManager {
     }
     return results
   }
+
+  async getEpg(date) {
+    const allPrograms = []
+    for (const plugin of this.plugins) {
+      try {
+        if (typeof plugin.getEpg === 'function') {
+          const programs = await plugin.getEpg({ date })
+          if (programs && programs.length > 0) {
+            programs.forEach(p => allPrograms.push({ ...p, pluginId: plugin.id, pluginName: plugin.name }))
+          }
+        }
+      } catch (e) {
+        logError(`getEpg failed in plugin ${plugin.id}`, String(e?.message || e))
+      }
+    }
+    return allPrograms
+  }
 }
 
 export const pluginManager = new PluginManager()
