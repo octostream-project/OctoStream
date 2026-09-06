@@ -433,14 +433,13 @@ export default function LiveTV() {
                   {u7dItems.map(item => {
                     const ts = item.startTimestamp || (item.startTime ? new Date(item.startTime).getTime() / 1000 : 0)
                     const timeStr = ts ? new Date(ts * 1000).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''
-                    const playable = item.playable !== false
                     const isFree = item.isFree
                     const hasVod = item.hasVod
                     return (
                       <button
                         key={item.id}
-                        onClick={() => playable && handlePlayChannel(item)}
-                        className={`card group p-3 flex flex-col gap-2 text-left ${!playable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        onClick={() => handlePlayChannel(item)}
+                        className="card group p-3 flex flex-col gap-2 text-left"
                       >
                         {item.poster ? (
                           <img src={item.poster} alt={item.title} className="w-full aspect-video object-cover rounded-lg" />
@@ -452,9 +451,9 @@ export default function LiveTV() {
                         <div>
                           <div className="flex items-center gap-1.5 mb-0.5">
                             {timeStr && <span className="text-dark-500 text-xs">{timeStr}</span>}
-                            {playable && <span className="text-[10px] bg-green-600/30 text-green-400 px-1 rounded">GRATIS</span>}
-                            {hasVod && !isFree && !playable && <span className="text-[10px] bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
-                            {!playable && <span className="text-[10px] bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
+                            {hasVod && isFree && <span className="text-[10px] bg-green-600/30 text-green-400 px-1 rounded">GRATIS</span>}
+                            {hasVod && !isFree && <span className="text-[10px] bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
+                            {!hasVod && <span className="text-[10px] bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
                           </div>
                           <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
                           {item.description && (
