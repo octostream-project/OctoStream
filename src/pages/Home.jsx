@@ -11,21 +11,36 @@ export default function Home() {
     const loadContent = async () => {
       setLoading(true)
       const catalogs = pluginManager.getAllCatalogs()
-      const loadedRows = []
+      // Split: movies/series first (fast), TV/live later (slow)
+      const movieCatalogs = catalogs.filter(c => c.type === 'movie' || c.type === 'series')
+      const tvCatalogs = catalogs.filter(c => c.type !== 'movie' && c.type !== 'series')
 
-      for (const cat of catalogs) {
+      // Load movies/series first and show immediately
+      const fastRows = []
+      for (const cat of movieCatalogs) {
         try {
           const items = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 20)
           if (items && items.length > 0) {
-            loadedRows.push({ title: cat.name, items })
+            fastRows.push({ title: cat.name, items })
           }
-        } catch (e) {
-          // skip
-        }
+        } catch (e) { /* skip */ }
       }
-
-      setRows(loadedRows)
+      setRows(fastRows)
       setLoading(false)
+
+      // Load TV/live in background and append
+      const tvRows = []
+      for (const cat of tvCatalogs) {
+        try {
+          const items = await pluginManager.getCatalogContent(cat.pluginId, cat.id, cat.type, 0, 20)
+          if (items && items.length > 0) {
+            tvRows.push({ title: cat.name, items })
+          }
+        } catch (e) { /* skip */ }
+      }
+      if (tvRows.length > 0) {
+        setRows(prev => [...prev, ...tvRows])
+      }
     }
     loadContent()
   }, [])
