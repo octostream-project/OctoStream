@@ -281,10 +281,14 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
 
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
+      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement))
     }
     document.addEventListener('fullscreenchange', handleFsChange)
-    return () => document.removeEventListener('fullscreenchange', handleFsChange)
+    document.addEventListener('webkitfullscreenchange', handleFsChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange)
+      document.removeEventListener('webkitfullscreenchange', handleFsChange)
+    }
   }, [])
 
   // Keyboard shortcuts
@@ -322,8 +326,9 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
           toggleMute()
           break
         case 'Escape':
-          if (document.fullscreenElement) {
-            document.exitFullscreen()
+          if (document.fullscreenElement || document.webkitFullscreenElement) {
+            if (document.exitFullscreen) document.exitFullscreen()
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen()
           } else {
             onClose?.()
           }
@@ -335,10 +340,20 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
   }, [currentTime, volume, playing])
 
   const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen()
-    } else {
-      containerRef.current?.requestFullscreen()
+    const el = containerRef.current
+    if (!el) return
+    try {
+      if (document.fullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen()
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen()
+      } else {
+        if (el.requestFullscreen) el.requestFullscreen()
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+        else if (el.mozRequestFullScreen) el.mozRequestFullScreen()
+        else if (el.msRequestFullscreen) el.msRequestFullscreen()
+      }
+    } catch (e) {
+      console.error('[Player] fullscreen error:', e?.message)
     }
   }
 
@@ -794,9 +809,6 @@ export default function VideoPlayer({ stream, title, onClose, meta }) {
             </div>
           )}
 
-          <button onClick={toggleFullscreen} className="btn-ghost p-2" title="Pantalla completa">
-            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-          </button>
           <button onClick={onClose} className="btn-ghost p-2" title="Cerrar">
             <X size={24} />
           </button>
