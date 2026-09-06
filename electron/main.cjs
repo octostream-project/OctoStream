@@ -1,5 +1,32 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, shell, session } = require('electron')
 const path = require('path')
+
+// Inject custom headers (User-Agent, Referer, Origin) for HLS stream requests.
+// TDT Spain streams from RTVE/Atresplayer/Mediaset require these headers.
+app.whenReady().then(() => {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const url = details.url
+    // Only modify media/stream requests to known TDT domains
+    if (/rtve\.|atresplayer\.|mediaset\.|tdtchannels\.|tdtspain\.|doubleclick\.net/i.test(url)) {
+      if (!details.requestHeaders['User-Agent']) {
+        details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+      }
+      if (/rtve\./i.test(url)) {
+        details.requestHeaders['Origin'] = 'https://www.rtve.es'
+        details.requestHeaders['Referer'] = 'https://www.rtve.es/'
+      } else if (/atresplayer\./i.test(url)) {
+        details.requestHeaders['Origin'] = 'https://www.atresplayer.com'
+        details.requestHeaders['Referer'] = 'https://www.atresplayer.com/'
+      } else if (/mediaset\./i.test(url)) {
+        details.requestHeaders['Origin'] = 'https://www.mediasetinfinity.es'
+        details.requestHeaders['Referer'] = 'https://www.mediasetinfinity.es/'
+      } else if (/tdtchannels\./i.test(url)) {
+        details.requestHeaders['Referer'] = 'https://www.tdtchannels.com/'
+      }
+    }
+    callback({ requestHeaders: details.requestHeaders })
+  })
+})
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -14,6 +41,8 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
+      webSecurity: false,
+      allowRunningInsecureContent: true,
     },
   })
 
