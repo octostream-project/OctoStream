@@ -78,6 +78,17 @@ const DEFAULT_BUNDLED_PLUGINS = [
       types: ['channel'],
     },
   },
+  {
+    bundled: true,
+    manifest: {
+      id: 'palantir',
+      name: 'Palantir 3',
+      version: '1.0.0',
+      description: 'Catálogo Palantir 3: películas, series, anime y documentales (requiere debrid).',
+      bundled: true,
+      types: ['movie', 'series', 'anime'],
+    },
+  },
 ]
 
 const INCLUDED_PLUGIN_IDS = new Set(DEFAULT_BUNDLED_PLUGINS.map(cfg => cfg.manifest.id))

@@ -915,12 +915,10 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: la de esta semana y las siguientes — las pasadas ya
-  // no interesan (resultados) y ensucian la navegación con el mando.
+  // Jornadas visibles: todas las que tienen partidos — las pasadas muestran
+  // sus resultados y el scroll/foco inicial cae en la jornada en curso.
   const visibleJornadas = activeLeague?.marca
-    ? activeLeague.jornadas.filter(j =>
-        j.items.length > 0 &&
-        (activeLeague.currentRound == null || j.round >= activeLeague.currentRound))
+    ? activeLeague.jornadas.filter(j => j.items.length > 0)
     : []
   // Partidos visibles en ligas sin calendario: directos, recién finalizados
   // y próximos — los jugados hace >3h ya no se muestran.
@@ -1058,7 +1056,11 @@ export default function Sports() {
                   </div>
                 </div>
               )}
-              {visibleJornadas.map((j, ji) => (
+              {visibleJornadas.map((j, ji) => {
+                // Foco inicial en la primera tarjeta de la jornada en curso
+                // (o la primera visible si no hay currentRound).
+                const isCurrent = j.round === (activeLeague.currentRound ?? visibleJornadas[0]?.round)
+                return (
                 <div key={j.round} id={`sports-jrnd-${j.round}`} className="space-y-3 scroll-mt-4">
                   <h3 className="text-sm font-medium text-dark-300">{j.name || `Jornada ${j.round}`}</h3>
                   <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -1071,12 +1073,13 @@ export default function Sports() {
                         liveLabel={t('sports.live')}
                         finishedLabel={t('sports.finished')}
                         loadingLabel={t('sports.loading')}
-                        initial={activeLeague.liveItems.length === 0 && ji === 0 && i === 0}
+                        initial={activeLeague.liveItems.length === 0 && isCurrent && i === 0}
                       />
                     ))}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </>
           ) : (
             <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

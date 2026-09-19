@@ -8,6 +8,8 @@ import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
+import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
+import { isRealdebridEnabled, unlockLink as rdUnlockLink } from '../plugins/bundled/realdebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative } from '../utils/platform.js'
@@ -112,6 +114,32 @@ function getLangPriority() {
   } catch {}
   langPriorityCache = ['ESP', 'LAT', 'DUAL', 'SUB', 'ENG']
   return langPriorityCache
+}
+
+// Unlock a file-host link (1fichier, etc.) through the configured debrid
+// service. Returns a direct URL or null.
+async function unlockDebrid(url) {
+  const pickBest = (res) => {
+    if (!res?.link) return null
+    const alts = res.streams || res.alternatives || []
+    const sorted = [...alts].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
+    return sorted[0]?.link || res.link
+  }
+  if (isAlldebridEnabled()) {
+    try {
+      const r = await adUnlockLink(url)
+      const best = pickBest(r)
+      if (best) return best
+    } catch (e) { console.warn('[Details] AllDebrid unlock failed:', e?.message) }
+  }
+  if (isRealdebridEnabled()) {
+    try {
+      const r = await rdUnlockLink(url)
+      const best = pickBest(r)
+      if (best) return best
+    } catch (e) { console.warn('[Details] RealDebrid unlock failed:', e?.message) }
+  }
+  return null
 }
 
 // Sort streams by language priority. Streams with no language go last.
@@ -496,6 +524,35 @@ export default function Details() {
   const handlePlay = async (stream, skipResume = false) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
+    // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
+    // browsing never burns debrid API calls.
+    if (stream.streamType === 'debrid') {
+      if (!isAlldebridEnabled() && !isRealdebridEnabled()) {
+        setEpisodeError('Este enlace requiere AllDebrid o RealDebrid. Configúralo en Ajustes → Debrid.')
+        return
+      }
+      setResolvingStream(true)
+      try {
+        const direct = await unlockDebrid(stream.url)
+        if (!direct) {
+          console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
+          setEpisodeError('No se pudo desbloquear el enlace (debrid). Prueba otro servidor.')
+          setResolvingStream(false)
+          return
+        }
+        stream = {
+          ...stream,
+          url: direct,
+          streamType: /\.m3u8(\?|$)/i.test(direct) ? 'hls' : 'mp4',
+        }
+      } catch (e) {
+        console.warn('[Details] Debrid unlock error:', e?.message)
+        setEpisodeError('No se pudo desbloquear el enlace (debrid). Prueba otro servidor.')
+        setResolvingStream(false)
+        return
+      }
+      setResolvingStream(false)
+    }
     // If the stream has an originalUrl (embed page), always resolve fresh
     // because tokens from CDNs like fastream expire quickly
     const isDirectUrl = /\.(m3u8|mp4|mkv)(\?|$)/i.test(stream.url) || /videoplayback/.test(stream.url)

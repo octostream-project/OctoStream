@@ -1,0 +1,15 @@
+{
+  "name": "@octostream/palantir",
+  "version": "1.0.0",
+  "description": "Palantir 3 catalog bridge: moria SQLite database download/update, native queries and link decryption",
+  "main": "src/index.js",
+  "types": "src/definitions.ts",
+  "dependencies": {
+    "@capacitor/core": "^6.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

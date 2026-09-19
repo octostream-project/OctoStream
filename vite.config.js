@@ -16,6 +16,7 @@ export default defineConfig({
       '@octostream/torrent-engine': path.resolve(projectRoot, 'capacitor-plugins/torrent-engine/dist/esm/index.js'),
       '@optopus/sync-server': path.resolve(projectRoot, 'capacitor-plugins/sync-server/src/index.js'),
       '@optopus/app-updater': path.resolve(projectRoot, 'capacitor-plugins/app-updater/src/index.js'),
+      '@octostream/palantir': path.resolve(projectRoot, 'capacitor-plugins/palantir/src/index.js'),
     },
   },
   server: {
