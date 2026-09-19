@@ -33,6 +33,21 @@ const WOMEN_RE = /femenin|feminine|women|ladies/i
 const isWomen = (item) => WOMEN_RE.test(item._home?.name || '') ||
   WOMEN_RE.test(item._away?.name || '') || WOMEN_RE.test(item._league?.name || '')
 
+// DLive solo conoce la hora ("21:00") y le asigna la fecha de HOY aunque el
+// partido sea mañana: la comparación por timestamp absoluto separaría un
+// duplicado real. Por eso, cuando uno de los lados es DLive, se acepta
+// también la misma hora circular (mod 24h). Entre fuentes con fecha real
+// (FCTV, Marca) >6h sigue siendo partido distinto.
+function closeInTime(a, b) {
+  if (!a._matchDate || !b._matchDate) return true
+  const H = 3600 * 1000, DAY = 24 * H
+  const diff = Math.abs(a._matchDate - b._matchDate)
+  if (diff <= 6 * H) return true
+  if (a.pluginId !== DLIVE_PLUGIN && b.pluginId !== DLIVE_PLUGIN) return false
+  const circ = Math.min(diff % DAY, DAY - (diff % DAY))
+  return circ <= 3 * H
+}
+
 function sameMatch(a, b) {
   const ah = a._home?.name, aa = a._away?.name, bh = b._home?.name, ba = b._away?.name
   if (!ah || !aa || !bh || !ba) return false
@@ -42,8 +57,7 @@ function sameMatch(a, b) {
   // "Real Madrid vs Barcelona" y "Real Madrid Femenino vs Barcelona Femení"
   // casan por includes pero son partidos distintos.
   if (isWomen(a) !== isWomen(b)) return false
-  if (a._matchDate && b._matchDate && Math.abs(a._matchDate - b._matchDate) > 6 * 3600 * 1000) return false
-  return true
+  return closeInTime(a, b)
 }
 
 // Quita duplicados del mismo partido dentro de la lista final (pueden venir
@@ -748,9 +762,7 @@ export default function Sports() {
         name: j.name || null,
         items: j.matches.map((m, i) => {
           const item = normalizeMarcaMatch(m, j.round, lg.slug, i)
-          let f = fctvGroup?.items.find(fi =>
-            teamsMatch(fi._home?.name, item._home?.name) &&
-            teamsMatch(fi._away?.name, item._away?.name))
+          let f = fctvGroup?.items.find(fi => sameMatch(fi, item))
           let d = null
           // El match puede venir de un item DLive colgado en el grupo FCTV.
           if (f?.pluginId === DLIVE_PLUGIN) { d = f; f = null }
@@ -769,8 +781,7 @@ export default function Sports() {
           // evento DLive suelto (cualquier grupo) que case por equipos.
           if (!d) {
             d = items.find(di => di.pluginId === DLIVE_PLUGIN && !claimedFctv.has(di.id) &&
-              teamsMatch(di._home?.name, item._home?.name) &&
-              teamsMatch(di._away?.name, item._away?.name))
+              sameMatch(di, item))
           }
           if (d) {
             claimedFctv.add(d.id)
