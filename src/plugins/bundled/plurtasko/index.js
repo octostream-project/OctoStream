@@ -189,14 +189,15 @@ async function debridUnlock(url) {
   return null
 }
 
-// Try to resolve a magnet via debrid services. Returns array of direct links or null.
-async function debridResolveMagnet(url) {
+// Try to resolve a magnet via debrid services.
+// Returns { links, via } or null.
+async function debridResolveMagnet(url, ep = {}) {
   if (isAlldebridEnabled()) {
     try {
-      const links = await resolveMagnet(url, 30000)
+      const links = await resolveMagnet(url, 30000, ep)
       if (links?.length) {
         console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
-        return links
+        return { links, via: 'AllDebrid' }
       }
     } catch (e) {
       logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
@@ -204,10 +205,10 @@ async function debridResolveMagnet(url) {
   }
   if (isRealdebridEnabled()) {
     try {
-      const links = await rdResolveMagnet(url, 30000)
+      const links = await rdResolveMagnet(url, 30000, ep)
       if (links?.length) {
         console.log(`[RealDebrid] Resolved magnet: ${links.length} links`)
-        return links
+        return { links, via: 'RealDebrid' }
       }
     } catch (e) {
       logWarn(`[RealDebrid] Failed to resolve magnet:`, String(e?.message || e))
@@ -508,7 +509,7 @@ function dedupeTorrentStreams(streams) {
   return out
 }
 
-async function resolveStreams(streams, onBatch) {
+async function resolveStreams(streams, onBatch, context = {}) {
   if (!streams || !streams.length) return []
 
   // Filter out blocked servers that crash the app
@@ -574,30 +575,40 @@ async function resolveStreams(streams, onBatch) {
     // en serie multiplicaría la espera por cada resultado.
     if (s.streamType === 'torrent' && debridEnabled) {
       debridTasks.push((async () => {
+        let magnetUrl = null
         try {
-          let magnetUrl = /magnet:/.test(s.url) ? s.url : null
+          const { torrentUrlToMagnet, withDefaultTrackers } = await import('../../../utils/torrentFile.js')
+          magnetUrl = /magnet:/.test(s.url) ? s.url : null
           if (!magnetUrl && /^https?:\/\//i.test(s.url)) {
-            const { torrentUrlToMagnet } = await import('../../../utils/torrentFile.js')
             magnetUrl = await torrentUrlToMagnet(s.url)
           }
+          if (magnetUrl) magnetUrl = withDefaultTrackers(magnetUrl)
           if (!magnetUrl) return [{ ...s, quality: urlQuality }]
-          const links = await debridResolveMagnet(magnetUrl)
-          if (links && links.length) {
-            return links.map(link => ({
+          // Season/episode del contexto de la petición — el stream también
+          // puede traerlos (filas por episodio de dontorrent).
+          const ep = {
+            season: s.season ?? context.season,
+            episode: s.episode ?? context.episode,
+          }
+          const resolved = await debridResolveMagnet(magnetUrl, ep)
+          if (resolved?.links?.length) {
+            return resolved.links.map(link => ({
               ...s,
               url: link,
               streamType: /\.m3u8/i.test(link) || /m3u8/i.test(link) ? 'hls' : 'mp4',
               quality: urlQuality,
               server: s.server + ' (Debrid)',
               originalUrl: s.url,
+              viaDebrid: resolved.via,
             }))
           }
         } catch (e) {
           logWarn(`[Debrid] Failed to resolve magnet: ${hostOf(s.url)}`, String(e?.message || e))
         }
-        // Debrid no lo tenía cacheado → cae a P2P; se marca para que el
-        // usuario distinga el fallback del stream "(Debrid)".
-        return [{ ...s, quality: urlQuality, server: s.server + ' (P2P)' }]
+        // Debrid no lo tenía cacheado → cae a P2P con el magnet ya enriquecido
+        // con trackers públicos; se marca para que el usuario distinga el
+        // fallback del stream "(Debrid)".
+        return [{ ...s, url: magnetUrl || s.url, quality: urlQuality, server: s.server + ' (P2P)' }]
       })())
       continue
     }
@@ -896,7 +907,7 @@ export const plurtaskoFactory = (config) => {
             streamId = providerEpisode.id
           }
           const rawStreams = await channel.getStreams({ type, id: streamId, season, episode, debridEnabled })
-          return await resolveStreams(rawStreams, onBatch)
+          return await resolveStreams(rawStreams, onBatch, { season, episode })
         }
 
         // Caso 2: ID externo (ej: TMDB) - buscar por nombre en todos los canales
@@ -1220,7 +1231,7 @@ export const plurtaskoFactory = (config) => {
               allStreams = dedupeTorrentStreams(allStreams)
               onBatch(sortHdfull(allStreams))
             } : null
-            const resolved = await resolveStreams(rawStreams, channelOnBatch)
+            const resolved = await resolveStreams(rawStreams, channelOnBatch, { season, episode })
             if (resolved && resolved.length > 0) {
               allStreams = allStreams.filter(s => s._channelId !== ch.id)
               allStreams = allStreams.concat(resolved.map(tagStream))

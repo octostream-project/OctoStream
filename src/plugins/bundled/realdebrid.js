@@ -8,6 +8,7 @@
 // It does NOT support: streamwish, filemoon, vidhide, fastream, hanerix.
 
 import { getItemSync, setItemSync } from '../../utils/storage.js'
+import { pickTorrentEntries } from '../../utils/torrentPick.js'
 
 const API_BASE = 'https://api.real-debrid.com/rest/1.0'
 
@@ -280,10 +281,17 @@ export async function getTorrentInfo(torrentId) {
   try {
     const data = await apiFetch(`/torrents/info/${torrentId}`)
     if (!data) return { status: 'error' }
+    const files = (data.files || []).map(f => ({
+      id: f.id,
+      name: f.path || '',
+      size: f.bytes || 0,
+      selected: f.selected === 1,
+    }))
     if (data.status === 'downloaded') {
       return {
         status: 'ready',
         links: data.links || [],
+        files,
         filename: data.filename || '',
         progress: data.progress || 0,
         rawStatus: data.status,
@@ -292,6 +300,7 @@ export async function getTorrentInfo(torrentId) {
     return {
       status: 'processing',
       progress: data.progress || 0,
+      files,
       rawStatus: data.status,
     }
   } catch (e) {
@@ -322,24 +331,25 @@ export async function deleteTorrent(torrentId) {
   }
 }
 
-// Resolve magnet to direct streaming links (polls every 3s, up to 60s)
-export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
+// Resolve magnet to direct streaming links (polls every 3s, up to 60s).
+// opts.season/episode: en packs de temporada se selecciona solo el archivo del
+// episodio pedido (fileIdx estilo Peerflix) en vez de bajar el torrent entero.
+export async function resolveMagnet(magnetUrl, timeoutMs = 60000, opts = {}) {
   const torrentId = await addMagnet(magnetUrl)
   if (!torrentId) return null
 
-  // Select all files — pero si el torrent aún está en magnet_conversion la
-  // llamada falla en silencio y el torrent queda en waiting_files_selection
-  // para siempre: hay que reintentarla desde el bucle de polling.
-  await selectFiles(torrentId)
-  let selectRetries = 1
-
+  let selectRetries = 0
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const info = await getTorrentInfo(torrentId)
     if (info.status === 'ready' && info.links?.length) {
-      // Unrestrict each link
+      // links[] se corresponde con los files marcados selected, en orden.
+      const selected = (info.files || []).filter(f => f.selected)
+      const picked = pickTorrentEntries(selected, opts) || []
+      const wantedIdx = new Set(picked.map(f => selected.indexOf(f)))
+      const links = info.links.filter((_, i) => !wantedIdx.size || wantedIdx.has(i))
       const directLinks = []
-      for (const link of info.links) {
+      for (const link of links) {
         const unrestricted = await unlockLink(link)
         if (unrestricted?.link) directLinks.push(unrestricted.link)
       }
@@ -352,7 +362,9 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
     }
     if (info.rawStatus === 'waiting_files_selection' && selectRetries < 6) {
       selectRetries++
-      await selectFiles(torrentId)
+      const picked = pickTorrentEntries(info.files || [], opts)
+      const ids = picked?.length ? picked.map(f => f.id).join(',') : 'all'
+      await selectFiles(torrentId, ids)
     }
     await new Promise(r => setTimeout(r, 3000))
   }

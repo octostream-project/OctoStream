@@ -13,6 +13,7 @@
 //   5. For torrents/magnets, we upload the magnet and poll for status
 
 import { getItemSync, removeItemSync } from '../../utils/storage.js'
+import { pickTorrentEntries } from '../../utils/torrentPick.js'
 
 const API_BASE = 'https://api.alldebrid.com/v4'
 const AGENT = 'octostream_stream'
@@ -174,7 +175,11 @@ export async function getMagnetStatus(magnetId) {
     if (!data || !data.magnets || !data.magnets.length) return { status: 'error' }
     const mag = data.magnets[0]
     if (mag.status === 'Ready') {
-      const links = (mag.links || []).map(l => l.link)
+      const links = (mag.links || []).map(l => ({
+        link: l.link,
+        name: l.filename || '',
+        size: l.size || 0,
+      }))
       return {
         status: 'ready',
         links,
@@ -200,7 +205,9 @@ export async function deleteMagnet(magnetId) {
 
 // Upload magnet and wait for it to be ready (polls every 3s, up to 60s)
 // Returns array of direct streaming links or null.
-export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
+// opts.season/episode: en packs de temporada desbloquea solo el archivo del
+// episodio pedido (fileIdx estilo Peerflix) en vez de todos los links.
+export async function resolveMagnet(magnetUrl, timeoutMs = 60000, opts = {}) {
   const magnetId = await uploadMagnet(magnetUrl)
   if (!magnetId) return null
 
@@ -210,10 +217,11 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
     if (status.status === 'ready' && status.links?.length) {
       // Los links de /magnet/status son restringidos: hay que pasarlos por
       // /link/unlock para obtener la URL final reproducible.
+      const picked = pickTorrentEntries(status.links, opts) || status.links
       const direct = []
-      for (const l of status.links) {
-        const unlocked = await unlockLink(l)
-        direct.push(unlocked?.link || l)
+      for (const l of picked) {
+        const unlocked = await unlockLink(l.link)
+        direct.push(unlocked?.link || l.link)
       }
       deleteMagnet(magnetId).catch(() => {})
       return direct.length ? direct : null
