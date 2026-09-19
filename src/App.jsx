@@ -9,7 +9,7 @@ import Screensaver from './components/Screensaver.jsx'
 import RemotePlayReceiver from './components/RemotePlayReceiver.jsx'
 import UpdateChecker from './components/UpdateChecker.jsx'
 import { useStore } from './store/useStore.js'
-import { isAndroidNative, isWebOS } from './utils/platform.js'
+import { isAndroidNative } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
@@ -330,45 +330,6 @@ export default function App() {
       listener?.remove()
       clearTimeout(exitPromptTimerRef.current)
     }
-  }, [navigate])
-
-  // webOS (LG): la tecla Atrás del mando llega como keyCode 461 (461 = webOS
-  // back, 10009 = Tizen por compatibilidad). Replica la misma lógica que el
-  // backButton de Android: doble pulsación para salir (window.close), si no,
-  // Back a la página y navigate(-1) si nada lo consume.
-  useEffect(() => {
-    if (!isWebOS()) return
-    const onKey = (e) => {
-      if (e.keyCode !== 461 && e.keyCode !== 10009) return
-      e.preventDefault()
-      e.stopPropagation()
-      if (document.querySelector('[data-player-overlay]') || isPlayerOpen()) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Back', bubbles: true }))
-        return
-      }
-      const now = Date.now()
-      if (exitBackAtRef.current && now - exitBackAtRef.current < 2500) {
-        exitBackAtRef.current = 0
-        window.close()
-        return
-      }
-      exitBackAtRef.current = now
-      setExitPrompt(true)
-      clearTimeout(exitPromptTimerRef.current)
-      exitPromptTimerRef.current = setTimeout(() => setExitPrompt(false), 2500)
-
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Back', bubbles: true }))
-      setTimeout(() => {
-        const consumedEl = document.querySelector('[data-back-consumed="true"]')
-        consumedEl?.removeAttribute('data-back-consumed')
-        if (consumedEl) return
-        if (locationPathRef.current !== '/' && locationKeyRef.current !== 'default') {
-          navigate(-1)
-        }
-      }, 0)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
   }, [navigate])
 
   // Refocus on page change (TV navigation)

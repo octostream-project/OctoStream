@@ -17,12 +17,6 @@ export function isAndroidTv() {
   return isAndroidNative() && /\bOctoTV\b/.test(navigator.userAgent || '')
 }
 
-// LG webOS TV: app web empaquetada (.ipk). Sin plugins nativos — usa los
-// fallbacks web (fetch, hls.js, <video>), igual que el build de navegador.
-export function isWebOS() {
-  return /web0S|webOS\.TV|Web0S/i.test(navigator.userAgent || '')
-}
-
 /**
  * Whether Widevine DRM is available as a production client on this platform.
  * - Android: yes (Play Services provides a production-certified CDM)
