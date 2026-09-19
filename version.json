@@ -1,8 +1,8 @@
 {
-  "versionCode": 17,
-  "versionName": "1.7",
+  "versionCode": 18,
+  "versionName": "1.8",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.7.apk",
-  "sha256": "5e08726a44f1af3c027fcdf16840fc43a5a0453e7c76a745536bcfc1c9171eec",
-  "notes": "Compat WebView viejo: escala de UI ajustable (Settings>Miscelanea) + polyfills Chrome 66 + CSS legacy completo"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.8.apk",
+  "sha256": "f19522f5319b780c7d9a4aa1f117f1f0db14ab22d186fe81d46853765654a0b7",
+  "notes": "UI mas grande en TVs viejas (auto escala 115-165%)"
 }

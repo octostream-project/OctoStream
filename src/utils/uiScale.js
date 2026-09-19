@@ -14,15 +14,15 @@ export function getUiScale() {
   return 0 // auto
 }
 
-// Auto: en TV/boxes (sin pantalla táctil) con viewport CSS grande la UI queda
-// pequeña — escalar proporcional al ancho respecto a ~1280px de referencia.
+// Auto: en TV/boxes (sin pantalla táctil) el viewport CSS suele ser amplio y
+// la UI queda pequeña — escalar proporcional al ancho respecto a ~1150px de
+// referencia, con un suelo del 115% porque en TV siempre sienta bien algo más.
 function autoScale() {
   if (!isAndroidNative()) return 100
   const looksLikeTv = isAndroidTv() || (navigator.maxTouchPoints === 0 && screen.width >= 960)
   if (!looksLikeTv) return 100
   const vw = window.innerWidth || screen.width
-  if (vw <= 1400) return 100
-  return Math.min(160, Math.round((vw / 1280) * 100))
+  return Math.min(165, Math.max(115, Math.round((vw / 1150) * 100)))
 }
 
 export function applyUiScale() {
