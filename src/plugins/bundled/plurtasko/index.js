@@ -401,8 +401,8 @@ const DEBRID_UNLOCKABLE = [
   'streamtape.com', 'streamtape.to',
   // Upstream (RealDebrid)
   'upstream.to',
-  // Doodstream (RealDebrid + AllDebrid)
-  'doodstream', 'dood.so', 'dood.pm', 'dood.ws', 'dood.to', 'dood.li', 'dood.la',
+  // Doodstream NO está: ni RD ni AD lo soportan (verificado contra
+  // /hosts de alldebrid) — va por el resolver propio (port AniWorld).
   // Mega (AllDebrid + RealDebrid)
   'mega.nz', 'mega.',
   // 1fichier (AllDebrid + RealDebrid)
