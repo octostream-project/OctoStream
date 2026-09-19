@@ -1,14 +1,67 @@
 // Normalización y comparación de nombres de equipo/jugador entre fuentes
 // (Marca, FCTV, Sofascore): minúsculas, sin tildes ni siglas típicas.
+//
+// Equivalencias léxicas: las fuentes llaman distinto al mismo club
+// ("Athletic Club" en DLive = "Athletic Bilbao" en FCTV). 'real' NO se
+// recorta: "Real Madrid" vs "Atlético Madrid" colapsaría por includes.
+// 'club' tampoco: "Racing Club" ≠ "Racing Santander".
 export const normTeam = (s) => String(s || '')
   .toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .replace(/\b(fc|cf|afc|ud|cd|sc|ac|as|rc|rcd|sv|fk|sk|ssc|ogc|vfl|vfb|tsv|tsg|fsv|bc|scb|rcc|rfc|krc|kvc|kfc|sad|ad|ca|cp|de|the|1)\b\.?/g, ' ')
+  .replace(/\b(fc|cf|afc|ud|cd|sc|ac|as|rc|rcd|sv|fk|sk|ssc|ogc|vfl|vfb|tsv|tsg|fsv|bc|scb|rcc|rfc|krc|kvc|kfc|sad|ad|ca|cp|de|the|deportivo|1)\b\.?/g, ' ')
+  .replace(/\butd\b/g, 'united')
+  .replace(/\bdinamo\b/g, 'dynamo')
   .replace(/[^a-z0-9]+/g, ' ')
   .trim()
 
+// Alias: nombres normalizados que designan al mismo club aunque no se
+// contengan ("athletic club" no contiene "athletic bilbao"). Se aplica
+// DESPUÉS de normTeam — añadir aquí divergencias que aparezcan en vivo.
+const TEAM_ALIASES = {
+  'athletic club': 'athletic bilbao',
+  'man united': 'manchester united',
+  'spurs': 'tottenham',
+  'wolves': 'wolverhampton',
+  'psg': 'psg',
+  'paris saint germain': 'psg',
+  'paris sg': 'psg',
+  'inter milan': 'inter',
+  'internazionale': 'inter',
+  'bayer 04 leverkusen': 'leverkusen',
+  'borussia monchengladbach': 'gladbach',
+  'rb leipzig': 'leipzig',
+  'red bull leipzig': 'leipzig',
+  'rb salzburg': 'salzburg',
+  'red bull salzburg': 'salzburg',
+  'red bull bragantino': 'bragantino',
+  'sporting lisbon': 'sporting',
+  'olympiakos': 'olympiacos',
+  'schalke 04': 'schalke',
+  'mainz 05': 'mainz',
+  'koln': 'cologne',
+  'fc cologne': 'cologne',
+  'nottm forest': 'nottingham forest',
+  'west brom': 'west bromwich',
+  'qpr': 'queens park rangers',
+  'olympique lyonnais': 'lyon',
+  'ol': 'lyon',
+  'olympique marseille': 'marseille',
+  'om': 'marseille',
+  'stade rennais': 'rennes',
+  'stade brestois': 'brest',
+  'stade reims': 'reims',
+  'mhsc': 'montpellier',
+  'racing club': 'racing avellaneda',
+  'real madrid cf': 'real madrid',
+}
+
+export const canonTeam = (s) => {
+  const n = normTeam(s)
+  return TEAM_ALIASES[n] || n
+}
+
 export const teamsMatch = (a, b) => {
-  const x = normTeam(a), y = normTeam(b)
+  const x = canonTeam(a), y = canonTeam(b)
   return !!x && !!y && (x === y || x.includes(y) || y.includes(x))
 }
 
