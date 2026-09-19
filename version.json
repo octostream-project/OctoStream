@@ -1,8 +1,8 @@
 {
-  "versionCode": 114,
-  "versionName": "1.14",
+  "versionCode": 115,
+  "versionName": "1.15",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.14.apk",
-  "sha256": "32bf3241daaae425024dca761c27ff7a530ef5df9cd45d34546bb4586f0a36c9",
-  "notes": "Detalle de liga: solo la jornada actual y las siguientes. PiP sin pausas (audio focus). Fix 'sin enlaces' FCTV"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.15.apk",
+  "sha256": "81a44d001bbf2354656c5145f79b71b23ff331b7169d269d4462e303a8d53ffc",
+  "notes": "Anti-popunder en embeds: los anuncios de DLive ya no pueden secuestrar la reproducción. Liga: solo jornada actual + siguientes"
 }
