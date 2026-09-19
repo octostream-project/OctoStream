@@ -35,8 +35,17 @@ export default function UpdateChecker() {
     if (!perm.allowed) { setPhase('needPerm'); return }
     // Si falta el permiso, el plugin resuelve {needsPermission:true} en vez de
     // lanzar el instalador — sin esto la fase quedaba en "downloading" pillada.
-    const r = await AppUpdater.installApk({ path: apkPath.current })
-    if (r?.needsPermission) setPhase('needPerm')
+    // La llamada queda pendiente hasta que la sesión de instalación termina:
+    // {installed:true}, {aborted:true} (usuario canceló) o reject (error real).
+    try {
+      const r = await AppUpdater.installApk({ path: apkPath.current })
+      if (r?.needsPermission) setPhase('needPerm')
+      else if (r?.aborted) setPhase('prompt')
+      else if (r?.installed) setUpdate(null)
+    } catch (e) {
+      setError(String(e?.message || e))
+      setPhase('error')
+    }
   }
 
   const download = async () => {
