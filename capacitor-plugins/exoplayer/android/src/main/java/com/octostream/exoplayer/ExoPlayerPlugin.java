@@ -2301,7 +2301,10 @@ public class ExoPlayerPlugin extends Plugin {
         "advane.net", "a-ads.com", "ad-media.io", "adsco.re",
         "trafficstars.com", "ero-advertising.com", "adxpansion.com",
         "trafficfactory.biz", "cdn4ads.com", "adcolony.com",
-        "inmobi.com", "moloco.com", "applovin.com", "unityads.unity3d.com"
+        "inmobi.com", "moloco.com", "applovin.com", "unityads.unity3d.com",
+        "profitableratecpmnetwork.com", "xadsmart.com", "adexchangerapid.com",
+        "protrafficinspector.com", "usrpubtrk.com", "luugy.com",
+        "chatango.com", "st.chatango.com"
     ));
 
     // Patrones de URL típicos de anuncios/popunders independientemente del host.
