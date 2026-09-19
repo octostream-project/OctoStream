@@ -87,9 +87,8 @@ function useIdleScreensaver() {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [warpBlocking, setWarpBlocking] = useState(false) // blocks UI while WARP connects
-  const [exitPrompt, setExitPrompt] = useState(false)
+  const [exitPromptAt, setExitPromptAt] = useState(0)
   const exitBackAtRef = useRef(0)
-  const exitPromptTimerRef = useRef(null)
   const initPlugins = useStore(s => s.initPlugins)
   const location = useLocation()
   const navigate = useNavigate()
@@ -294,9 +293,10 @@ export default function App() {
           return
         }
         exitBackAtRef.current = now
-        setExitPrompt(true)
-        clearTimeout(exitPromptTimerRef.current)
-        exitPromptTimerRef.current = setTimeout(() => setExitPrompt(false), 2500)
+        // Timestamp: cada pulsación re-dispara el efecto del toast y reinicia
+        // su temporizador (antes el timer vivía en este efecto y moría al
+        // re-ejecutarse tras navigate(-1) → el aviso no desaparecía jamás).
+        setExitPromptAt(now)
 
         // Las páginas internas (modal de actor, temporada y episodio) reciben
         // primero el Back y lo consumen sin cambiar la ruta.
@@ -328,9 +328,17 @@ export default function App() {
     return () => {
       cancelled = true
       listener?.remove()
-      clearTimeout(exitPromptTimerRef.current)
     }
   }, [navigate])
+
+  // El toast "pulsa atrás otra vez" se oculta a los 2.5s. Vive en un efecto
+  // propio porque el listener de arriba se re-ejecuta en cada navegación
+  // (navigate cambia de identidad) y su cleanup mataba el temporizador.
+  useEffect(() => {
+    if (!exitPromptAt) return
+    const t = setTimeout(() => setExitPromptAt(0), 2500)
+    return () => clearTimeout(t)
+  }, [exitPromptAt])
 
   // Refocus on page change (TV navigation)
   useEffect(() => {
@@ -376,7 +384,7 @@ export default function App() {
         )}
 
         {/* Doble Back para salir: pill estilo toast de Android */}
-        {exitPrompt && (
+        {exitPromptAt > 0 && (
           <div className="fixed inset-x-0 bottom-8 z-[110] flex justify-center pointer-events-none" data-exit-toast>
             <div className="bg-dark-800/95 border border-white/10 text-white text-sm px-5 py-2.5 rounded-full shadow-lg flex items-center gap-2">
               <img src="/logo-symbol.png" alt="" className="w-4 h-5 object-contain" draggable={false} />
