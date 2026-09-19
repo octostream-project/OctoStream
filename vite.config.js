@@ -15,6 +15,7 @@ export default defineConfig({
       '@octostream/youtube': path.resolve(projectRoot, 'capacitor-plugins/youtube/dist/esm/index.js'),
       '@octostream/torrent-engine': path.resolve(projectRoot, 'capacitor-plugins/torrent-engine/dist/esm/index.js'),
       '@optopus/sync-server': path.resolve(projectRoot, 'capacitor-plugins/sync-server/src/index.js'),
+      '@optopus/app-updater': path.resolve(projectRoot, 'capacitor-plugins/app-updater/src/index.js'),
     },
   },
   server: {

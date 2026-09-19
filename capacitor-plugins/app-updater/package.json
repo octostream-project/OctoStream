@@ -1,0 +1,15 @@
+{
+  "name": "@optopus/app-updater",
+  "version": "1.0.0",
+  "description": "In-app APK updater for OctoStream (checks a remote manifest, downloads and installs)",
+  "main": "src/index.js",
+  "types": "src/definitions.ts",
+  "dependencies": {
+    "@capacitor/core": "^6.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

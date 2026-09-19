@@ -29,6 +29,7 @@
     "@octostream/exo-player": "file:capacitor-plugins/exoplayer",
     "@octostream/torrent-engine": "file:capacitor-plugins/torrent-engine",
     "@octostream/youtube": "file:capacitor-plugins/youtube",
+    "@optopus/app-updater": "file:capacitor-plugins/app-updater",
     "@optopus/sync-server": "file:capacitor-plugins/sync-server",
     "hls.js": "^1.7.3",
     "lucide-react": "^0.400.0",
