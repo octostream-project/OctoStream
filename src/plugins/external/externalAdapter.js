@@ -1,6 +1,8 @@
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
-import { logError, logWarn } from '../../utils/logger.js'
+import { logWarn } from '../../utils/logger.js'
 import { sanitizeUrl } from '../../utils/sanitizeUrl.js'
+import { validateExternalPluginConfig } from '../schemas.js'
+import { replaceParams, fetchJson } from '../utils.js'
 
 const STREMIO_TO_CONTENT_TYPE = {
   movie: CONTENT_TYPES.MOVIE,
@@ -14,64 +16,7 @@ function toContentType(stremioType) {
   return STREMIO_TO_CONTENT_TYPE[stremioType] || CONTENT_TYPES.OTHER
 }
 
-function replaceParams(url, params) {
-  let result = url
-  Object.entries(params).forEach(([key, value]) => {
-    result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), encodeURIComponent(String(value)))
-  })
-  return result
-}
-
-async function fetchJson(url) {
-  const safeUrl = sanitizeUrl(url)
-  if (!safeUrl) throw new Error('Unsafe or invalid URL')
-  const res = await fetch(safeUrl)
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${safeUrl}`)
-  return res.json()
-}
-
-function normalizeStremioMeta(item) {
-  if (!item) return null
-  const isSeries = item.type === 'series'
-  const id = item.id || `${item.type}:${item.imdb_id || item.ids?.imdb || item.name}`
-  return {
-    id,
-    type: toContentType(item.type),
-    name: item.name || item.title || '',
-    title: item.name || item.title || '',
-    poster: item.poster || item.logo || null,
-    backdrop: item.background || item.banner || null,
-    description: item.description || '',
-    year: item.year || item.releaseInfo ? parseInt(item.releaseInfo, 10) : null,
-    rating: item.imdbRating ? parseFloat(item.imdbRating) : null,
-    genres: item.genres || [],
-    releaseDate: item.releaseInfo,
-    // Stremio specific passthrough
-    stremioMeta: item,
-  }
-}
-
-function normalizeStremioStream(stream) {
-  if (!stream) return null
-  // Stremio stream objects can be { url, title, name } or nested { externalUrl, ytId, infoHash, fileIdx }
-  const url =
-    stream.url ||
-    stream.externalUrl ||
-    (stream.ytId ? `https://www.youtube.com/watch?v=${stream.ytId}` : '') ||
-    (stream.infoHash ? `magnet:?xt=urn:btih:${stream.infoHash}` : '')
-  if (!url) return null
-  return {
-    name: stream.title || stream.name || 'External',
-    url,
-    streamType: stream.url ? 'mp4' : 'embed',
-    quality: stream.tag || stream.quality || '',
-    title: stream.title || '',
-    behaviorHints: stream.behaviorHints || {},
-  }
-}
-
 function detectStremioManifest(manifest) {
-  // Stremio manifests are identified by the presence of a `resources` array.
   return Array.isArray(manifest.resources)
 }
 
@@ -84,8 +29,6 @@ function buildStremioEndpoints(manifest) {
   if (resourceNames.includes('meta')) endpoints.meta = '/meta/{type}/{id}.json'
   if (resourceNames.includes('stream')) endpoints.streams = '/stream/{type}/{id}.json'
 
-  // Stremio search uses catalog endpoints with a `search` extra.
-  // Pick the first available catalog as the default search target.
   const firstCatalog = (manifest.catalogs || [])[0]
   if (endpoints.catalog && firstCatalog) {
     endpoints.search = `/catalog/{type}/${firstCatalog.id}.json?search={query}`
@@ -100,6 +43,49 @@ function getCatalogTypes(manifest) {
     name: cat.name || cat.id || 'Catalog',
     type: toContentType(cat.type),
   }))
+}
+
+function normalizeStremioMeta(item) {
+  if (!item) return null
+  const id = item.id || `${item.type}:${item.imdb_id || item.ids?.imdb || item.name}`
+  return {
+    id,
+    type: toContentType(item.type),
+    name: item.name || item.title || '',
+    title: item.name || item.title || '',
+    poster: item.poster || item.logo || null,
+    backdrop: item.background || item.banner || null,
+    description: item.description || '',
+    year: (() => { const y = parseInt(item.releaseInfo || item.year, 10); return Number.isNaN(y) ? null : y })(),
+    rating: item.imdbRating ? parseFloat(item.imdbRating) : null,
+    genres: item.genres || [],
+    releaseDate: item.releaseInfo,
+    stremioMeta: item,
+  }
+}
+
+function normalizeStremioStream(stream) {
+  if (!stream) return null
+  const url =
+    stream.url ||
+    stream.externalUrl ||
+    (stream.ytId ? `https://www.youtube.com/watch?v=${stream.ytId}` : '') ||
+    (stream.infoHash ? `magnet:?xt=urn:btih:${stream.infoHash}` : '')
+  if (!url) return null
+  // .m3u8/.mpd deben ir como hls/dash — si se etiquetan mp4 el player intenta
+  // reproducción progresiva y falla.
+  const streamType = !stream.url ? 'embed'
+    : /\.m3u8($|[?#])/i.test(url) ? 'hls'
+    : /\.mpd($|[?#])/i.test(url) ? 'dash'
+    : 'mp4'
+  return {
+    name: stream.title || stream.name || 'External',
+    url,
+    streamType,
+    quality: stream.tag || stream.quality || '',
+    title: stream.title || '',
+    behaviorHints: stream.behaviorHints || {},
+  }
 }
 
 function deriveBaseUrl(config, isStremio) {
@@ -122,7 +108,14 @@ function deriveBaseUrl(config, isStremio) {
 }
 
 export function createExternalPlugin(config) {
-  const manifest = config.manifest || config
+  const manifestInput = config.manifest || config
+  const validation = validateExternalPluginConfig(manifestInput)
+  if (!validation.success) {
+    const issues = validation.error.issues || validation.error.errors || []
+    throw new Error('Invalid external plugin config: ' + issues.map(e => e.message).join(', '))
+  }
+
+  const manifest = manifestInput
   const isStremio = detectStremioManifest(manifest)
 
   const baseUrl = deriveBaseUrl(config, isStremio)
@@ -148,20 +141,17 @@ export function createExternalPlugin(config) {
     ? buildStremioEndpoints(manifest)
     : (config.api || {})
 
-  // Attach original manifest/config for debugging and adapter hints.
   const plugin = createPlugin(pluginManifest, {
     isExternal: true,
     isStremio,
     baseUrl,
     originalManifest: manifest,
 
-    async getCatalog({ type, id, skip = 0, top = 50 }) {
+    async getCatalog({ type, id, skip = 0, top = 50, signal }) {
       if (!api.catalog) return []
       const url = `${baseUrl}${replaceParams(api.catalog, { type, id, skip, top })}`
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return []
       try {
-        const data = await fetchJson(safeUrl)
+        const data = await fetchJson(url, {}, signal)
         if (isStremio) {
           const metas = data?.metas || []
           return metas.map(normalizeStremioMeta).filter(Boolean)
@@ -174,13 +164,11 @@ export function createExternalPlugin(config) {
       }
     },
 
-    async getMeta({ type, id }) {
+    async getMeta({ type, id, signal }) {
       if (!api.meta) return null
       const url = `${baseUrl}${replaceParams(api.meta, { type, id })}`
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return null
       try {
-        const data = await fetchJson(safeUrl)
+        const data = await fetchJson(url, {}, signal)
         if (isStremio) {
           return normalizeStremioMeta(data?.meta)
         }
@@ -191,13 +179,11 @@ export function createExternalPlugin(config) {
       }
     },
 
-    async getStreams({ type, id }) {
+    async getStreams({ type, id, signal }) {
       if (!api.streams) return []
       const url = `${baseUrl}${replaceParams(api.streams, { type, id })}`
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return []
       try {
-        const data = await fetchJson(safeUrl)
+        const data = await fetchJson(url, {}, signal)
         if (isStremio) {
           const streams = data?.streams || []
           return streams.map(normalizeStremioStream).filter(Boolean)
@@ -210,13 +196,11 @@ export function createExternalPlugin(config) {
       }
     },
 
-    async search({ query, type }) {
+    async search({ query, type, signal }) {
       if (!api.search) return []
       const url = `${baseUrl}${replaceParams(api.search, { query, type: type || 'movie' })}`
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return []
       try {
-        const data = await fetchJson(safeUrl)
+        const data = await fetchJson(url, {}, signal)
         if (isStremio) {
           const metas = data?.metas || []
           return metas.map(normalizeStremioMeta).filter(Boolean)
@@ -236,7 +220,9 @@ export function createExternalPlugin(config) {
 export async function fetchManifest(manifestUrl) {
   const safeUrl = sanitizeUrl(manifestUrl)
   if (!safeUrl) throw new Error('Invalid manifest URL')
-  const res = await fetch(safeUrl)
+  const res = await fetch(safeUrl, {
+    signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+  })
   if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status}`)
   return res.json()
 }

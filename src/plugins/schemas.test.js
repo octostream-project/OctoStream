@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateCustomPluginConfig, validatePluginManifest } from './schemas.js'
+import { validatePluginManifest } from './schemas.js'
 
 describe('plugin schemas', () => {
   const validConfig = {
@@ -16,23 +16,23 @@ describe('plugin schemas', () => {
     },
   }
 
-  it('accepts valid custom plugin config', () => {
-    const result = validateCustomPluginConfig(validConfig)
+  it('accepts a valid plugin manifest', () => {
+    const result = validatePluginManifest(validConfig)
     expect(result.success).toBe(true)
   })
 
-  it('rejects config without id', () => {
-    const result = validateCustomPluginConfig({ ...validConfig, id: '' })
+  it('rejects manifest without id', () => {
+    const result = validatePluginManifest({ ...validConfig, id: '' })
     expect(result.success).toBe(false)
   })
 
-  it('rejects config with invalid API baseUrl', () => {
-    const result = validateCustomPluginConfig({ ...validConfig, api: { baseUrl: 'not-a-url' } })
+  it('rejects manifest with invalid API baseUrl', () => {
+    const result = validatePluginManifest({ ...validConfig, api: { baseUrl: 'not-a-url' } })
     expect(result.success).toBe(false)
   })
 
-  it('rejects config with invalid catalog type', () => {
-    const result = validateCustomPluginConfig({
+  it('rejects manifest with invalid catalog type', () => {
+    const result = validatePluginManifest({
       ...validConfig,
       catalogs: [{ id: 'all', name: 'Todo', type: 'invalid' }],
     })

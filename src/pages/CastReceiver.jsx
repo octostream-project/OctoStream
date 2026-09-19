@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import Hls from 'hls.js'
-import { Loader2, AlertCircle, Cast } from 'lucide-react'
-import { sanitizeUrl } from '../utils/sanitizeUrl.js'
+import { AlertCircle, Cast } from 'lucide-react'
+import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
+import { loadHls } from '../utils/loadPlayerLibs.js'
+import LogoLoader from '../components/LogoLoader.jsx'
 
 export default function CastReceiver() {
   const videoRef = useRef(null)
@@ -10,6 +11,7 @@ export default function CastReceiver() {
   const [title, setTitle] = useState('')
 
   useEffect(() => {
+    let hls
     const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
     const rawUrl = params.get('url')
     const t = params.get('title') || 'Reproduciendo en TV'
@@ -20,7 +22,7 @@ export default function CastReceiver() {
       return
     }
 
-    const url = sanitizeUrl(rawUrl)
+    const url = sanitizeRemoteUrl(rawUrl)
     if (!url) {
       setError('URL de stream no válida')
       setLoading(false)
@@ -33,31 +35,51 @@ export default function CastReceiver() {
     if (!videoEl) return
 
     const isHls = url.includes('.m3u8') || url.includes('hls')
+    let cancelled = false
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls()
-      hls.loadSource(url)
-      hls.attachMedia(videoEl)
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setLoading(false)
-        videoEl.play()
-      })
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          setError('Error al cargar stream HLS')
-          setLoading(false)
-        }
-      })
-    } else {
+    const onLoaded = () => {
+      setLoading(false)
+      videoEl.play().catch(() => {})
+    }
+    const onError = () => {
+      setError('Error al cargar el video')
+      setLoading(false)
+    }
+    const playDirect = () => {
       videoEl.src = url
-      videoEl.addEventListener('loadedmetadata', () => {
-        setLoading(false)
-        videoEl.play()
-      })
-      videoEl.addEventListener('error', () => {
-        setError('Error al cargar el video')
-        setLoading(false)
-      })
+      videoEl.addEventListener('loadedmetadata', onLoaded)
+      videoEl.addEventListener('error', onError)
+    }
+
+    const init = async () => {
+      if (isHls) {
+        const Hls = await loadHls()
+        if (cancelled) return
+        if (Hls.isSupported()) {
+          hls = new Hls()
+          hls.loadSource(url)
+          hls.attachMedia(videoEl)
+          hls.on(Hls.Events.MANIFEST_PARSED, onLoaded)
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (data.fatal) {
+              setError('Error al cargar stream HLS')
+              setLoading(false)
+            }
+          })
+        } else {
+          playDirect()
+        }
+      } else {
+        playDirect()
+      }
+    }
+    init()
+
+    return () => {
+      cancelled = true
+      videoEl.removeEventListener('loadedmetadata', onLoaded)
+      videoEl.removeEventListener('error', onError)
+      if (hls) hls.destroy()
     }
   }, [])
 
@@ -69,7 +91,7 @@ export default function CastReceiver() {
       </div>
 
       {loading && (
-        <Loader2 className="animate-spin text-primary-500" size={48} />
+        <LogoLoader size={80} />
       )}
 
       {error && (

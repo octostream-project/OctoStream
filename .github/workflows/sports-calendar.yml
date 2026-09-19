@@ -1,0 +1,32 @@
+name: Sports Calendar
+
+on:
+  schedule:
+    # Dos pasadas al día: la de 07:00 recoge los resultados de los partidos
+    # que acabaron tarde la noche anterior; la de 23:30 recoge los del día.
+    - cron: '0 7 * * *'
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Scrape Marca calendars
+        run: node scripts/update-marca-calendar.mjs
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/data/marcaCalendar.js
+          git diff --cached --quiet || git commit -m "chore: update sports calendar"
+          git push

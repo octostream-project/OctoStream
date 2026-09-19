@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Custom ExoPlayer layout: no center play button, all controls at bottom -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <androidx.media3.ui.AspectRatioFrameLayout
+        android:id="@+id/exo_content_frame"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center">
+
+        <View
+            android:id="@+id/exo_shutter"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black" />
+
+        <android.view.SurfaceView
+            android:id="@+id/exo_surface_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <View
+            android:id="@+id/exo_artwork"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+    </androidx.media3.ui.AspectRatioFrameLayout>
+
+    <!-- NO center play button - all controls are in the bottom bar -->
+
+    <!-- Bottom controller bar -->
+    <LinearLayout
+        android:id="@+id/exo_controller"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="#AA000000"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <!-- Time row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:id="@+id/exo_position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:layout_marginEnd="8dp" />
+
+            <androidx.media3.ui.DefaultTimeBar
+                android:id="@+id/exo_progress"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                app:bar_height="2dp"
+                app:touch_target_height="24dp"
+                app:scrubber_dragged_size="20dp"
+                app:scrubber_enabled_size="14dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+            <TextView
+                android:id="@+id/exo_duration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- Controls row: rewind, play/pause, forward, volume, boost, subtitle, settings, fullscreen -->
+        <LinearLayout
+            android:id="@+id/exo_basic_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="4dp">
+
+            <ImageButton
+                android:id="@+id/exo_rew"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_media_rew"
+                android:contentDescription="Rebobinar 10s"
+                android:focusable="true"
+                android:scaleType="centerInside" />
+
+            <ImageButton
+                android:id="@+id/exo_play_pause"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_media_play"
+                android:contentDescription="Reproducir/Pausar"
+                android:focusable="true"
+                android:scaleType="centerInside" />
+
+            <ImageButton
+                android:id="@+id/exo_ffwd"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_media_ff"
+                android:contentDescription="Avanzar 10s"
+                android:focusable="true"
+                android:scaleType="centerInside" />
+
+            <!-- Volume, boost, subtitle, settings, fullscreen are added programmatically -->
+            <!-- Placeholder for exo_subtitle -->
+            <ImageButton
+                android:id="@+id/exo_subtitle"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:contentDescription="Subtítulos"
+                android:focusable="true"
+                android:scaleType="centerInside"
+                android:visibility="gone" />
+
+            <!-- Placeholder for exo_settings -->
+            <ImageButton
+                android:id="@+id/exo_settings"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_preferences"
+                android:contentDescription="Ajustes"
+                android:focusable="true"
+                android:scaleType="centerInside"
+                android:visibility="gone" />
+
+            <!-- Placeholder for exo_fullscreen -->
+            <ImageButton
+                android:id="@+id/exo_fullscreen"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_zoom"
+                android:contentDescription="Pantalla completa"
+                android:focusable="true"
+                android:scaleType="centerInside"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Buffering spinner -->
+    <ProgressBar
+        android:id="@+id/exo_buffering"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+</FrameLayout>

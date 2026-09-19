@@ -16,7 +16,7 @@ export default function Favorites() {
           <p className="text-dark-500 text-sm">Marca contenido con el corazón para guardarlo aquí</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {favorites.map(item => (
             <ContentCard key={`${item.type}-${item.id}`} item={item} />
           ))}

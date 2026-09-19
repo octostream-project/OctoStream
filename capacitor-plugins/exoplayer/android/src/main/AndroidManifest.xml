@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Requerido por ExoPlayer.setWakeMode(WAKE_MODE_LOCAL): sin él el
+         WakeLockManager lanza SecurityException al iniciar la reproducción. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Descubrimiento WiFi Direct (Miracast): WifiP2pManager.discoverPeers
+         exige NEARBY_WIFI_DEVICES en API 33+ (sin ubicación gracias a
+         neverForLocation) o FINE/COARSE_LOCATION en API ≤32. Solo se piden
+         cuando el usuario pulsa "Duplicar pantalla". -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="32" />
+    <application>
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.octostream.exoplayer.CastOptionsProvider" />
+    </application>
+</manifest>

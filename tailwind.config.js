@@ -34,6 +34,15 @@ export default {
           950: '#020617',
         },
       },
+      keyframes: {
+        'warp-pulse': {
+          '0%, 100%': { opacity: '0.3', transform: 'scale(0.85)' },
+          '50%': { opacity: '1', transform: 'scale(1.1)' },
+        },
+      },
+      animation: {
+        'warp-pulse': 'warp-pulse 1.2s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

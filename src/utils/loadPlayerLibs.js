@@ -1,15 +1,13 @@
-import Hls from 'hls.js'
-import videojs from 'video.js'
-import dashjs from 'dashjs'
-
-export async function loadVideojs() {
-  return videojs.default || videojs
-}
+// Lazy loaders for player libraries.
+// These dynamic imports let Vite code-split hls.js and shaka-player into
+// separate chunks so they are only downloaded when needed.
 
 export async function loadHls() {
-  return Hls
+  const mod = await import('hls.js')
+  return mod.default || mod
 }
 
-export async function loadDashjs() {
-  return dashjs.default || dashjs
+export async function loadShaka() {
+  const mod = await import('shaka-player')
+  return mod.default || mod
 }

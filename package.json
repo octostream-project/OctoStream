@@ -1,9 +1,9 @@
 {
-  "name": "optopus-stream",
+  "name": "octostream",
   "version": "1.0.0",
-  "description": "Media center multiplataforma con sistema de plugins tipo Kodi/Stremio",
-  "author": "Optopus Stream",
-  "homepage": "https://github.com/optopus-stream/optopus-stream",
+  "description": "Media center multiplataforma con sistema de plugins",
+  "author": "OctoStream",
+  "homepage": "https://github.com/octostream/octostream",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -17,59 +17,93 @@
     "android:add": "cap add android",
     "android:sync": "vite build && cap sync",
     "android:run": "vite build && cap sync && cap run android",
+    "android:build": "vite build && cap sync && cd android && ./gradlew :app:assembleDebug",
+    "android:build:release": "vite build && cap sync && cd android && ./gradlew :app:assembleRelease",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
+    "@capacitor/app": "^8.1.1",
+    "@octostream/cloud-proxy": "file:capacitor-plugins/cloud-proxy",
+    "@octostream/exo-player": "file:capacitor-plugins/exoplayer",
+    "@octostream/torrent-engine": "file:capacitor-plugins/torrent-engine",
+    "@octostream/youtube": "file:capacitor-plugins/youtube",
+    "@optopus/sync-server": "file:capacitor-plugins/sync-server",
+    "hls.js": "^1.7.3",
     "lucide-react": "^0.400.0",
-    "zustand": "^4.5.4",
-    "axios": "^1.7.2",
-    "video.js": "^8.17.0",
-    "hls.js": "^1.5.13",
-    "zod": "^3.23.8"
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.3",
+    "shaka-player": "^5.2.10",
+    "zod": "^4.6.4",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@eslint/js": "^9.39.5",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.4.19",
-    "postcss": "^8.4.40",
-    "tailwindcss": "^3.4.7",
-    "vite": "^5.3.5",
     "concurrently": "^8.2.2",
-    "wait-on": "^7.2.0",
-    "electron": "^31.2.0",
+    "electron": "^33.0.0",
     "electron-builder": "^24.13.3",
-    "@capacitor/cli": "^6.1.0",
-    "@capacitor/core": "^6.1.0",
-    "@capacitor/android": "^6.1.0",
-    "vitest": "^4.1.9",
-    "jsdom": "^25.0.0"
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.12.0",
+    "jsdom": "^25.0.0",
+    "postcss": "^8.4.40",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0",
+    "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.optopus.stream",
-    "productName": "Optopus Stream",
+    "appId": "com.octostream.app",
+    "productName": "OctoStream",
     "directories": {
       "output": "dist-electron"
     },
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
-      "electron/**/*.cjs"
+      "electron/**/*"
     ],
     "linux": {
-      "target": ["AppImage", "pacman"],
+      "target": [
+        "AppImage",
+        "pacman"
+      ],
       "category": "Video",
-      "maintainer": "Optopus Stream",
+      "maintainer": "OctoStream",
       "desktop": {
-        "Name": "Optopus Stream",
+        "Name": "OctoStream",
         "Comment": "Media Center multiplataforma",
-        "Categories": ["AudioVideo", "Video"]
+        "Categories": [
+          "AudioVideo",
+          "Video"
+        ]
       }
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     }
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.10",
+    "js-yaml": "^4.2.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true
   }
 }

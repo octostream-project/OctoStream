@@ -2,8 +2,10 @@ import { useState, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import {
   Puzzle, Check, Download, Trash2, Film, Tv, Radio, Play,
-  Globe, Plus, Link, FileJson, AlertCircle, Upload, Cloud, Loader2,
+  Globe, Plus, Link, FileJson, AlertCircle, Upload, Cloud,
+  Trophy,
 } from 'lucide-react'
+import OctoLoader from '../components/OctoLoader.jsx'
 
 const iconMap = {
   film: Film,
@@ -11,6 +13,7 @@ const iconMap = {
   radio: Radio,
   play: Play,
   globe: Globe,
+  trophy: Trophy,
 }
 
 export default function Plugins() {
@@ -102,7 +105,9 @@ export default function Plugins() {
     setRepoLoading(true)
     setRepoItems([])
     try {
-      const res = await fetch(repoUrl.trim())
+      const res = await fetch(repoUrl.trim(), {
+        signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       const items = Array.isArray(data) ? data : (data.addons || data.plugins || [])
@@ -217,7 +222,7 @@ export default function Plugins() {
       </div>
 
       <p className="text-dark-400 text-sm mb-6">
-        Los plugins extienden la funcionalidad de Optopus Stream. Activa los incluidos o añade servidores externos al estilo Stremio.
+        Los plugins extienden la funcionalidad de OctoStream. Activa los incluidos o añade más abajo.
       </p>
 
       <div className="flex gap-2 mb-6 border-b border-dark-800">
@@ -231,21 +236,14 @@ export default function Plugins() {
         >
           Repositorio
         </button>
-        <button
-          onClick={() => setActiveTab('external')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'external'
-              ? 'text-primary-400 border-primary-500'
-              : 'text-dark-400 border-transparent hover:text-white'
-          }`}
-        >
-          Externos
-        </button>
+        <span className="px-4 py-2 text-sm text-dark-500">
+          Solo plugins incluidos en la aplicación
+        </span>
       </div>
 
       {activeTab === 'repository' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {plugins.filter(p => !externalPlugins.some(ep => ep.id === p.id)).map(plugin => pluginCard(plugin, false))}
+          {plugins.filter(p => !p.isExternal || p.isBundled).map(plugin => pluginCard(plugin, false))}
         </div>
       )}
 
@@ -257,7 +255,7 @@ export default function Plugins() {
               Añadir plugin externo
             </h3>
             <p className="text-dark-400 text-sm mb-4">
-              Soporta manifest JSON propio o manifest Stremio (terminado en <code>/manifest.json</code>).
+              Soporta manifest JSON (terminado en <code>/manifest.json</code>).
             </p>
             <form onSubmit={handleInstallExternalByUrl} className="flex flex-col sm:flex-row gap-2">
               <input
@@ -344,7 +342,7 @@ export default function Plugins() {
                 disabled={repoLoading || !repoUrl.trim()}
                 className="btn-primary text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {repoLoading ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+                {repoLoading ? <OctoLoader size={16} /> : <Cloud size={16} />}
                 {repoLoading ? 'Cargando...' : 'Cargar lista'}
               </button>
             </form>
@@ -412,7 +410,7 @@ export default function Plugins() {
         <p className="text-dark-400 text-sm">
           <strong>Internos:</strong> añade un archivo en <code className="text-primary-400">src/plugins/builtIn/</code> y regístralo en el índice.
           <br />
-          <strong>Externos:</strong> crea un servidor REST con endpoints <code className="text-primary-400">catalog</code>, <code className="text-primary-400">meta</code>, <code className="text-primary-400">streams</code> y <code className="text-primary-400">search</code>, o usa el formato Stremio.
+          <strong>Externos:</strong> crea un servidor REST con endpoints <code className="text-primary-400">catalog</code>, <code className="text-primary-400">meta</code>, <code className="text-primary-400">streams</code> y <code className="text-primary-400">search</code>.
         </p>
       </div>
     </div>

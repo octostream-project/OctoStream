@@ -1,8 +1,8 @@
 node_modules/
 dist/
 dist-electron/
-android/
-capacitor-android/
+/android/
+/capacitor-android/
 *.log
 .DS_Store
 .env
@@ -15,3 +15,12 @@ build/
 native/**/build/
 capacitor-plugins/*/platform-android/.gradle/
 capacitor-plugins/*/platform-android/build/
+capacitor-plugins/*/android/.gradle/
+capacitor-plugins/*/android/build/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+local.properties
+*.swp

@@ -1,0 +1,35 @@
+{
+  "name": "@octostream/cloud-proxy",
+  "version": "1.0.0",
+  "description": "Cloudflare WARP local proxy plugin for OctoStream using Aether (MASQUE over QUIC)",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": [
+    "android/",
+    "dist/",
+    "src/"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "rimraf ./dist",
+    "watch": "tsc --watch"
+  },
+  "keywords": ["warp", "cloudflare", "aether", "proxy", "capacitor"],
+  "author": "OctoStream",
+  "license": "GPL-3.0",
+  "peerDependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-// Official built-in plugins (Kodi-style repository).
+// Official built-in plugins.
 // These plugins ship with the app and can be enabled/disabled by the user.
 
 import { tmdbPlugin } from './tmdb.js'

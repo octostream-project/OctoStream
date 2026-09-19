@@ -23,7 +23,7 @@ export default function LazyImage({ src, alt, className, placeholder = null }) {
   }, [src])
 
   return (
-    <div ref={imgRef} className={`relative ${className}`}>
+    <div ref={imgRef} className={`relative overflow-hidden ${className}`}>
       {!loaded && (
         <div className="absolute inset-0 bg-dark-700 animate-pulse" />
       )}
@@ -33,7 +33,7 @@ export default function LazyImage({ src, alt, className, placeholder = null }) {
           alt={alt}
           loading="lazy"
           onLoad={() => setLoaded(true)}
-          className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'} ${className}`}
+          className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
         />
       ) : (
         placeholder || <div className="w-full h-full bg-dark-700" />

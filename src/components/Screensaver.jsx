@@ -1,31 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
-import { Clapperboard } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
 // Animated screensaver: logo floats around the screen with subtle rotation.
 // Dismissed on any user interaction (mousemove, click, keypress, touch).
+// La animación es 100% CSS (compositor/GPU): la versión anterior usaba
+// requestAnimationFrame + setState, que re-renderizaba el componente a 60fps
+// — precisamente cuando la TV está en reposo y conviene ahorrar CPU/batería.
 
 export default function Screensaver({ onDismiss }) {
-  const [pos, setPos] = useState({ x: 50, y: 50 })
-  const [rot, setRot] = useState(0)
-  const rafRef = useRef(null)
-  const startTimeRef = useRef(Date.now())
   const dismissedRef = useRef(false)
-
-  // Floating animation
-  useEffect(() => {
-    const animate = () => {
-      const elapsed = (Date.now() - startTimeRef.current) / 1000
-      // Smooth Lissajous-like movement
-      const x = 50 + 35 * Math.sin(elapsed * 0.35)
-      const y = 50 + 30 * Math.sin(elapsed * 0.27 + 1.2)
-      const rotation = Math.sin(elapsed * 0.2) * 8
-      setPos({ x, y })
-      setRot(rotation)
-      rafRef.current = requestAnimationFrame(animate)
-    }
-    rafRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [])
 
   // Dismiss on any interaction
   useEffect(() => {
@@ -52,25 +34,19 @@ export default function Screensaver({ onDismiss }) {
         }
       }}
     >
-      {/* Floating logo */}
-      <div
-        className="absolute transition-none"
-        style={{
-          left: `${pos.x}%`,
-          top: `${pos.y}%`,
-          transform: `translate(-50%, -50%) rotate(${rot}deg)`,
-        }}
-      >
-        <div className="flex flex-col items-center gap-4 opacity-80">
-          <Clapperboard
-            className="text-primary-500"
-            size={120}
-            style={{ filter: 'drop-shadow(0 0 30px rgba(245, 158, 11, 0.4))' }}
-          />
-          <h1 className="text-3xl font-bold text-white tracking-wide">
-            Optopus<span className="text-primary-500"> Stream</span>
-          </h1>
-          <p className="text-dark-500 text-sm">Media Center</p>
+      {/* Floating logo: dos ejes con duraciones distintas = trayectoria
+          tipo Lissajous sin un solo frame de JS */}
+      <div className="absolute" style={{ animation: 'screensaver-drift-x 14s ease-in-out infinite alternate', left: '15%', right: '15%', top: 0, bottom: 0 }}>
+        <div className="absolute left-0 right-0" style={{ animation: 'screensaver-drift-y 11s ease-in-out infinite alternate', top: '15%', bottom: '15%' }}>
+          <div className="flex flex-col items-center gap-4 opacity-80" style={{ animation: 'screensaver-tilt 9s ease-in-out infinite alternate' }}>
+            <img
+              src="/logo-full.png"
+              alt="OctoStream"
+              className="w-64 h-auto"
+              style={{ filter: 'drop-shadow(0 0 40px rgba(124, 58, 237, 0.45))' }}
+              draggable={false}
+            />
+          </div>
         </div>
       </div>
 
@@ -85,6 +61,18 @@ export default function Screensaver({ onDismiss }) {
         @keyframes screensaver-fade-in {
           from { opacity: 0; }
           to { opacity: 1; }
+        }
+        @keyframes screensaver-drift-x {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes screensaver-drift-y {
+          from { transform: translateY(0); }
+          to { transform: translateY(100%); }
+        }
+        @keyframes screensaver-tilt {
+          from { transform: rotate(-8deg); }
+          to { transform: rotate(8deg); }
         }
       `}</style>
     </div>

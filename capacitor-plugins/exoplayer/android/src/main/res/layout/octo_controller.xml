@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Controller propio estilo Netfly/Stremio: barra inferior con gradiente,
+     fila de tiempos + progreso, fila de transporte (con zapping) y fila de
+     audio/velocidad/EPG. Sin iconos centrales (exo_center_controls omitido). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="bottom">
+
+    <LinearLayout
+        android:id="@id/exo_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bottom_gradient"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="28dp"
+        android:paddingBottom="12dp">
+
+        <!-- Fila 0: tiempos -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@id/exo_position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="  ·  "
+                android:textColor="#99FFFFFF"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@id/exo_duration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#B3FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Barra de progreso -->
+        <androidx.media3.ui.DefaultTimeBar
+            android:id="@id/exo_progress"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            app:played_color="#7B5BF5"
+            app:scrubber_color="#7B5BF5"
+            app:buffered_color="#66FFFFFF"
+            app:unplayed_color="#33FFFFFF" />
+
+        <!-- Fila 1: transporte -->
+        <LinearLayout
+            android:id="@id/exo_basic_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageButton
+                android:id="@id/exo_rew"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Retroceder"
+                android:src="@drawable/exo_styled_controls_rewind" />
+
+            <ImageButton
+                android:id="@id/exo_play_pause"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/circle_accent"
+                android:contentDescription="Reproducir o pausar"
+                android:scaleType="fitCenter"
+                android:padding="14dp"
+                android:src="@drawable/exo_styled_controls_play" />
+
+            <ImageButton
+                android:id="@id/exo_ffwd"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Avanzar"
+                android:src="@drawable/exo_styled_controls_fastforward" />
+
+            <ImageButton
+                android:id="@+id/octo_zap_down"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Canal inferior"
+                android:src="@drawable/ic_channel_down" />
+
+            <ImageButton
+                android:id="@+id/octo_zap_up"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Canal superior"
+                android:src="@drawable/ic_channel_up" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@id/exo_subtitle"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Subtítulos"
+                android:src="@drawable/exo_styled_controls_subtitle_on" />
+
+            <ImageButton
+                android:id="@id/exo_settings"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Ajustes"
+                android:src="@drawable/exo_styled_controls_settings" />
+
+            <ImageButton
+                android:id="@id/exo_fullscreen"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Pantalla completa"
+                android:src="@drawable/exo_styled_controls_fullscreen_enter" />
+        </LinearLayout>
+
+        <!-- Fila 2: volumen, amplificador, velocidad, EPG -->
+        <LinearLayout
+            android:id="@+id/octo_extra_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="4dp">
+
+            <ImageButton
+                android:id="@+id/octo_volume"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Silenciar volumen"
+                android:src="@android:drawable/ic_lock_silent_mode_off" />
+
+            <SeekBar
+                android:id="@+id/octo_volume_seek"
+                android:layout_width="170dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:max="100"
+                android:progress="100"
+                android:contentDescription="Volumen" />
+
+            <ImageButton
+                android:id="@+id/octo_boost"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Amplificador"
+                android:src="@drawable/ic_volume_boost" />
+
+            <TextView
+                android:id="@+id/octo_speed"
+                android:layout_width="56dp"
+                android:layout_height="44dp"
+                android:gravity="center"
+                android:text="1x"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:contentDescription="Velocidad de reproducción"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/octo_epg"
+                android:layout_width="60dp"
+                android:layout_height="44dp"
+                android:gravity="center"
+                android:text="EPG"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:contentDescription="Guía de programación"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

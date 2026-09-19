@@ -8,6 +8,8 @@ export const PLUGIN_TYPES = {
 export const CONTENT_TYPES = {
   MOVIE: 'movie',
   SERIES: 'series',
+  ANIME: 'anime',
+  DORAMA: 'dorama',
   CHANNEL: 'channel',
   LIVE: 'live',
   LANGUAGE: 'language',

@@ -1,17 +1,79 @@
-const isElectron = () => typeof window !== 'undefined' && window.octo?.platform === 'electron'
+// Cross-platform storage abstraction.
+// On Electron, mirrors localStorage to the Electron main process via IPC.
+// On web/Android, uses localStorage directly.
+// All functions are safe to call at module load time (no top-level access).
+
+const isElectron = () =>
+  typeof window !== 'undefined' && window.octostream?.platform === 'electron'
+
+// Migración única: renombra claves antiguas (optopus_*/octo_*) a octostream_*.
+// Copia el valor a la clave nueva (sin pisarla si ya existe) y borra la vieja.
+try {
+  if (typeof localStorage !== 'undefined') {
+    const renames = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith('optopus_')) renames.push([k, 'octostream_' + k.slice(8)])
+      else if (k?.startsWith('octo_')) renames.push([k, 'octostream_' + k.slice(5)])
+    }
+    for (const [oldKey, newKey] of renames) {
+      if (localStorage.getItem(newKey) === null) {
+        const v = localStorage.getItem(oldKey)
+        if (v !== null) localStorage.setItem(newKey, v)
+      }
+      localStorage.removeItem(oldKey)
+    }
+  }
+} catch {
+  // ignore
+}
+
+// Keys that are mirrored between Electron persistent storage and localStorage.
+const SYNCED_KEYS = [
+  'octostream_installed_plugins',
+  'octostream_custom_plugins',
+  'octostream_language',
+  'octostream_favorites',
+  'octostream_history',
+  'octostream_search_history',
+  'octostream_tmdb_key',
+  'octostream_opensubs_apikey',
+  'octostream_screensaver_enabled',
+  'octostream_screensaver_timeout',
+  'octostream_sub_lang',
+  'octostream_auto_subs',
+  'octostream_player_engine',
+  'octostream_default_quality',
+  'octostream_hw_accel',
+  'octostream_seek_secs',
+  'octostream_buffer_size',
+  'octostream_default_speed',
+  'octostream_show_player_clock',
+  'octostream_image_quality',
+  'octostream_home_items_limit',
+  'octostream_dark_mode',
+  'octostream_audio_lang',
+  'octostream_auto_skip_intro',
+  'octostream_auto_skip_recap',
+  'octostream_confirm_exit_player',
+  'octostream_auto_next_episode',
+  'octostream_external_plugins',
+  'octostream_recent_searches',
+  'octostream_tdspain_cache',
+  'octostream_youtube_search_history',
+]
 
 export async function getItem(key) {
   if (isElectron()) {
     try {
-      const value = await window.octo.getData(key)
-      return value
+      const value = await window.octostream.getData(key)
+      if (value !== null && value !== undefined) return value
     } catch (e) {
       console.warn('[Storage] electron get failed', e)
     }
   }
   try {
-    const value = localStorage.getItem(key)
-    return value
+    return localStorage.getItem(key)
   } catch {
     return null
   }
@@ -20,7 +82,7 @@ export async function getItem(key) {
 export async function setItem(key, value) {
   if (isElectron()) {
     try {
-      await window.octo.setData(key, value)
+      await window.octostream.setData(key, value)
     } catch (e) {
       console.warn('[Storage] electron set failed', e)
     }
@@ -35,7 +97,7 @@ export async function setItem(key, value) {
 export async function removeItem(key) {
   if (isElectron()) {
     try {
-      await window.octo.removeData(key)
+      await window.octostream.removeData(key)
     } catch (e) {
       console.warn('[Storage] electron remove failed', e)
     }
@@ -62,7 +124,7 @@ export function setItemSync(key, value) {
     // ignore
   }
   if (isElectron()) {
-    window.octo.setData(key, value).catch(() => {})
+    window.octostream.setData(key, value).catch(() => {})
   }
 }
 
@@ -73,16 +135,67 @@ export function removeItemSync(key) {
     // ignore
   }
   if (isElectron()) {
-    window.octo.removeData(key).catch(() => {})
+    window.octostream.removeData(key).catch(() => {})
   }
 }
 
+/**
+ * Get a JSON-parsed value from storage, with a fallback default.
+ */
+export async function getJson(key, fallback = null) {
+  const raw = await getItem(key)
+  if (raw === null || raw === undefined) return fallback
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Serialize and store a JSON value.
+ */
+export async function setJson(key, value) {
+  try {
+    await setItem(key, JSON.stringify(value))
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Synchronous JSON getter with fallback.
+ */
+export function getJsonSync(key, fallback = null) {
+  const raw = getItemSync(key)
+  if (raw === null || raw === undefined) return fallback
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Synchronous JSON setter.
+ */
+export function setJsonSync(key, value) {
+  try {
+    setItemSync(key, JSON.stringify(value))
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Mirror all known keys from Electron persistent storage into localStorage.
+ * Called once at app startup on Electron.
+ */
 export async function syncFromElectron() {
   if (!isElectron()) return
   try {
-    const keys = ['octo_installed_plugins', 'octo_custom_plugins', 'octo_language', 'octo_favorites', 'octo_history', 'octo_search_history', 'octo_tmdb_key', 'octo_opensubs_apikey', 'octo_screensaver_enabled', 'octo_screensaver_timeout', 'octo_sub_lang', 'octo_auto_subs', 'octo_player_engine', 'octo_default_quality', 'octo_hw_accel', 'octo_seek_secs', 'octo_buffer_size', 'octo_default_speed', 'octo_show_player_clock', 'octo_image_quality', 'octo_home_items_limit', 'octo_dark_mode', 'octo_audio_lang', 'octo_auto_skip_intro', 'octo_auto_skip_recap', 'octo_confirm_exit_player', 'octo_auto_next_episode']
-    for (const key of keys) {
-      const value = await window.octo.getData(key)
+    for (const key of SYNCED_KEYS) {
+      const value = await window.octostream.getData(key)
       if (value !== null && value !== undefined) {
         localStorage.setItem(key, value)
       }
@@ -91,3 +204,5 @@ export async function syncFromElectron() {
     console.warn('[Storage] sync from electron failed', e)
   }
 }
+
+export { SYNCED_KEYS }
