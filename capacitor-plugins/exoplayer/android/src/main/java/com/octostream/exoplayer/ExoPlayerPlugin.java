@@ -2468,12 +2468,15 @@ public class ExoPlayerPlugin extends Plugin {
     private boolean relayKeepAlive = false;
     private final java.util.Map<String, java.io.OutputStream> relaySinks =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<String> relayBegun =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private void stopEmbedRelay() {
         if (relayKeepAlive) return;
         relayReady = false;
         relayToken = null;
         relaySinks.clear();
+        relayBegun.clear();
         if (relayServer != null) {
             try { relayServer.close(); } catch (Exception ignored) {}
             relayServer = null;
@@ -2547,18 +2550,67 @@ public class ExoPlayerPlugin extends Plugin {
                     try { out.close(); } catch (Exception ignored) {}
                 }
             }
+            // Entrega por streaming: el fetch del WebView va mandando chunks
+            // según llegan (getReader) en vez de esperar al segmento entero.
+            // Sin esto, un .ts de ~3MB tardaba >10s en verse (fetch + base64
+            // completo en JS) y ExoPlayer abortaba el socket → reset storm.
+            @android.webkit.JavascriptInterface
+            public void relayBegin(String reqId, String mime, String clen) {
+                java.io.OutputStream out = relaySinks.get(reqId);
+                if (out == null) { Log.w(TAG, "relayBegin: unknown reqId"); return; }
+                relayBegun.add(reqId);
+                try {
+                    String hdr = "HTTP/1.1 200 OK\r\nContent-Type: "
+                            + (mime != null && !mime.isEmpty() ? mime : "application/octet-stream")
+                            + (clen != null && !clen.isEmpty()
+                                    ? "\r\nContent-Length: " + clen : "")
+                            + "\r\nConnection: close\r\n\r\n";
+                    out.write(hdr.getBytes("ISO-8859-1"));
+                    out.flush();
+                } catch (Exception e) {
+                    relayBegun.remove(reqId);
+                    relaySinks.remove(reqId);
+                    try { out.close(); } catch (Exception ignored) {}
+                    throw new RuntimeException("relayBegin write: " + e);
+                }
+            }
+            @android.webkit.JavascriptInterface
+            public void relayChunk(String reqId, String b64) {
+                java.io.OutputStream out = relaySinks.get(reqId);
+                if (out == null) throw new RuntimeException("relayChunk: closed");
+                try {
+                    byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                    out.write(bytes);
+                    out.flush();
+                } catch (Exception e) {
+                    relayBegun.remove(reqId);
+                    relaySinks.remove(reqId);
+                    try { out.close(); } catch (Exception ignored) {}
+                    throw new RuntimeException("relayChunk write: " + e);
+                }
+            }
+            @android.webkit.JavascriptInterface
+            public void relayEnd(String reqId) {
+                relayBegun.remove(reqId);
+                java.io.OutputStream out = relaySinks.remove(reqId);
+                if (out == null) return;
+                try { out.close(); } catch (Exception ignored) {}
+            }
             @android.webkit.JavascriptInterface
             public void relayFail(String reqId, String msg) {
                 Log.w(TAG, "relayFail: " + msg);
+                boolean begun = relayBegun.remove(reqId);
                 java.io.OutputStream out = relaySinks.remove(reqId);
                 if (out == null) return;
                 try {
-                    byte[] e = "relay fetch failed".getBytes("utf-8");
-                    out.write(("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\n"
-                            + "Content-Length: " + e.length + "\r\nConnection: close\r\n\r\n")
-                            .getBytes("ISO-8859-1"));
-                    out.write(e);
-                    out.flush();
+                    if (!begun) {
+                        byte[] e = "relay fetch failed".getBytes("utf-8");
+                        out.write(("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\n"
+                                + "Content-Length: " + e.length + "\r\nConnection: close\r\n\r\n")
+                                .getBytes("ISO-8859-1"));
+                        out.write(e);
+                        out.flush();
+                    }
                     out.close();
                 } catch (Exception ignored) {}
             }
@@ -2653,6 +2705,15 @@ public class ExoPlayerPlugin extends Plugin {
                         + "return l;});"
                         + "AndroidRelay.relayData(R,btoa(lines.join('\\n')),'application/vnd.apple.mpegurl');"
                         + "});}"
+                        + "var cl=r.headers.get('content-length')||'';"
+                        + "if(r.body&&r.body.getReader){var rd=r.body.getReader();"
+                        + "AndroidRelay.relayBegin(R,ct||'video/mp2t',cl);"
+                        + "var pump=function(){rd.read().then(function(x){"
+                        + "if(x.done){AndroidRelay.relayEnd(R);return;}"
+                        + "var u8=x.value,bin='';"
+                        + "for(var i=0;i<u8.length;i+=8192){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+8192));}"
+                        + "AndroidRelay.relayChunk(R,btoa(bin));pump();"
+                        + "}).catch(function(e){try{rd.cancel()}catch(_){}AndroidRelay.relayFail(R,''+e);});};pump();return;}"
                         + "return r.arrayBuffer().then(function(b){var u8=new Uint8Array(b),bin='';"
                         + "for(var i=0;i<u8.length;i+=32768){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+32768));}"
                         + "AndroidRelay.relayData(R,btoa(bin),ct||'video/mp2t');});"
@@ -5544,10 +5605,14 @@ public class ExoPlayerPlugin extends Plugin {
         // RAM en boxes débiles. Track selector capado a ~360p/1.2Mbps (los
         // masters HLS eligen la variante más baja que cumpla) y LoadControl
         // pequeño — el default reserva ~50MB, demasiado para un 2º player.
+        // YouTube (manifest.googlevideo.com) se capa aún más, al mínimo
+        // (~144p/300kbps): en el mini solo importa el audio.
+        boolean yt = url != null
+            && (url.contains("googlevideo.com") || url.contains("youtube"));
         DefaultTrackSelector pipTrackSelector = new DefaultTrackSelector(context);
         pipTrackSelector.setParameters(pipTrackSelector.buildUponParameters()
-                .setMaxVideoSize(640, 360)
-                .setMaxVideoBitrate(1_200_000)
+                .setMaxVideoSize(yt ? 256 : 640, yt ? 144 : 360)
+                .setMaxVideoBitrate(yt ? 300_000 : 1_200_000)
                 .build());
         DefaultLoadControl pipLoadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)

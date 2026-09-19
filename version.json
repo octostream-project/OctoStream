@@ -1,8 +1,8 @@
 {
-  "versionCode": 118,
-  "versionName": "1.18",
+  "versionCode": 119,
+  "versionName": "1.19",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.18.apk",
-  "sha256": "4f71ffdb6a252fa96cc204688a4bd04570ecb08315e3ff8fcf8196be1fcd9568",
-  "notes": "Bloqueador de ads tipo uBlock (3.5k dominios en assets) + el picker de deportes muestra los enlaces de FCTV y DaddyLive juntos"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.19.apk",
+  "sha256": "f8d920749544ce852b60ba51ff02e26af56576e6f6e2dd8093713c366f363a6c",
+  "notes": "Relay de embeds en streaming por chunks (los segmentos ya no tardan 10s+ en llegar — fuera el bucle de buffering que caía al embed) + YouTube en PiP decodifica a 144p"
 }
