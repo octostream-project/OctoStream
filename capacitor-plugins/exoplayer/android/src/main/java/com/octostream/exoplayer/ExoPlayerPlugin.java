@@ -218,6 +218,8 @@ public class ExoPlayerPlugin extends Plugin {
     // Se re-asigna el MediaSource (fuerza recarga de la playlist) antes de
     // rendirse con error. lastMediaSource se guarda en cada setMediaSource.
     private int bufferingRetries = 0;
+    private int behindLiveRetries = 0;
+    private int sourceErrorRetries = 0;
     private MediaSource lastMediaSource = null;
 
     // Cliente OkHttp compartido para peticiones puntuales (búsqueda de
@@ -3957,6 +3959,8 @@ public class ExoPlayerPlugin extends Plugin {
                         // Cancel buffering timeout
                         cancelBufferingCheck();
                         bufferingRetries = 0;
+                        behindLiveRetries = 0;
+                        sourceErrorRetries = 0;
                         dismissStreamLoading();
                         event.put("state", "ready");
                         if (pendingSeekMs > 0 && player != null) {
@@ -4000,6 +4004,45 @@ public class ExoPlayerPlugin extends Plugin {
 
             @Override
             public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                // El directo se le escapó al player (la ventana en vivo dejó
+                // atrás su posición — pasa cuando el relay/la red van lentos).
+                // Recuperar saltando al borde en vivo en vez de matar el
+                // player: JS no ve error y no hay fallback al embed.
+                if (error.errorCode
+                        == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
+                        && player != null && lastMediaSource != null
+                        && behindLiveRetries < 4) {
+                    behindLiveRetries++;
+                    Log.w(TAG, "Behind live window — salto al borde en vivo ("
+                            + behindLiveRetries + "/4)");
+                    cancelBufferingCheck();
+                    player.seekToDefaultPosition();
+                    player.prepare();
+                    return;
+                }
+                // Errores de red en directos (ERROR_CODE_IO_* = 2000-2999:
+                // token de segmento caducado → 403, timeout, conexión caída).
+                // Un directo se reintenta con backoff — la playlist rota y el
+                // siguiente intento suele entrar. Sin esto un solo 403 mata el
+                // player y JS cae al embed.
+                if ("live".equals(playerMode) && lastMediaSource != null
+                        && error.errorCode >= 2000 && error.errorCode < 3000
+                        && sourceErrorRetries < 3) {
+                    sourceErrorRetries++;
+                    Log.w(TAG, "IO error en live (" + error.errorCode
+                            + ") — reintento " + sourceErrorRetries + "/3");
+                    cancelBufferingCheck();
+                    dismissStreamLoading();
+                    showStreamLoading();
+                    mainHandler.postDelayed(() -> {
+                        if (player == null || lastMediaSource == null) return;
+                        try {
+                            player.setMediaSource(lastMediaSource);
+                            player.prepare();
+                        } catch (Exception ignored) {}
+                    }, 1500L * sourceErrorRetries);
+                    return;
+                }
                 // Cancel buffering timeout on error
                 cancelBufferingCheck();
                 dismissStreamLoading();
@@ -7837,6 +7880,8 @@ public class ExoPlayerPlugin extends Plugin {
         }
         lastMediaSource = null;
         bufferingRetries = 0;
+        behindLiveRetries = 0;
+        sourceErrorRetries = 0;
         if (playerView != null) {
             playerView.setPlayer(null);
             playerView = null;
