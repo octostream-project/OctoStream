@@ -705,10 +705,13 @@ export default function Sports() {
     pickerOpenedAtRef.current = Date.now()
     lastPickerItemRef.current = item.id
     const acc = []
+    const order = (list) => [
+      ...list.filter(s => s.streamType !== 'embed'),
+      ...list.filter(s => s.streamType === 'embed'),
+    ]
     const flush = () => {
       if (requestId !== playRequestRef.current || ctrl.signal.aborted) return
-      const direct = acc.filter(s => s.streamType !== 'embed')
-      setStreamPicker({ item, streams: direct.length ? direct : acc, loading: true })
+      setStreamPicker({ item, streams: order(acc), loading: true })
     }
     try {
       flush()
@@ -748,8 +751,7 @@ export default function Sports() {
       if (item.link) {
         acc.push({ name: 'Marca · Directo', title: 'Página del partido', _external: item.link })
       }
-      const direct = acc.filter(s => s.streamType !== 'embed')
-      const final = direct.length ? direct : acc
+      const final = order(acc)
       if (final.length) {
         setStreamPicker({ item, streams: final, loading: false })
       } else {
