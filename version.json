@@ -1,8 +1,8 @@
 {
-  "versionCode": 15,
-  "versionName": "1.5",
+  "versionCode": 16,
+  "versionName": "1.6",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.5.apk",
-  "sha256": "c801770e81348149465578f8a55ed1db34014608a4cdc3352da457e288cedf82",
-  "notes": "Deportes: fix duplicados FCTV/DLive por fecha fabricada (Athletic-Alaves)"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.6.apk",
+  "sha256": "2f31cf5e7bf92305b6de5a35696595cfcae23bef02cd173cac51598f9c94d454",
+  "notes": "Deportes: aliases de equipos (Athletic Club=Bilbao, Man Utd, Spurs…) + guarda de filiales"
 }
