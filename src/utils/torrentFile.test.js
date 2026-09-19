@@ -49,3 +49,24 @@ describe('torrentBytesToMagnet', () => {
       .rejects.toThrow()
   })
 })
+
+describe('withDefaultTrackers', () => {
+  it('injects trackers into a bare magnet', async () => {
+    const { withDefaultTrackers } = await import('./torrentFile.js')
+    const m = withDefaultTrackers('magnet:?xt=urn:btih:abc123')
+    expect(m).toContain('tracker.opentrackr.org')
+    expect((m.match(/&tr=/g) || []).length).toBeGreaterThan(5)
+  })
+
+  it('leaves magnets with enough trackers untouched', async () => {
+    const { withDefaultTrackers } = await import('./torrentFile.js')
+    const m = 'magnet:?xt=urn:btih:abc&tr=a&tr=b&tr=c'
+    expect(withDefaultTrackers(m)).toBe(m)
+  })
+
+  it('passes through non-magnet values', async () => {
+    const { withDefaultTrackers } = await import('./torrentFile.js')
+    expect(withDefaultTrackers('https://x.com/f.torrent')).toBe('https://x.com/f.torrent')
+    expect(withDefaultTrackers(null)).toBe(null)
+  })
+})

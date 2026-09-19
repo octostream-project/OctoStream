@@ -112,6 +112,43 @@ export async function torrentBytesToMagnet(bytes) {
   return magnet
 }
 
+// Trackers públicos estables (el mismo estilo de lista que inyecta Peerflix a
+// cada infoHash). Los magnets que vienen de los indexers suelen traer 0-2
+// trackers — sin ellos el motor P2P depende solo de DHT y tarda en encontrar
+// peers, sobre todo en torrents poco sembrados.
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://tracker.qu.ax:6969/announce',
+  'udp://tracker.theoks.net:6969/announce',
+  'udp://tracker.ducks.party:1984/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.bittor.pw:1337/announce',
+  'udp://tracker-udp.gbitt.info:80/announce',
+  'udp://tracker.0x7c0.com:6969/announce',
+  'http://tracker.dler.org:6969/announce',
+  'udp://tracker.farted.net:6969/announce',
+  'udp://tracker.peerfect.org:6969/announce',
+]
+
+// Añade los trackers por defecto a un magnet que traiga pocos o ninguno.
+// Si el magnet ya trae >=3 trackers propios se respeta tal cual.
+export function withDefaultTrackers(magnetUrl) {
+  if (!magnetUrl || !magnetUrl.startsWith('magnet:')) return magnetUrl
+  const existing = new Set()
+  for (const m of magnetUrl.matchAll(/[?&]tr=([^&]+)/g)) {
+    try { existing.add(decodeURIComponent(m[1])) } catch { existing.add(m[1]) }
+  }
+  if (existing.size >= 3) return magnetUrl
+  let out = magnetUrl
+  for (const tr of DEFAULT_TRACKERS) {
+    if (!existing.has(tr)) out += '&tr=' + encodeURIComponent(tr)
+  }
+  return out
+}
+
 // Fetch a .torrent URL and convert it to a magnet URI. Returns null on failure.
 // httpGetBlob devuelve un Blob en web/Electron pero un string base64 en
 // Android (CapacitorHttp): hay que manejar ambos o la conversión siempre
