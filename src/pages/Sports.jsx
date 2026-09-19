@@ -33,6 +33,13 @@ const WOMEN_RE = /femenin|feminine|women|ladies/i
 const isWomen = (item) => WOMEN_RE.test(item._home?.name || '') ||
   WOMEN_RE.test(item._away?.name || '') || WOMEN_RE.test(item._league?.name || '')
 
+// Filiales: "Athletic Bilbao B", "Real Madrid Castilla", "Barça Atlètic",
+// "Bayern II", "U21/U23", "reserves" — compiten en otra liga y NO deben
+// fundirse con el primer equipo aunque el nombre case por includes.
+const B_TEAM_RE = /(?:\s|\-)b$|\breserv|\bu2[0-3]\b|\bjuvenil|\bcastilla\b|\batletic\b|\bii{1,2}\b|cantera/i
+const isBTeam = (item) => B_TEAM_RE.test(item._home?.name || '') ||
+  B_TEAM_RE.test(item._away?.name || '') || B_TEAM_RE.test(item._league?.name || '')
+
 // DLive solo conoce la hora ("21:00") y le asigna la fecha de HOY aunque el
 // partido sea mañana: la comparación por timestamp absoluto separaría un
 // duplicado real. Por eso, cuando uno de los lados es DLive, se acepta
@@ -57,6 +64,7 @@ function sameMatch(a, b) {
   // "Real Madrid vs Barcelona" y "Real Madrid Femenino vs Barcelona Femení"
   // casan por includes pero son partidos distintos.
   if (isWomen(a) !== isWomen(b)) return false
+  if (isBTeam(a) !== isBTeam(b)) return false
   return closeInTime(a, b)
 }
 
@@ -80,6 +88,7 @@ function dedupeMatches(items) {
         for (const l of dItem._links) if (!urls.has(l.url)) dup._dliveItem._links.push(l)
       }
     }
+    if (!dup._fctvItem && item._fctvItem) dup._fctvItem = item._fctvItem
     if (!dup._isLive && item._isLive) dup._isLive = true
     for (const side of ['_home', '_away']) {
       if (dup[side] && !dup[side].logo && item[side]?.logo) dup[side].logo = item[side].logo
@@ -799,10 +808,10 @@ export default function Sports() {
       // EN DIRECTO (con la tarjeta de escudos fusionada). Los FCTV en directo
       // sin tarjeta de calendario también van ahí; los que no están en directo
       // ni en la jornada se descartan (evita duplicados sin escudos).
-      const liveItems = [
+      const liveItems = dedupeMatches([
         ...jornadas.flatMap(j => j.items).filter(i => i._isLive || i._justFinished),
         ...(fctvGroup?.items || []).filter(fi => !claimedFctv.has(fi.id) && (fi._isLive || fi._justFinished)),
-      ]
+      ])
       // Los recién finalizados tampoco vuelven a la jornada durante sus 5 min.
       jornadas.forEach(j => { j.items = j.items.filter(i => !i._isLive && !i._justFinished) })
       return {
@@ -825,8 +834,7 @@ export default function Sports() {
   // Localiza el item FCTV equivalente a un partido del calendario (para sacar
   // sus enlaces de stream al seleccionarlo).
   const findFctvItem = (marcaItem) => marcaItem._fctvItem || items.find(i =>
-    teamsMatch(i._home?.name, marcaItem._home?.name) &&
-    teamsMatch(i._away?.name, marcaItem._away?.name))
+    sameMatch(i, marcaItem))
 
   // La liga seleccionada se re-resuelve contra los grupos actuales: el refresco
   // silencioso reconstruye los objetos y la referencia guardada queda obsoleta
