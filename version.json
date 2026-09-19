@@ -1,8 +1,8 @@
 {
-  "versionCode": 14,
-  "versionName": "1.4",
+  "versionCode": 15,
+  "versionName": "1.5",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.4.apk",
-  "sha256": "ae8f738a5c96b8feb2223f307ec475d1ce028ba61799ccd6a93e529d2b6f4c04",
-  "notes": "Debrid: badge visible + fileIdx en torrents + trackers. Deportes: dedupe de partidos. Compat TVs viejas."
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.5.apk",
+  "sha256": "c801770e81348149465578f8a55ed1db34014608a4cdc3352da457e288cedf82",
+  "notes": "Deportes: fix duplicados FCTV/DLive por fecha fabricada (Athletic-Alaves)"
 }
