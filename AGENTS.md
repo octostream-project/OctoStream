@@ -122,6 +122,25 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   `VideoPlayer.jsx` cae a ese modo cuando una URL resuelta de embed falla en
   ExoPlayer, o directo si el stream trae `_wvPlayback`.
 
+## Auto-updater (modelo FCTV)
+
+- `version.json` en la raíz es el manifiesto remoto:
+  `{versionCode, versionName, minCode, apkUrl, sha256, notes}`.
+  `minCode > versionCode instalada` → actualización forzosa sin botón cancelar.
+- `src/utils/appUpdater.js` (`checkForUpdate`) + `src/components/UpdateChecker.jsx`
+  (montado en `App.jsx`, solo Android, check ~8s tras arranque, máx. 1/hora).
+- Plugin nativo `@optopus/app-updater` (`capacitor-plugins/app-updater`):
+  `getAppVersion`, `downloadApk` (HTTPS only, progreso, verifica sha256),
+  `installApk` (FileProvider + ACTION_VIEW), `canInstallUnknownApps`,
+  `openInstallSettings`. Declara `REQUEST_INSTALL_PACKAGES` en su manifest.
+- La instalación siempre pasa por el diálogo del sistema — no hay install
+  silenciosa sin privilegios de sistema.
+- Flujo de release: `node scripts/bump-version.mjs <version>` →
+  `npm run android:build:release` → subir el APK como asset a la release en
+  Disroot → `node scripts/bump-version.mjs <version> <apk> <url-asset>` →
+  commit + push del `version.json` resultante. El APK debe firmarse siempre
+  con la misma keystore o la instalación fallará por conflicto de firma.
+
 ## Posibles próximos pasos
 
 - Configurar CI para compilar APK de Android (requiere aceptar licencias SDK y Java).

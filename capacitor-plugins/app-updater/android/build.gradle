@@ -1,0 +1,22 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace = "com.octostream.appupdater"
+    compileSdk = project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 34
+    defaultConfig {
+        minSdk = project.hasProperty('minSdkVersion') ? rootProject.ext.minSdkVersion : 23
+        targetSdk = project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 34
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        abortOnError = false
+    }
+}
+
+dependencies {
+    api project(':capacitor-android')
+    implementation "androidx.core:core:${project.hasProperty('androidxCoreVersion') ? rootProject.ext.androidxCoreVersion : '1.12.0'}"
+}
