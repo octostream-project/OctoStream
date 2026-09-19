@@ -1,8 +1,8 @@
 {
-  "versionCode": 13,
-  "versionName": "1.3",
+  "versionCode": 14,
+  "versionName": "1.4",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.3.apk",
-  "sha256": "2ea69849353c3b6c795b5c381095c60557ed0ccdb2d6304ee9f7fb775d12b023",
-  "notes": "Fix updater: no se queda en 100% sin permiso de instalación"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.4.apk",
+  "sha256": "ae8f738a5c96b8feb2223f307ec475d1ce028ba61799ccd6a93e529d2b6f4c04",
+  "notes": "Debrid: badge visible + fileIdx en torrents + trackers. Deportes: dedupe de partidos. Compat TVs viejas."
 }
