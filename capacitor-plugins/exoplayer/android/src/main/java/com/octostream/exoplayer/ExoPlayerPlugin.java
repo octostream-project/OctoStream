@@ -5506,8 +5506,23 @@ public class ExoPlayerPlugin extends Plugin {
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .setUsage(C.USAGE_MEDIA)
                 .build();
+        // El mini se ve a ~340dp: decodificar 1080p para él dispara CPU/GPU y
+        // RAM en boxes débiles. Track selector capado a ~360p/1.2Mbps (los
+        // masters HLS eligen la variante más baja que cumpla) y LoadControl
+        // pequeño — el default reserva ~50MB, demasiado para un 2º player.
+        DefaultTrackSelector pipTrackSelector = new DefaultTrackSelector(context);
+        pipTrackSelector.setParameters(pipTrackSelector.buildUponParameters()
+                .setMaxVideoSize(640, 360)
+                .setMaxVideoBitrate(1_200_000)
+                .build());
+        DefaultLoadControl pipLoadControl = new DefaultLoadControl.Builder()
+                .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
+                .setTargetBufferBytes(15 * 1024 * 1024)
+                .build();
         pipPlayer = new ExoPlayer.Builder(context)
                 .setAudioAttributes(aa, true)
+                .setTrackSelector(pipTrackSelector)
+                .setLoadControl(pipLoadControl)
                 .setWakeMode(C.WAKE_MODE_LOCAL)
                 .build();
         pipView.setPlayer(pipPlayer);
