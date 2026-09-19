@@ -1,8 +1,8 @@
 {
-  "versionCode": 120,
-  "versionName": "1.20",
+  "versionCode": 121,
+  "versionName": "1.21",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.20.apk",
-  "sha256": "708ae947620ec93225ca98f95615d0173ef600969b128e88940a830a92128085",
-  "notes": "Directos ya no mueren: BehindLiveWindow salta al borde en vivo y los errores de red (403/timeout de segmentos) reintentan solos — fuera las caídas al embed con el círculo"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.21.apk",
+  "sha256": "2431b5cf30b256b3beca1ee8c7bf12965d66f8a12d847ce0e42edd2d4258a2b4",
+  "notes": "Deportes: Primera Federación, Segunda Federación y fútbol femenino español (Liga F, Copa de la Reina) se ordenan junto a LaLiga EA Sports y Hypermotion"
 }

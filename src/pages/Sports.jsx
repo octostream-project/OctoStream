@@ -126,8 +126,11 @@ function trackFinished(merged, catId) {
 // después las grandes ligas europeas y por último el resto del mundo.
 const LEAGUE_ORDER = [
   { re: /laliga ea|la liga|laliga|primera divisi/, not: /hyper|segunda|\b2\b|rfef|federac|women|femen/ },
-  { re: /hypermotion|la ?liga 2|segunda divisi/ },
-  { re: /copa del rey|supercopa/ },
+  { re: /hypermotion|la ?liga 2|segunda divisi/, not: /federac|rfef|women|femen/ },
+  { re: /primera (federaci|rfef)|1[aª]? ?federac|primer?a fed/ },
+  { re: /segunda (federaci|rfef)|2[aª]? ?federac/ },
+  { re: /liga f\b|liga femenina|primera divisi.*femen|femenina|copa de la reina|supercopa.*femen/ },
+  { re: /copa del rey|supercopa/, not: /femen/ },
   { re: /champions league/, not: /afc|caf|women|youth|qualif|asian|concacaf|oceania|\btwo\b/ },
   { re: /europa league/, not: /conference/ },
   { re: /conference league/ },
