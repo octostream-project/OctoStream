@@ -33,7 +33,10 @@ export default function UpdateChecker() {
   const startInstall = async () => {
     const perm = await AppUpdater.canInstallUnknownApps().catch(() => ({ allowed: true }))
     if (!perm.allowed) { setPhase('needPerm'); return }
-    await AppUpdater.installApk({ path: apkPath.current })
+    // Si falta el permiso, el plugin resuelve {needsPermission:true} en vez de
+    // lanzar el instalador — sin esto la fase quedaba en "downloading" pillada.
+    const r = await AppUpdater.installApk({ path: apkPath.current })
+    if (r?.needsPermission) setPhase('needPerm')
   }
 
   const download = async () => {
