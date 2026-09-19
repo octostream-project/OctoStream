@@ -1,8 +1,8 @@
 {
-  "versionCode": 11,
-  "versionName": "1.1",
+  "versionCode": 12,
+  "versionName": "1.2",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.1.apk",
-  "sha256": "9a2afcbf393bc9ae664650ebb8634d779d12ec1b47251e4b815cb7f25b51f401",
-  "notes": ""
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.2.apk",
+  "sha256": "2927d6205caf2b49825425d323d77fe03ff2eeac1b565c0fa70a7dd875daf272",
+  "notes": "Multi-ABI, compat con TVs antiguas, debrid mejorado"
 }
