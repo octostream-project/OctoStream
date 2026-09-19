@@ -24,6 +24,58 @@ const finishedMatches = new Map() // id → { at, catId, item }
 const catalogSnapshot = new Map() // catId → { items, ts }
 const SNAPSHOT_TTL = 10 * 60 * 1000
 
+// Mismo partido = mismo PAR de equipos, sin importar quién figura como local.
+// FCTV usa el orden oficial del fixture pero DLive parsea "A vs B" del título
+// — cuando el orden difiere, el merge no casaba y el partido salía dos veces
+// (el mismo equipo aparecía en "dos partidos diferentes"). Si ambos traen
+// fecha y difieren >6h son partidos distintos (ida/vuelta, doble jornada).
+const WOMEN_RE = /femenin|feminine|women|ladies/i
+const isWomen = (item) => WOMEN_RE.test(item._home?.name || '') ||
+  WOMEN_RE.test(item._away?.name || '') || WOMEN_RE.test(item._league?.name || '')
+
+function sameMatch(a, b) {
+  const ah = a._home?.name, aa = a._away?.name, bh = b._home?.name, ba = b._away?.name
+  if (!ah || !aa || !bh || !ba) return false
+  const direct = teamsMatch(ah, bh) && teamsMatch(aa, ba)
+  const swapped = teamsMatch(ah, ba) && teamsMatch(aa, bh)
+  if (!direct && !swapped) return false
+  // "Real Madrid vs Barcelona" y "Real Madrid Femenino vs Barcelona Femení"
+  // casan por includes pero son partidos distintos.
+  if (isWomen(a) !== isWomen(b)) return false
+  if (a._matchDate && b._matchDate && Math.abs(a._matchDate - b._matchDate) > 6 * 3600 * 1000) return false
+  return true
+}
+
+// Quita duplicados del mismo partido dentro de la lista final (pueden venir
+// del propio FCTV con distinto matchId, o de DLive con nombres que casan por
+// includes en un sentido pero no en el otro). Gana el primero —FCTV va antes
+// que DLive—, heredando lo que el duplicado aporte (links DLive, escudos).
+function dedupeMatches(items) {
+  const out = []
+  for (const item of items) {
+    const dup = out.find(o => sameMatch(o, item))
+    if (!dup) { out.push(item); continue }
+    // El duplicado aporta sus links DLive al item que se queda (puede ser el
+    // propio item DLive o un FCTV con _dliveItem ya asignado).
+    const dItem = item.pluginId === DLIVE_PLUGIN ? item : item._dliveItem
+    if (dItem) {
+      if (!dup._dliveItem) {
+        dup._dliveItem = dItem
+      } else if (Array.isArray(dItem._links) && Array.isArray(dup._dliveItem._links)) {
+        const urls = new Set(dup._dliveItem._links.map(l => l.url))
+        for (const l of dItem._links) if (!urls.has(l.url)) dup._dliveItem._links.push(l)
+      }
+    }
+    if (!dup._isLive && item._isLive) dup._isLive = true
+    for (const side of ['_home', '_away']) {
+      if (dup[side] && !dup[side].logo && item[side]?.logo) dup[side].logo = item[side].logo
+    }
+    if (dup._league && !dup._league.logo && item._league?.logo) dup._league.logo = item._league.logo
+    if (!dup._score && item._score) dup._score = item._score
+  }
+  return out
+}
+
 function trackFinished(merged, catId) {
   const now = Date.now()
   const liveIds = new Set()
@@ -442,9 +494,7 @@ export default function Sports() {
         const mergeAll = () => {
           const merged = (fctvItems || []).map(i => ({ ...i, pluginId: activeCat.pluginId }))
           for (const d of dliveItems) {
-            const f = merged.find(i =>
-              teamsMatch(i._home?.name, d._home?.name) &&
-              teamsMatch(i._away?.name, d._away?.name))
+            const f = merged.find(i => sameMatch(i, d))
             if (f) {
               f._dliveItem = d
               if (!f._isLive && d._isLive) f._isLive = true
@@ -457,7 +507,7 @@ export default function Sports() {
               merged.push({ ...d, pluginId: DLIVE_PLUGIN })
             }
           }
-          return merged
+          return dedupeMatches(merged)
         }
         const paint = () => {
           if (cancelled || fctvItems === null) return
