@@ -19,6 +19,7 @@
     "android:run": "vite build && cap sync && cap run android",
     "android:build": "vite build && cap sync && cd android && ./gradlew :app:assembleDebug",
     "android:build:release": "vite build && cap sync && cd android && ./gradlew :app:assembleRelease",
+    "webos:build": "node scripts/build-webos.mjs --package",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
