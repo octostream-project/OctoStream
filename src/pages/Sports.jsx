@@ -828,11 +828,30 @@ export default function Sports() {
       ])
       // Los recién finalizados tampoco vuelven a la jornada durante sus 5 min.
       jornadas.forEach(j => { j.items = j.items.filter(i => !i._isLive && !i._justFinished) })
+      // Jornada en curso: la primera (en orden) que tiene algún partido sin
+      // terminar (kickoff en el futuro o en las últimas 3h — los que están en
+      // juego se movieron a liveItems pero su ronda sigue siendo la actual).
+      const now = Date.now()
+      let currentRound = null
+      const allRounds = [
+        ...jornadas.map(j => ({ round: j.round, items: j.items })),
+        ...(liveItems.length ? [{ round: liveItems[0]._round, items: liveItems }] : []),
+      ].sort((a, b) => a.round - b.round)
+      for (const j of allRounds) {
+        if (j.items.some(i => !i._matchDate || i._matchDate > now - 3 * 3600e3)) {
+          currentRound = j.round
+          break
+        }
+      }
+      if (currentRound == null && allRounds.length) {
+        currentRound = allRounds[allRounds.length - 1].round
+      }
       return {
         name: lg.name,
         logo: lg.logo || fctvGroup?.logo || null,
         marca: true,
         liveItems,
+        currentRound,
         items: [...liveItems, ...jornadas.flatMap(j => j.items)],
         jornadas,
       }
@@ -866,6 +885,28 @@ export default function Sports() {
   useEffect(() => {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
+
+  // Índice de la jornada en curso dentro de la liga abierta (para scroll y
+  // foco inicial del D-pad).
+  const currentJi = activeLeague?.marca
+    ? Math.max(0, activeLeague.jornadas.findIndex(
+        j => j.round === activeLeague.currentRound && j.items.length > 0))
+    : -1
+
+  // Al abrir una liga de calendario: bajar directo a la jornada de esta
+  // semana en vez de empezar por la jornada 1. Sin directos se hace scroll;
+  // con directos la sección EN DIRECTO ya está arriba (es la misma jornada).
+  useEffect(() => {
+    if (!selectedLeague) return
+    const g = allGroups.find(g => g.name === selectedLeague.name)
+    if (!g?.marca || g.liveItems?.length || g.currentRound == null) return
+    const t = setTimeout(() => {
+      document.getElementById(`sports-jrnd-${g.currentRound}`)
+        ?.scrollIntoView({ block: 'start' })
+    }, 80)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeague])
 
   if (loading && items.length === 0) {
     return (
@@ -979,7 +1020,7 @@ export default function Sports() {
                 </div>
               )}
               {activeLeague.jornadas.map((j, ji) => (
-                <div key={j.round} className="space-y-3">
+                <div key={j.round} id={`sports-jrnd-${j.round}`} className="space-y-3 scroll-mt-4">
                   <h3 className="text-sm font-medium text-dark-300">{j.name || `Jornada ${j.round}`}</h3>
                   <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {j.items.map((item, i) => (
@@ -991,7 +1032,7 @@ export default function Sports() {
                         liveLabel={t('sports.live')}
                         finishedLabel={t('sports.finished')}
                         loadingLabel={t('sports.loading')}
-                        initial={activeLeague.liveItems.length === 0 && ji === 0 && i === 0}
+                        initial={activeLeague.liveItems.length === 0 && ji === currentJi && i === 0}
                       />
                     ))}
                   </div>
