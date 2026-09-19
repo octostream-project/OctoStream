@@ -1,5 +1,5 @@
 import { WebPlugin } from '@capacitor/core'
-import type { ExoPlayerPlugin, PlayOptions, SeekOptions, RateOptions, PlayEmbedOptions, PlayEmbedResult, ResolveEmbedOptions, PlayRelayOptions, PlayRelayResult, SetChannelsOptions, SetEpisodesOptions, SwitchChannelOptions } from './definitions'
+import type { ExoPlayerPlugin, PlayOptions, PlayPipOptions, SeekOptions, RateOptions, PlayEmbedOptions, PlayEmbedResult, ResolveEmbedOptions, PlayRelayOptions, PlayRelayResult, SetChannelsOptions, SetEpisodesOptions, SwitchChannelOptions } from './definitions'
 
 export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async play(_options: PlayOptions): Promise<{ status: string }> {
@@ -56,5 +56,15 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
 
   async setPlaybackRate(_options: RateOptions): Promise<void> {
     throw new Error('ExoPlayer is only available on Android native')
+  }
+
+  async playPip(_options: PlayPipOptions): Promise<{ status: string }> {
+    throw new Error('ExoPlayer is only available on Android native')
+  }
+
+  async stopPip(): Promise<void> {}
+
+  async isPipActive(): Promise<{ active: boolean }> {
+    return { active: false }
   }
 }

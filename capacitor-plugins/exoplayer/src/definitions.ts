@@ -152,6 +152,14 @@ export interface PlayRelayResult {
   status: string
 }
 
+export interface PlayPipOptions {
+  url: string
+  streamType?: 'hls' | 'dash' | 'mp4' | 'webm' | 'progressive' | string
+  headers?: Record<string, string>
+  direct?: boolean
+  title?: string
+}
+
 export interface ExoPlayerPlugin {
   play(options: PlayOptions): Promise<{ status: string }>
   playEmbed(options: PlayEmbedOptions): Promise<PlayEmbedResult>
@@ -182,6 +190,15 @@ export interface ExoPlayerPlugin {
   openDlna(options: { url: string; title?: string }): Promise<{ sent: boolean; device?: string; reason?: string }>
   seekTo(options: SeekOptions): Promise<void>
   setPlaybackRate(options: RateOptions): Promise<void>
+  /**
+   * Abre un segundo ExoPlayer en mini-ventana flotante (PiP interno). El
+   * mini conserva el audio; si hay player principal abierto queda muteado.
+   */
+  playPip(options: PlayPipOptions): Promise<{ status: string }>
+  /** Cierra el mini-player PiP y restaura el audio del principal. */
+  stopPip(): Promise<void>
+  /** Indica si hay un mini-player PiP reproduciendo. */
+  isPipActive(): Promise<{ active: boolean }>
   addListener(eventName: 'playbackState', listener: (state: PlaybackState) => void): Promise<{
     remove: () => void
   }> | { remove: () => void }
