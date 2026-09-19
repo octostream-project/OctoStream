@@ -1,8 +1,8 @@
 {
-  "versionCode": 16,
-  "versionName": "1.6",
+  "versionCode": 17,
+  "versionName": "1.7",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.6.apk",
-  "sha256": "2f31cf5e7bf92305b6de5a35696595cfcae23bef02cd173cac51598f9c94d454",
-  "notes": "Deportes: aliases de equipos (Athletic Club=Bilbao, Man Utd, Spurs…) + guarda de filiales"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.7.apk",
+  "sha256": "5e08726a44f1af3c027fcdf16840fc43a5a0453e7c76a745536bcfc1c9171eec",
+  "notes": "Compat WebView viejo: escala de UI ajustable (Settings>Miscelanea) + polyfills Chrome 66 + CSS legacy completo"
 }

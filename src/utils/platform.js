@@ -13,8 +13,16 @@ export function isAndroidNative() {
 
 // Android TV / box leanback: MainActivity añade "OctoTV" al User-Agent del
 // WebView solo cuando el dispositivo es TV (UI_MODE_TYPE_TELEVISION/leanback).
+// Fallback: boxes con ROM de tablet (sin feature leanback pero sin pantalla
+// táctil y pantalla grande) también son TV para el layout.
 export function isAndroidTv() {
-  return isAndroidNative() && /\bOctoTV\b/.test(navigator.userAgent || '')
+  if (!isAndroidNative()) return false
+  if (/\bOctoTV\b/.test(navigator.userAgent || '')) return true
+  try {
+    return navigator.maxTouchPoints === 0 && Math.max(screen.width, screen.height) >= 960
+  } catch {
+    return false
+  }
 }
 
 /**
