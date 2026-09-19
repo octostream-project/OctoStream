@@ -24,9 +24,15 @@ const LINKS_TABLE = { pelis: 'enlaces_pelis', series: 'enlaces_series' }
 const img = (path, size) =>
   typeof path === 'string' && path.startsWith('/') ? `${TMDB_IMG}${size}${path}` : null
 
+// Acepta ids propios (palantir:movie:N) y ids TMDB (tmdb-movie-N): las claves
+// de la DB son ids TMDB, así los enlaces de Palantir también salen en fichas
+// abiertas desde catálogos/búsquedas TMDB.
 const parseId = (id) => {
-  const m = String(id || '').match(/^palantir:(movie|series):(\d+)$/)
-  return m ? { table: m[1] === 'movie' ? 'pelis' : 'series', tmdb: Number(m[2]) } : null
+  const s = String(id || '')
+  const m = s.match(/^palantir:(movie|series):(\d+)$/) || s.match(/^tmdb-(movie|series)-(\d+)$/)
+  if (m) return { table: m[1] === 'movie' ? 'pelis' : 'series', tmdb: Number(m[2]) }
+  const a = s.match(/^tmdb-anime-(\d+)$/)
+  return a ? { table: 'pelis', tmdb: Number(a[1]), orSeries: true } : null
 }
 
 const itemId = (table, tmdb) => `palantir:${table === 'pelis' ? 'movie' : 'series'}:${tmdb}`
@@ -44,12 +50,24 @@ function rowToItem(row, table, type) {
   }
 }
 
-// Solo comprueba que la DB existe — nunca instala. getMeta/getStreams/search se
-// invocan para ids de otros plugins, así que no pueden disparar la descarga.
+// Solo comprueba que la DB existe — nunca instala. getMeta/search se invocan
+// para ids de otros plugins, así que no pueden disparar la descarga.
 async function readyOrEmpty() {
   if (!isAvailable()) return false
   const st = await getStatus()
   if (st.installed) { maybeUpdate(); return true }
+  return false
+}
+
+// Para getStreams: Palantir se comporta como el resto de plugins — si la DB no
+// está, lanza la descarga en segundo plano y devuelve vacío esta vez. En las
+// siguientes fichas ya responde con enlaces. (Esperar a una descarga de ~78MB
+// dentro del timeout de streams bloquearía la carga del resto de fuentes.)
+async function readyOrDownload() {
+  if (!isAvailable()) return false
+  const st = await getStatus()
+  if (st.installed) { maybeUpdate(); return true }
+  ensureInstalled().catch(() => {})
   return false
 }
 
@@ -102,7 +120,8 @@ export const palantirFactory = (config) => {
     },
 
     async getMeta({ id, signal }) {
-      const ref = parseId(id)
+      // Solo ids propios: para tmdb-* la meta la da TMDB (más completa).
+      const ref = String(id || '').startsWith('palantir:') ? parseId(id) : null
       if (!ref || signal?.aborted || !(await readyOrEmpty())) return null
       const rows = await query(`SELECT * FROM ${ref.table} WHERE tmdb = ?`, [ref.tmdb])
       const r = rows[0]
@@ -155,13 +174,20 @@ export const palantirFactory = (config) => {
 
     async getStreams({ id, season, episode, signal }) {
       const ref = parseId(id)
-      if (!ref || signal?.aborted || !(await readyOrEmpty())) return []
-      const rows = ref.table === 'pelis'
+      if (!ref || signal?.aborted || !(await readyOrDownload())) return []
+      let rows = ref.table === 'pelis'
         ? await query('SELECT link, calidad, audio, info FROM enlaces_pelis WHERE tmdb = ?', [ref.tmdb])
         : await query(
             'SELECT link, calidad, audio, info FROM enlaces_series WHERE tmdb = ? AND temporada = ? AND episodio = ?',
             [ref.tmdb, season ?? 1, episode ?? 1]
           )
+      // tmdb-anime-N: la ficha puede estar en pelis o en series.
+      if (!rows.length && ref.orSeries) {
+        rows = await query(
+          'SELECT link, calidad, audio, info FROM enlaces_series WHERE tmdb = ? AND temporada = ? AND episodio = ?',
+          [ref.tmdb, season ?? 1, episode ?? 1]
+        )
+      }
       if (!rows.length) return []
       const urls = await decryptLinks(rows.map(r => r.link))
       return rows.map((r, i) => {
