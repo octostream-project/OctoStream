@@ -1,8 +1,8 @@
 {
-  "versionCode": 117,
-  "versionName": "1.17",
+  "versionCode": 118,
+  "versionName": "1.18",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.17.apk",
-  "sha256": "c1d1f6356b1c22ee9540f4ddc78252175b69699b898310b4f613e3287952d6eb",
-  "notes": "Anti-ads reforzado en embeds DLive/tiestep: bloqueados profitableratecpmnetwork, xadsmart, adexchangerapid, protrafficinspector, usrpubtrk, luugy y el widget de chat con ads"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.18.apk",
+  "sha256": "4f71ffdb6a252fa96cc204688a4bd04570ecb08315e3ff8fcf8196be1fcd9568",
+  "notes": "Bloqueador de ads tipo uBlock (3.5k dominios en assets) + el picker de deportes muestra los enlaces de FCTV y DaddyLive juntos"
 }

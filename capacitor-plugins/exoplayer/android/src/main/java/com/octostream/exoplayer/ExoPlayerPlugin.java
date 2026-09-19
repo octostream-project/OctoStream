@@ -2312,20 +2312,51 @@ public class ExoPlayerPlugin extends Plugin {
         "(?:^|[/.-])(popads|popunder|popcash|onclick|adserver|adserver\\.|[/]ads[/]|ad\\.php|banner_ads|advert(?:isement)?[/._-])",
         java.util.regex.Pattern.CASE_INSENSITIVE);
 
+    // Lista empaquetada (assets/ad_hosts.txt): ~3.5k dominios de ads/trackers
+    // (base Peter Lowe — la misma fuente que usa uBlock Origin — más los hosts
+    // de ads vistos en los embeds de DLive/tiestep). Se carga una vez.
+    private static volatile java.util.Set<String> assetAdHosts = null;
+
+    private java.util.Set<String> adHosts() {
+        java.util.Set<String> s = assetAdHosts;
+        if (s == null) {
+            synchronized (ExoPlayerPlugin.class) {
+                s = assetAdHosts;
+                if (s == null) {
+                    s = new java.util.HashSet<>(AD_HOSTS);
+                    try {
+                        java.io.BufferedReader r = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(
+                                getContext().getAssets().open("ad_hosts.txt")));
+                        String line;
+                        while ((line = r.readLine()) != null) {
+                            line = line.trim().toLowerCase(java.util.Locale.ROOT);
+                            if (!line.isEmpty() && !line.startsWith("#")) s.add(line);
+                        }
+                        r.close();
+                    } catch (Exception ignored) {}
+                    assetAdHosts = s;
+                }
+            }
+        }
+        return s;
+    }
+
     private boolean isAdRequest(String u) {
         if (u == null) return false;
         try {
             android.net.Uri uri = android.net.Uri.parse(u);
             String host = uri.getHost();
             if (host == null) return false;
+            java.util.Set<String> hosts = adHosts();
             String h = host.toLowerCase(java.util.Locale.ROOT);
             if (h.startsWith("www.")) h = h.substring(4);
-            if (AD_HOSTS.contains(h)) return true;
+            if (hosts.contains(h)) return true;
             // Sufijos de dominio (subdominios de redes de ads)
             int dot = h.indexOf('.');
             while (dot > 0 && dot < h.length() - 1) {
                 h = h.substring(dot + 1);
-                if (AD_HOSTS.contains(h)) return true;
+                if (hosts.contains(h)) return true;
                 dot = h.indexOf('.');
             }
             if (AD_PATH.matcher(u).find()) return true;
