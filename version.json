@@ -3,16 +3,14 @@
   "versionName": "1.24",
   "minCode": 0,
   "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk",
-  "sha256": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
+  "sha256": "32470633179cebe7448f87c2fb362f9b6daee0f923ddd19957842b721f70461b",
   "notes": "Fix: el aviso \"pulsa atras otra vez para salir\" ya desaparece tras 2.5s",
   "apkUrls": {
     "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk",
-    "x86_64": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-x86_64.apk"
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "eacdcfe449aeb00c0a80811b956a706d64113d59ce7a53dbd69a362c01e6596c",
-    "armeabi-v7a": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
-    "x86_64": "7cee6b4e9ec32c8780317bfb413da342e5a1e008a7020842ddf243f2211e369c"
+    "arm64-v8a": "0dd4f6bb9bdba806245a834695afd7089ca10389e775db26cc3c1caf3c62dc9d",
+    "armeabi-v7a": "32470633179cebe7448f87c2fb362f9b6daee0f923ddd19957842b721f70461b"
   }
 }
