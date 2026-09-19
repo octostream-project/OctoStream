@@ -29,6 +29,10 @@ export default defineConfig({
   // NOTA: Vite 8 usa rolldown+oxc — `esbuild.pure` se ignora; el equivalente
   // es treeshake.manualPureFunctions.
   build: {
+    // TVs Android antiguos (9 y anteriores) traen WebView Chromium ~66 sin
+    // actualizar — el default de Vite (Chrome ~87+) emite sintaxis que no
+    // parsean (optional chaining, class fields…) → pantalla negra al arrancar.
+    target: 'es2015',
     rolldownOptions: {
       treeshake: {
         manualPureFunctions: ['console.log', 'console.debug', 'console.info'],
