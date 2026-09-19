@@ -3,6 +3,6 @@
   "versionName": "1.22",
   "minCode": 0,
   "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.22/octostream-1.22.apk",
-  "sha256": "5eefa08ebf1bf776e5e0d2ccb48ebafd8ee38dce990fa736971fdc870dd0a52c",
-  "notes": "Deportes: todas las jornadas con resultados, logo de liga y apertura directa en la jornada de la semana"
+  "sha256": "96316ac2cafd28a0a93483ddb5966c4de77b6b593c3d474b01853018b3d1b914",
+  "notes": "Deportes: todas las jornadas con resultados, logo de liga y apertura directa en la jornada de la semana (APK arm64)"
 }
