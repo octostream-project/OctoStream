@@ -716,7 +716,23 @@ export default function Sports() {
         pluginManager.getStreams(src.type, src.id, src.name, ctrl.signal)
           .catch(() => [])
           .then(streams => {
-            for (const s of streams || []) acc.push({ ...s, _fctvItem: src })
+            let list = streams || []
+            // Si la resolución falla (dominio rotado, timeout) pero la tarjeta
+            // ya traía sus enlaces del schedule, ofrecerlos como embed — la
+            // resolución headless/WebView los abre en el player.
+            if (!list.length && src._links?.length) {
+              list = src._links.map(l => ({
+                name: `DLive ${l.label || 'Web'}`,
+                title: 'DLive · Web',
+                url: l.url,
+                referer: l.referer,
+                streamType: 'embed',
+                isLive: true,
+                _noCache: true,
+                _wvPlayback: /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b/i.test(l.url) || undefined,
+              }))
+            }
+            for (const s of list) acc.push({ ...s, _fctvItem: src })
             flush()
           })))
       if (requestId !== playRequestRef.current || ctrl.signal.aborted) return
