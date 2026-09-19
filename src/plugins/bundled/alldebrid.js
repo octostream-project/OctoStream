@@ -225,8 +225,8 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
     // Still processing, wait and retry
     await new Promise(r => setTimeout(r, 3000))
   }
-  // Timeout - clean up
-  deleteMagnet(magnetId).catch(() => {})
+  // Timeout: NO borrar el magnet — AllDebrid sigue bajándolo en su servidor y
+  // queda cacheado para la próxima petición (igual que el fix de RealDebrid).
   return null
 }
 

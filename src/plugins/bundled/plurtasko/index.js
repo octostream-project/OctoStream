@@ -562,49 +562,49 @@ async function resolveStreams(streams, onBatch) {
     s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'dash' ||
     (s.streamType === 'torrent' && torrentSearchEnabled())
   )
+  const debridEnabled = isAlldebridEnabled() || isRealdebridEnabled()
+  const debridTasks = []
   for (const s of directStreams) {
     // Extract quality from direct URL if not already set
     const urlQuality = extractQualityFromUrl(s.url) || 'HD'
 
     // For torrents, try debrid services (converts magnet to direct stream).
     // .torrent URLs are converted to magnets first so debrid can ingest them.
-    if (s.streamType === 'torrent' && (isAlldebridEnabled() || isRealdebridEnabled())) {
-      try {
-        let magnetUrl = /magnet:/.test(s.url) ? s.url : null
-        if (!magnetUrl && /^https?:\/\//i.test(s.url)) {
-          const { torrentUrlToMagnet } = await import('../../../utils/torrentFile.js')
-          magnetUrl = await torrentUrlToMagnet(s.url)
-        }
-        if (!magnetUrl) {
-          expanded.push({ ...s, quality: urlQuality })
-          continue
-        }
-        const links = await debridResolveMagnet(magnetUrl)
-        if (links && links.length) {
-          for (const link of links) {
-            const isHls = /\.m3u8/i.test(link) || /m3u8/i.test(link)
-            expanded.push({
+    // Se lanzan en paralelo — un torrent no cacheado tarda ~30s de timeout y
+    // en serie multiplicaría la espera por cada resultado.
+    if (s.streamType === 'torrent' && debridEnabled) {
+      debridTasks.push((async () => {
+        try {
+          let magnetUrl = /magnet:/.test(s.url) ? s.url : null
+          if (!magnetUrl && /^https?:\/\//i.test(s.url)) {
+            const { torrentUrlToMagnet } = await import('../../../utils/torrentFile.js')
+            magnetUrl = await torrentUrlToMagnet(s.url)
+          }
+          if (!magnetUrl) return [{ ...s, quality: urlQuality }]
+          const links = await debridResolveMagnet(magnetUrl)
+          if (links && links.length) {
+            return links.map(link => ({
               ...s,
               url: link,
-              streamType: isHls ? 'hls' : 'mp4',
+              streamType: /\.m3u8/i.test(link) || /m3u8/i.test(link) ? 'hls' : 'mp4',
               quality: urlQuality,
               server: s.server + ' (Debrid)',
               originalUrl: s.url,
-            })
+            }))
           }
-          continue
+        } catch (e) {
+          logWarn(`[Debrid] Failed to resolve magnet: ${hostOf(s.url)}`, String(e?.message || e))
         }
-      } catch (e) {
-        logWarn(`[AllDebrid] Failed to resolve magnet: ${hostOf(s.url)}`, String(e?.message || e))
-      }
+        // Debrid no lo tenía cacheado → cae a P2P; se marca para que el
+        // usuario distinga el fallback del stream "(Debrid)".
+        return [{ ...s, quality: urlQuality, server: s.server + ' (P2P)' }]
+      })())
+      continue
     }
 
-    if (!s.quality) {
-      expanded.push({ ...s, quality: urlQuality })
-    } else {
-      expanded.push(s)
-    }
+    expanded.push(s.quality ? s : { ...s, quality: urlQuality })
   }
+  for (const entries of await Promise.all(debridTasks)) expanded.push(...entries)
 
   // Emit direct streams immediately (they're already playable)
   if (onBatch && expanded.length > 0) onBatch(expanded)
