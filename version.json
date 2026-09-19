@@ -1,16 +1,18 @@
 {
-  "versionCode": 123,
-  "versionName": "1.23",
+  "versionCode": 124,
+  "versionName": "1.24",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-armeabi-v7a.apk",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk",
   "sha256": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
-  "notes": "Updater: APK por arquitectura (arm64/armv7). x86_64 usa el fallback armv7",
+  "notes": "Fix: el aviso \"pulsa atras otra vez para salir\" ya desaparece tras 2.5s",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk",
+    "x86_64": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-x86_64.apk"
   },
   "sha256s": {
     "arm64-v8a": "eacdcfe449aeb00c0a80811b956a706d64113d59ce7a53dbd69a362c01e6596c",
-    "armeabi-v7a": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9"
+    "armeabi-v7a": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
+    "x86_64": "7cee6b4e9ec32c8780317bfb413da342e5a1e008a7020842ddf243f2211e369c"
   }
 }
