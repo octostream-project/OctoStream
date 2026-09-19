@@ -7,6 +7,7 @@ import { getDeviceCode as rdGetDeviceCode, getDeviceCredentials as rdGetCredenti
 import OctoLoader from '../components/OctoLoader.jsx'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
+import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -42,6 +43,7 @@ export default function Settings() {
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
   )
   const [mobileMenu, setMobileMenu] = useState(true)
+  const [uiScale, setUiScalePct] = useState(() => getUiScale() || 100)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)')
     const onChange = () => setIsMobile(mq.matches)
@@ -1229,6 +1231,41 @@ export default function Settings() {
       {/* Tab: Miscelánea */}
       {activeTab === 'misc' && (
         <div className="space-y-6">
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Monitor className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Tamaño de interfaz</h3>
+                <p className="text-dark-400 text-sm">
+                  Agrandar o reducir toda la UI — útil en TVs/boxes donde se ve pequeña
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(Math.max(80, uiScale - 10)))}
+                className="btn-secondary px-4 py-2 font-bold"
+              >−</button>
+              <span className="text-white font-mono text-lg w-16 text-center">{uiScale}%</span>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(Math.min(200, uiScale + 10)))}
+                className="btn-secondary px-4 py-2 font-bold"
+              >+</button>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(0))}
+                className="btn-ghost px-3 py-2 text-sm"
+              >Auto</button>
+            </div>
+          </div>
+
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
