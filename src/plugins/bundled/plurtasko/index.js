@@ -692,17 +692,19 @@ async function resolveStreams(streams, onBatch) {
               continue
             }
             const quality = pickQuality(urlQuality, meta.quality, srv.quality, s.quality)
+            const srvName = srv.viaDebrid ? `${srv.server} (Debrid)` : srv.server
             results.push({
               ...s,
-              name: `${srv.server}${lang ? ` (${lang})` : ''}`,
+              name: `${srvName}${lang ? ` (${lang})` : ''}`,
               url: srv.directUrl,
               streamType: srv.streamType,
-              server: srv.server,
+              server: srvName,
               lang,
               quality,
               title: meta.title || s.title,
               originalUrl: s.url,
               headers,
+              viaDebrid: srv.viaDebrid,
             })
           }
           return results
