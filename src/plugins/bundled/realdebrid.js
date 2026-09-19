@@ -356,7 +356,9 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000) {
     }
     await new Promise(r => setTimeout(r, 3000))
   }
-  deleteTorrent(torrentId).catch(() => {})
+  // Timeout: NO borrar el torrent — RD sigue descargándolo en su servidor y
+  // queda cacheado para la próxima petición. Borrarlo aquí hacía que un
+  // torrent no cacheado nunca llegara a estarlo → siempre caía a P2P.
   return null
 }
 
