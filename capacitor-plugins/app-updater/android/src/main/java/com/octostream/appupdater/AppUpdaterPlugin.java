@@ -116,6 +116,10 @@ public class AppUpdaterPlugin extends Plugin {
                         fos.write(buf, 0, n);
                         if (expectedSha != null) md.update(buf, 0, n);
                         received += n;
+                        // Si conocemos Content-Length, corta al llegar: una
+                        // conexión keep-alive puede no cerrar nunca y read()
+                        // se quedaría bloqueado en el 100% indefinidamente.
+                        if (total > 0 && received >= total) break;
                         if (received - lastEmit >= 512 * 1024 || received == total) {
                             lastEmit = received;
                             JSObject ev = new JSObject();
