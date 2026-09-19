@@ -120,19 +120,38 @@ function trackFinished(merged, catId) {
   }
 }
 
-// Ligas principales primero en la vista de categorías (substring, minúsculas).
-const MAJOR_LEAGUES = [
-  'la liga', 'laliga', 'primera división', 'primera division',
-  'premier league', 'bundesliga', 'serie a', 'ligue 1',
-  'champions league', 'europa league', 'conference league',
-  'copa del rey', 'fa cup', 'eredivisie', 'primeira',
-  'brasileir', 'brazilian serie a', 'libertadores', 'sudamericana',
-  'argentin', 'liga mx', 'mls', 'saudi', 'championship',
+// Orden de ligas en la vista de categorías: españolas primero (LaLiga,
+// Segunda, Copa del Rey), luego Champions y el resto de competiciones UEFA,
+// después las grandes ligas europeas y por último el resto del mundo.
+const LEAGUE_ORDER = [
+  { re: /laliga ea|la liga|laliga|primera divisi/, not: /hyper|segunda|\b2\b|rfef|federac|women|femen/ },
+  { re: /hypermotion|la ?liga 2|segunda divisi/ },
+  { re: /copa del rey|supercopa/ },
+  { re: /champions league/, not: /afc|caf|women|youth|qualif|asian|concacaf|oceania|\btwo\b/ },
+  { re: /europa league/, not: /conference/ },
+  { re: /conference league/ },
+  { re: /premier league/, not: /russian|egyptian|ukrain|saudi|indian|scottish|women|reserve/ },
+  { re: /\bserie a\b/, not: /brazil|ecuador|women|primavera/ },
+  { re: /bundesliga/, not: /\b2\b|austria|women|liga 3/ },
+  { re: /\bligue 1\b/, not: /women|reserve/ },
+  { re: /eredivisie/ },
+  { re: /primeira|liga portugal/ },
+  { re: /fa cup|copa italia|coppa italia|dfb pokal|coupe de france/ },
+  { re: /championship/ },
+  { re: /brasileir|brazilian serie a|libertadores|sudamericana|argentin|liga mx|\bmls\b|saudi/ },
 ]
 const leagueRank = (name) => {
   const n = String(name || '').toLowerCase()
-  const i = MAJOR_LEAGUES.findIndex(k => n.includes(k))
-  return i === -1 ? MAJOR_LEAGUES.length : i
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const i = LEAGUE_ORDER.findIndex(r => r.re.test(n) && !(r.not && r.not.test(n)))
+  return i === -1 ? LEAGUE_ORDER.length : i
+}
+const leagueGroupCmp = (a, b) => {
+  const diff = leagueRank(a.name) - leagueRank(b.name)
+  if (diff) return diff
+  const aLive = a.items.some(i => i._isLive) ? 1 : 0
+  const bLive = b.items.some(i => i._isLive) ? 1 : 0
+  return bLive - aLive || a.name.localeCompare(b.name)
 }
 
 // Alias: nombre de liga Marca → regex sobre el nombre de liga FCTV
@@ -639,14 +658,9 @@ export default function Sports() {
       }
       groups.get(key).items.push(ghost)
     }
-    // Ligas principales primero, luego con directos, luego por nombre.
-    return [...groups.values()].sort((a, b) => {
-      const diff = leagueRank(a.name) - leagueRank(b.name)
-      if (diff) return diff
-      const aLive = a.items.some(i => i._isLive) ? 1 : 0
-      const bLive = b.items.some(i => i._isLive) ? 1 : 0
-      return bLive - aLive || a.name.localeCompare(b.name)
-    })
+    // Ligas principales primero (orden LEAGUE_ORDER), luego con directos,
+    // luego por nombre.
+    return [...groups.values()].sort(leagueGroupCmp)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, activeCat])
 
@@ -823,6 +837,9 @@ export default function Sports() {
         jornadas,
       }
     })
+    // Mismo orden que el resto de ligas: españolas → Champions/UEFA →
+    // grandes ligas europeas → resto.
+    groups.sort(leagueGroupCmp)
     return { groups, usedNames: used }
   }, [leagueGroups, marcaResults])
 
