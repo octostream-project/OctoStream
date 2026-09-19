@@ -27,6 +27,7 @@
     "@capacitor/app": "^8.1.1",
     "@octostream/cloud-proxy": "file:capacitor-plugins/cloud-proxy",
     "@octostream/exo-player": "file:capacitor-plugins/exoplayer",
+    "@octostream/palantir": "file:capacitor-plugins/palantir",
     "@octostream/torrent-engine": "file:capacitor-plugins/torrent-engine",
     "@octostream/youtube": "file:capacitor-plugins/youtube",
     "@optopus/app-updater": "file:capacitor-plugins/app-updater",

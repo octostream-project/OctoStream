@@ -17,6 +17,7 @@ const bundledLoaders = {
   anilist: () => import('./kitsu/index.js').then(m => m.kitsuFactory),
   fctv: () => import('./fctv/index.js').then(m => m.fctvFactory),
   dlive: () => import('./dlive/index.js').then(m => m.dliveFactory),
+  palantir: () => import('./palantir/index.js').then(m => m.palantirFactory),
 }
 
 // Cache de factories ya resueltas para no re-importar
