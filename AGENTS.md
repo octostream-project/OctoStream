@@ -24,6 +24,10 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   saltarse CORS en Android.
 - SDK objetivo: `compileSdk/targetSdk 34`, `minSdk 23`. AGP 8.2.1.
 - Media3 ExoPlayer 1.10.1 se declara en `capacitor-plugins/exoplayer/android/build.gradle`.
+- ABIs del APK (`abiFilters` en `android/app/build.gradle`): `arm64-v8a`,
+  `armeabi-v7a`, `x86_64`. `x86` 32-bit queda fuera porque libaether
+  (cloud-proxy) no lo incluye; jlibtorrent sí cubre las 4. Si se regenera
+  `android/` con `cap add android` hay que volver a poner los abiFilters.
 
 ## Mejoras aplicadas recientemente
 
