@@ -13,6 +13,7 @@ import { createPlugin, PluginManifest, CONTENT_TYPES } from '../../base.js'
 import { logWarn } from '../../../utils/logger.js'
 import { httpGetText, httpGetJson, shortSignal } from '../../../utils/httpClient.js'
 import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, sofaSportFor } from './parse.js'
+import { probeHlsQuality } from '../../../utils/streamProbe.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 
 // Candidate domains — the service rotates often; first one answering with
@@ -139,9 +140,11 @@ async function resolveEventStreams(item, signal) {
   const jobs = (item._links || []).map(async (link) => {
     if (/watchlivelive\.php/.test(link.url)) {
       try {
-        const html = await httpGetText(link.url, UA, signal)
+        const html = await httpGetText(link.url, UA, shortSignal(signal, 8000))
         const r = extractLiveLiveUrl(html)
         if (r) {
+          const quality = await probeHlsQuality(r.url,
+            r.referer ? { Referer: r.referer } : UA, signal)
           streams.push({
             name: `DLive ${link.label}`,
             title: 'Directo',
@@ -149,6 +152,7 @@ async function resolveEventStreams(item, signal) {
             referer: r.referer,
             headers: r.referer ? { Referer: r.referer } : undefined,
             streamType: 'hls',
+            quality: quality || undefined,
             isLive: true,
             _noCache: true,
           })

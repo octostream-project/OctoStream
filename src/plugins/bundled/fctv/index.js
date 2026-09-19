@@ -13,6 +13,7 @@ import {
 } from './proto.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '../../../utils/httpClient.js'
+import { probeHlsQuality } from '../../../utils/streamProbe.js'
 
 // slug → API sportType (values reverse-engineered from the official app)
 const SPORT_TYPES = {
@@ -386,6 +387,12 @@ async function resolveDirectStreams(cfg, m, signal) {
       logWarn('[FCTV] stream detail failed:', String(e2?.message || e2))
     }
   }
+  // Resolución real del master .m3u8 (los CDN rotan; sonda paralela con
+  // timeout propio — nunca bloquea la lista si un origen está caído).
+  await Promise.allSettled(streams.slice(0, 8).map(async (s) => {
+    const q = await probeHlsQuality(s.url, s.headers, signal)
+    if (q) s.quality = q
+  }))
   return streams
 }
 
@@ -517,23 +524,16 @@ export const fctvFactory = (config) => {
           matchDate: item?._matchDate,
         }
 
-        // Direct HLS: match/detail → stream/detail → ROT47 + rb-session token.
-        // Falls back to the embed player below if the API path fails.
-        const streams = []
-        try {
-          streams.push(...await resolveDirectStreams(cfg, m, signal))
-        } catch (e) {
-          if (e?.name === 'AbortError') throw e
-          logWarn('[FCTV] direct resolve failed:', String(e?.message || e))
-        }
-
+        // Embeds baratos primero: garantizan enlaces aunque la API de streams
+        // se coma el timeout del manager (25s) en redes lentas de TV.
         // The site's own iframe uses mdata=b64(matchId_sportType). The player
         // page rejects requests without a Referer — pass the match page URL so
         // the native resolver sends it on the initial loadUrl.
         const referer = matchPageUrl(cfg.webDomain, m)
         const mdata = btoa(`${matchId}_${m.sportType}`)
+        const embeds = []
         for (const [i, dom] of cfg.iframeDomains.slice(0, 3).entries()) {
-          streams.push({
+          embeds.push({
             name: `FCTV Web ${i + 1}`,
             title: 'FCTV · Web',
             url: `https://${dom}/es/player.html?mdata=${mdata}&ilang=es`,
@@ -548,7 +548,7 @@ export const fctvFactory = (config) => {
         // itself creates the iframe with the proper Referer).
         for (const [i, base] of [cfg.playerDomains[0], cfg.webDomain].entries()) {
           if (!base) continue
-          streams.push({
+          embeds.push({
             name: `FCTV Página${i ? ' (alt)' : ''}`,
             title: 'FCTV · Web',
             url: matchPageUrl(base, m),
@@ -557,7 +557,18 @@ export const fctvFactory = (config) => {
             isLive: true,
           })
         }
-        return streams
+
+        // Direct HLS: match/detail → stream/detail → ROT47 + rb-session token.
+        // Presupuesto propio de 15s: si la API va lenta, se devuelven los
+        // embeds en vez de reventar el timeout del manager y volver vacío.
+        let direct = []
+        try {
+          direct = await resolveDirectStreams(cfg, m, shortSignal(signal, 15000))
+        } catch (e) {
+          if (signal?.aborted) throw e
+          logWarn('[FCTV] direct resolve failed:', String(e?.message || e))
+        }
+        return [...direct, ...embeds]
       } catch (e) {
         if (e?.name === 'AbortError') throw e
         logWarn('[FCTV] getStreams failed:', String(e?.message || e))
