@@ -2,7 +2,7 @@
   "versionCode": 11,
   "versionName": "1.1",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.1/octostream-1.1.apk",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.1.apk",
   "sha256": "a11ed7e58bcad8b08b9c557c9e230dbe17b6af03765897158b216a7b12e990c3",
   "notes": "Notas de la versión"
 }
