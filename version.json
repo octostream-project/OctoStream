@@ -1,8 +1,8 @@
 {
-  "versionCode": 112,
-  "versionName": "1.12",
+  "versionCode": 113,
+  "versionName": "1.13",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.12.apk",
-  "sha256": "1d60d7ed7eb1676c7d693f138cd733d37fe2f78d414f80ae6577a0d349a6f0fc",
-  "notes": "PiP interno: dos vídeos a la vez (mini con audio + grande muteado). Fix 'sin enlaces' en partidos FCTV (embeds siempre disponibles)"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.13.apk",
+  "sha256": "fb88c7f7c7e7d22b8d24d590b7068ad9b93609cc0a24ce93be79281ba1b88dd5",
+  "notes": "PiP ya no se pausa al abrir el vídeo grande (audio focus). Fix 'sin enlaces' FCTV"
 }
