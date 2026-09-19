@@ -1,8 +1,8 @@
 {
-  "versionCode": 115,
-  "versionName": "1.15",
+  "versionCode": 116,
+  "versionName": "1.16",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.15.apk",
-  "sha256": "81a44d001bbf2354656c5145f79b71b23ff331b7169d269d4462e303a8d53ffc",
-  "notes": "Anti-popunder en embeds: los anuncios de DLive ya no pueden secuestrar la reproducción. Liga: solo jornada actual + siguientes"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.16.apk",
+  "sha256": "c7390cb88cf75d43e0413f2ce0190a14f48a145e21329f2c51b196fbe82522de",
+  "notes": "PiP ligero: el mini decodifica a 360p máximo y usa 15MB de buffer — ya no ralentiza la app en boxes débiles"
 }
