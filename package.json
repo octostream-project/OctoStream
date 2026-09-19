@@ -8,17 +8,17 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/compat-css.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
     "electron:build": "vite build && electron-builder",
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
-    "android:sync": "vite build && cap sync",
-    "android:run": "vite build && cap sync && cap run android",
-    "android:build": "vite build && cap sync && cd android && ./gradlew :app:assembleDebug",
-    "android:build:release": "vite build && cap sync && cd android && ./gradlew :app:assembleRelease",
+    "android:sync": "npm run build && cap sync",
+    "android:run": "npm run build && cap sync && cap run android",
+    "android:build": "npm run build && cap sync && cd android && ./gradlew :app:assembleDebug",
+    "android:build:release": "npm run build && cap sync && cd android && ./gradlew :app:assembleRelease",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
@@ -106,5 +106,8 @@
   "allowScripts": {
     "electron@33.4.11": true,
     "esbuild@0.21.5": true
-  }
+  },
+  "browserslist": [
+    "chrome 66"
+  ]
 }
