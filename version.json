@@ -3,14 +3,14 @@
   "versionName": "1.24",
   "minCode": 0,
   "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk",
-  "sha256": "32470633179cebe7448f87c2fb362f9b6daee0f923ddd19957842b721f70461b",
-  "notes": "Fix: el aviso \"pulsa atras otra vez para salir\" ya desaparece tras 2.5s",
+  "sha256": "5b5668bf48231687cf4a7ea8f11d27825fd70290756ba340291cc7677924e827",
+  "notes": "Fix: el aviso de salida desaparece; APK instala en TV (features location/wifi no requeridas)",
   "apkUrls": {
     "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-arm64-v8a.apk",
     "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.24/octostream-1.24-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "0dd4f6bb9bdba806245a834695afd7089ca10389e775db26cc3c1caf3c62dc9d",
-    "armeabi-v7a": "32470633179cebe7448f87c2fb362f9b6daee0f923ddd19957842b721f70461b"
+    "arm64-v8a": "2bdc8d4da68f5b28f618f4a324983f7d58d27f2e9c0519dcf3fcec0cdda6094a",
+    "armeabi-v7a": "5b5668bf48231687cf4a7ea8f11d27825fd70290756ba340291cc7677924e827"
   }
 }
