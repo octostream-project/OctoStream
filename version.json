@@ -1,8 +1,18 @@
 {
-  "versionCode": 122,
-  "versionName": "1.22",
+  "versionCode": 123,
+  "versionName": "1.23",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.22/octostream-1.22.apk",
-  "sha256": "96316ac2cafd28a0a93483ddb5966c4de77b6b593c3d474b01853018b3d1b914",
-  "notes": "Deportes: todas las jornadas con resultados, logo de liga y apertura directa en la jornada de la semana (APK arm64)"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-armeabi-v7a.apk",
+  "sha256": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
+  "notes": "Updater: APK por arquitectura (arm64/armv7/x86_64) \u2014 cada build ~23MB, compatible con el limite de Disroot",
+  "apkUrls": {
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-armeabi-v7a.apk",
+    "x86_64": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.23/octostream-1.23-x86_64.apk"
+  },
+  "sha256s": {
+    "arm64-v8a": "eacdcfe449aeb00c0a80811b956a706d64113d59ce7a53dbd69a362c01e6596c",
+    "armeabi-v7a": "54cce0f17125236c0ceaa086344bd40556db245fc66f52cd5da154cd67b733d9",
+    "x86_64": "7cee6b4e9ec32c8780317bfb413da342e5a1e008a7020842ddf243f2211e369c"
+  }
 }

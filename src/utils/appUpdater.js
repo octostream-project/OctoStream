@@ -31,13 +31,30 @@ export async function checkForUpdate({ manifestUrl = UPDATE_MANIFEST_URL } = {})
     ])
     if (!manifest || !app) return null
     if (!(manifest.versionCode > app.versionCode)) return null
-    if (!manifest.apkUrl || !manifest.apkUrl.startsWith('https://')) return null
+    // APK por ABI: el manifiesto puede llevar apkUrls{abi:url}+sha256s{abi:sha}.
+    // Se prueban los ABIs del dispositivo en orden de preferencia; si el
+    // manifiesto no tiene mapa (releases antiguas) se usa apkUrl/sha256.
+    const abis = String(app.abis || '').split(',').filter(Boolean)
+    let apkUrl = null
+    let sha256 = ''
+    if (manifest.apkUrls && typeof manifest.apkUrls === 'object') {
+      const abi = abis.find(a => manifest.apkUrls[a])
+      if (abi) {
+        apkUrl = manifest.apkUrls[abi]
+        sha256 = (manifest.sha256s && manifest.sha256s[abi]) || ''
+      }
+    }
+    if (!apkUrl) {
+      apkUrl = manifest.apkUrl
+      sha256 = manifest.sha256 || ''
+    }
+    if (!apkUrl || !apkUrl.startsWith('https://')) return null
     return {
       versionCode: manifest.versionCode,
       versionName: manifest.versionName || String(manifest.versionCode),
       notes: manifest.notes || '',
-      apkUrl: manifest.apkUrl,
-      sha256: manifest.sha256 || '',
+      apkUrl,
+      sha256,
       force: (manifest.minCode || 0) > app.versionCode,
     }
   } catch {

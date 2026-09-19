@@ -1,8 +1,10 @@
 import type { PluginListenerHandle } from '@capacitor/core'
 
 export interface AppUpdaterPlugin extends Plugin {
-  /** Installed package version: {versionCode, versionName} */
-  getAppVersion(): Promise<{ versionCode: number; versionName: string }>
+  /** Installed package version: {versionCode, versionName, abis} — abis is a
+   *  comma-separated list of Build.SUPPORTED_ABIS (preference order) used to
+   *  pick a per-ABI APK when the manifest provides apkUrls{}. */
+  getAppVersion(): Promise<{ versionCode: number; versionName: string; abis?: string }>
   /** Android 8+: whether the app may install packages */
   canInstallUnknownApps(): Promise<{ allowed: boolean }>
   /** Opens the per-app "install unknown apps" system settings page */

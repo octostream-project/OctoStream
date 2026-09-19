@@ -50,13 +50,33 @@ if (apkPath && existsSync(apkPath)) {
   console.warn(`apk no encontrado: ${apkPath} — sha256 queda vacío`)
 }
 
+// Splits por ABI: si el dir de salida tiene app-<abi>-release.apk se genera
+// apkUrls/sha256s por ABI. apkUrl apunta al build armeabi-v7a (instalable en
+// todos los ABIs) como fallback para updaters antiguos.
+const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64']
+const splitDir = 'android/app/build/outputs/apk/release'
+const apkUrls = {}
+const sha256s = {}
+for (const abi of ABIS) {
+  const p = `${splitDir}/app-${abi}-release.apk`
+  if (existsSync(p)) {
+    apkUrls[abi] = `https://git.disroot.org/aka.kuro/OctoStream/releases/download/v${versionName}/octostream-${versionName}-${abi}.apk`
+    sha256s[abi] = createHash('sha256').update(readFileSync(p)).digest('hex')
+  }
+}
+
 const manifest = {
   versionCode,
   versionName,
   minCode: 0,
-  apkUrl: apkUrl || '',
-  sha256,
+  apkUrl: apkUrl || apkUrls['armeabi-v7a'] || '',
+  sha256: sha256 || sha256s['armeabi-v7a'] || '',
   notes,
+}
+if (Object.keys(apkUrls).length) {
+  manifest.apkUrls = apkUrls
+  manifest.sha256s = sha256s
+  console.log('splits detectados:', Object.keys(apkUrls).join(', '))
 }
 writeFileSync('version.json', JSON.stringify(manifest, null, 2) + '\n')
 console.log('version.json →', manifest)

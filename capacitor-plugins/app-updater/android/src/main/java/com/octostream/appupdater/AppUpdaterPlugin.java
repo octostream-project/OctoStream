@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 
 import androidx.core.content.FileProvider;
@@ -44,6 +45,9 @@ public class AppUpdaterPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("versionCode", code);
             ret.put("versionName", pi.versionName != null ? pi.versionName : "");
+            // ABIs soportados por el dispositivo (orden de preferencia) para
+            // elegir el APK correcto cuando el manifiesto publica apkUrls{}.
+            ret.put("abis", TextUtils.join(",", Build.SUPPORTED_ABIS));
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("getAppVersion failed", e);
