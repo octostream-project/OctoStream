@@ -47,6 +47,7 @@ async function sofaLiveEvents(slug, signal) {
       home: e.homeTeam?.name, homeId: e.homeTeam?.id,
       away: e.awayTeam?.name, awayId: e.awayTeam?.id,
       utId: e.tournament?.uniqueTournament?.id,
+      tournament: e.tournament?.uniqueTournament?.name || e.tournament?.name || null,
     }))
   } catch { /* offline / challenge — pasada de búsqueda cubre */ }
   cacheSet(liveCache, slug, { ts: Date.now(), events })
@@ -254,6 +255,15 @@ async function enrichLogosInner(items, signal, deep) {
       if (it._home && ev.homeId) it._home.logo = teamImg(ev.homeId)
       if (it._away && ev.awayId) it._away.logo = teamImg(ev.awayId)
       if (it._league && ev.utId) it._league.logo = tournamentImg(ev.utId)
+      // Sofascore sabe la competición real: los providers a veces etiquetan
+      // mal la liga (Copa del Rey listada bajo La Liga). Re-etiquetar cuando
+      // difiere de verdad — la comparación compacta ignora "La Liga"≈"LaLiga"
+      // para no partir una liga en dos grupos.
+      if (it._league?.name && ev.tournament) {
+        const cur = leagueKey(it._league.name).replace(/\s+/g, '')
+        const real = leagueKey(ev.tournament).replace(/\s+/g, '')
+        if (real && cur !== real) it._league = { ...it._league, name: ev.tournament }
+      }
     }
   }))
   if (signal?.aborted) return
