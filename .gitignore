@@ -27,3 +27,6 @@ local.properties
 
 # APKs de release — se suben como assets de release en Disroot (el repo supera la cuota)
 releases/*.apk
+
+# APKs de release — se suben como assets de release (repo con cuota de 1GB)
+releases/*.apk
