@@ -51,9 +51,14 @@ public class TorrentEnginePlugin extends Plugin {
     private static final int METADATA_TIMEOUT_S = 90;
     private static final int TORRENT_DL_TIMEOUT_MS = 30000;
     private static final int PIECE_TIMEOUT_MS = 60000;
-    private static final int WINDOW_BYTES = 48 * 1024 * 1024;
+    private static final int WINDOW_BYTES = 96 * 1024 * 1024;
     private static final int CHUNK = 128 * 1024;
     private static final int MAX_TORRENT_BYTES = 20 * 1024 * 1024;
+    // Caché persistente de descargas parciales (tipo Stremio): los datos
+    // sobreviven a stop() y reanudan al volver a abrir el mismo torrent.
+    // Se poda por antigüedad y por tamaño total para no llenar el box.
+    private static final long CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000;
+    private static final long CACHE_MAX_BYTES = 3L * 1024 * 1024 * 1024;
 
     private SessionManager session;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -90,8 +95,8 @@ public class TorrentEnginePlugin extends Plugin {
             // Streaming en TV: suficiente subida para reciprocidad tit-for-tat
             // sin quemar datos; 64 conexiones bastan para una descarga
             // secuencial y ahorran CPU/memoria frente al default.
-            sp.uploadRateLimit(128 * 1024);
-            sp.connectionsLimit(64);
+            sp.uploadRateLimit(256 * 1024);
+            sp.connectionsLimit(128);
             sp.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), false);
@@ -142,7 +147,7 @@ public class TorrentEnginePlugin extends Plugin {
                 fileSize = fs.fileSize(idx);
                 pieceLength = ti.pieceLength();
                 lastFilePiece = (int) ((fileOffset + fileSize - 1) / pieceLength);
-                windowPieces = Math.max(8, Math.min(60, (int) (WINDOW_BYTES / pieceLength)));
+                windowPieces = Math.max(8, Math.min(90, (int) (WINDOW_BYTES / pieceLength)));
 
                 // 3. Add torrent with file priorities (only selected file)
                 Priority[] pri = new Priority[fs.numFiles()];
@@ -151,6 +156,7 @@ public class TorrentEnginePlugin extends Plugin {
                 saveDir = new File(getContext().getExternalCacheDir() != null
                         ? getContext().getExternalCacheDir() : getContext().getCacheDir(), "torrents");
                 saveDir.mkdirs();
+                evictSaveDir(saveDir);
 
                 sm.download(ti, saveDir, null, pri, null);
 
@@ -253,16 +259,14 @@ public class TorrentEnginePlugin extends Plugin {
         synchronized (windowLock) { deadlinePieces.clear(); }
         try {
             if (session != null && th != null && th.isValid()) {
-                session.remove(th, SessionHandle.DELETE_FILES);
+                // Sin DELETE_FILES: las piezas parciales quedan en caché y la
+                // próxima apertura del mismo torrent reanuda al instante
+                // (comportamiento tipo Stremio). evictSaveDir() poda por
+                // antigüedad/tamaño en el siguiente start().
+                session.remove(th);
             }
         } catch (Throwable e) {
             Log.w(TAG, "remove torrent failed: " + e.getMessage());
-        }
-        // DELETE_FILES borra el contenido; quedan directorios vacíos — limpiarlos
-        // con un pequeño delay (la eliminación es asíncrona en libtorrent).
-        final File dir = saveDir;
-        if (dir != null) {
-            mainHandler.postDelayed(() -> deleteEmptyDirs(dir), 3000);
         }
         th = null;
         torrentInfo = null;
@@ -308,6 +312,50 @@ public class TorrentEnginePlugin extends Plugin {
         }
         File[] left = dir.listFiles();
         if (left == null || left.length == 0) dir.delete();
+    }
+
+    private static long dirSize(File f) {
+        if (f.isFile()) return f.length();
+        long total = 0;
+        File[] children = f.listFiles();
+        if (children != null) for (File c : children) total += dirSize(c);
+        return total;
+    }
+
+    private static void deleteRecursive(File f) {
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) for (File c : children) deleteRecursive(c);
+        }
+        f.delete();
+    }
+
+    // Poda de la caché de torrents: borra entradas con más de CACHE_MAX_AGE_MS
+    // y luego las más viejas hasta quedar por debajo de CACHE_MAX_BYTES.
+    private static void evictSaveDir(File dir) {
+        try {
+            File[] entries = dir.listFiles();
+            if (entries == null) return;
+            long now = System.currentTimeMillis();
+            long total = 0;
+            java.util.List<File> kept = new java.util.ArrayList<>();
+            for (File e : entries) {
+                if (now - e.lastModified() > CACHE_MAX_AGE_MS) {
+                    deleteRecursive(e);
+                } else {
+                    kept.add(e);
+                    total += dirSize(e);
+                }
+            }
+            kept.sort((a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            for (File e : kept) {
+                if (total <= CACHE_MAX_BYTES) break;
+                total -= dirSize(e);
+                deleteRecursive(e);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "cache eviction failed: " + t.getMessage());
+        }
     }
 
     private static boolean isVideoFile(String name) {

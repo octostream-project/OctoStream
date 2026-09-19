@@ -1068,7 +1068,7 @@ export default function Sports() {
                   )}
                   <div className="flex-1 min-w-0">
                     <span className="block text-sm font-medium text-white truncate">{s.name}</span>
-                    <span className="block text-xs text-dark-400 truncate">{s.title}{s.streamType ? ` · ${s.streamType}` : ''}</span>
+                    <span className="block text-xs text-dark-400 truncate">{s.title}{s.streamType ? ` · ${s.streamType}` : ''}{s.quality ? ` · ${s.quality}` : ''}</span>
                   </div>
                 </button>
               ))}
