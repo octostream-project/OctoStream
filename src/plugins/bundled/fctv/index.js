@@ -234,6 +234,71 @@ function matchPageUrl(base, m) {
   return `${base}/${sportSlug}/${league}-match-${m.matchId}/${team}-${mmyyyy}.html`
 }
 
+// Config de último recurso sin red: los dominios conocidos del APK oficial.
+const OFFLINE_CFG = {
+  apiHost: API_HOST_CANDIDATES[0],
+  webDomain: WEB_DOMAIN_FALLBACKS[0],
+  playerDomains: PLAYER_DOMAIN_FALLBACKS,
+  iframeDomains: IFRAME_DOMAIN_FALLBACKS,
+}
+
+// Embeds baratos (iframe player + página del partido). Se construyen sin más
+// red que la config — incluso con los dominios de respaldo cuando la API no
+// responde. The site's own iframe uses mdata=b64(matchId_sportType). The
+// player page rejects requests without a Referer — pass the match page URL
+// so the native resolver sends it on the initial loadUrl.
+function buildEmbedStreams(cfg, m, matchId) {
+  const referer = matchPageUrl(cfg.webDomain, m)
+  const mdata = btoa(`${matchId}_${m.sportType}`)
+  const embeds = []
+  for (const [i, dom] of cfg.iframeDomains.slice(0, 3).entries()) {
+    embeds.push({
+      name: `FCTV Web ${i + 1}`,
+      title: 'FCTV · Web',
+      url: `https://${dom}/es/player.html?mdata=${mdata}&ilang=es`,
+      referer,
+      streamType: 'embed',
+      quality: 'auto',
+      isLive: true,
+    })
+  }
+  // Fallback: the full match page on the player/web domains (the page
+  // itself creates the iframe with the proper Referer).
+  for (const [i, base] of [cfg.playerDomains[0], cfg.webDomain].entries()) {
+    if (!base) continue
+    embeds.push({
+      name: `FCTV Página${i ? ' (alt)' : ''}`,
+      title: 'FCTV · Web',
+      url: matchPageUrl(base, m),
+      streamType: 'embed',
+      quality: 'auto',
+      isLive: true,
+    })
+  }
+  return embeds
+}
+
+// Fallback sin red para Sports.jsx: si getStreams devolvió vacío (timeout,
+// API caída), los embeds se construyen solo con los metadatos de la tarjeta
+// — su url ya lleva el dominio web vigente cuando se generó el catálogo.
+export function fctvEmbedFallbacks(item) {
+  const parts = String(item?.id || '').replace(/^fctv:/, '').split(':')
+  const matchId = parts[0]
+  if (!/^\d+$/.test(matchId)) return []
+  const m = {
+    matchId: Number(matchId),
+    sportType: item?._sportType || Number(parts[1]) || SPORT_TYPES.football,
+    leagueSlug: item?._leagueSlug,
+    slug: item?._slug,
+    matchDate: item?._matchDate,
+  }
+  let webDomain = OFFLINE_CFG.webDomain
+  try {
+    if (/^https?:\/\//.test(item?.url || '')) webDomain = new URL(item.url).origin
+  } catch { /* fallback domain */ }
+  return buildEmbedStreams({ ...OFFLINE_CFG, webDomain }, m, matchId)
+}
+
 function matchToItem(m, cfg, streamEntry) {
   const hasStream = !!streamEntry
   const name = m.title || [m.home.name, m.away.name].filter(Boolean).join(' vs ')
@@ -508,7 +573,17 @@ export const fctvFactory = (config) => {
       const matchId = parts[0]
       if (!/^\d+$/.test(matchId)) return []
       try {
-        const cfg = await resolveConfig(signal)
+        // Config con presupuesto propio de 10s: si los hosts API van lentos
+        // se usan los dominios de respaldo — el total (config + directos)
+        // debe quedar siempre por debajo del timeout del manager (25s) o los
+        // embeds se pierden con el rechazo.
+        let cfg
+        try {
+          cfg = await resolveConfig(shortSignal(signal, 10000))
+        } catch (e) {
+          if (signal?.aborted) throw e
+          cfg = OFFLINE_CFG
+        }
         // Recover match metadata from the cached catalog entries
         let item = null
         for (const entry of listCache.values()) {
@@ -524,49 +599,19 @@ export const fctvFactory = (config) => {
           matchDate: item?._matchDate,
         }
 
-        // Embeds baratos primero: garantizan enlaces aunque la API de streams
-        // se coma el timeout del manager (25s) en redes lentas de TV.
-        // The site's own iframe uses mdata=b64(matchId_sportType). The player
-        // page rejects requests without a Referer — pass the match page URL so
-        // the native resolver sends it on the initial loadUrl.
-        const referer = matchPageUrl(cfg.webDomain, m)
-        const mdata = btoa(`${matchId}_${m.sportType}`)
-        const embeds = []
-        for (const [i, dom] of cfg.iframeDomains.slice(0, 3).entries()) {
-          embeds.push({
-            name: `FCTV Web ${i + 1}`,
-            title: 'FCTV · Web',
-            url: `https://${dom}/es/player.html?mdata=${mdata}&ilang=es`,
-            referer,
-            streamType: 'embed',
-            quality: 'auto',
-            isLive: true,
-          })
-        }
-
-        // Fallback: the full match page on the player/web domains (the page
-        // itself creates the iframe with the proper Referer).
-        for (const [i, base] of [cfg.playerDomains[0], cfg.webDomain].entries()) {
-          if (!base) continue
-          embeds.push({
-            name: `FCTV Página${i ? ' (alt)' : ''}`,
-            title: 'FCTV · Web',
-            url: matchPageUrl(base, m),
-            streamType: 'embed',
-            quality: 'auto',
-            isLive: true,
-          })
-        }
+        const embeds = buildEmbedStreams(cfg, m, matchId)
 
         // Direct HLS: match/detail → stream/detail → ROT47 + rb-session token.
-        // Presupuesto propio de 15s: si la API va lenta, se devuelven los
-        // embeds en vez de reventar el timeout del manager y volver vacío.
+        // Presupuesto propio de 10s. Un abort o fallo aquí no tira los embeds
+        // ya construidos: si el timeout del manager venció, el resultado se
+        // descarta igualmente aguas arriba.
         let direct = []
         try {
-          direct = await resolveDirectStreams(cfg, m, shortSignal(signal, 15000))
+          direct = await resolveDirectStreams(cfg, m, shortSignal(signal, 10000))
         } catch (e) {
-          if (signal?.aborted) throw e
-          logWarn('[FCTV] direct resolve failed:', String(e?.message || e))
+          if (!signal?.aborted) {
+            logWarn('[FCTV] direct resolve failed:', String(e?.message || e))
+          }
         }
         return [...direct, ...embeds]
       } catch (e) {
