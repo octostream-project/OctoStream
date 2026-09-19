@@ -7,6 +7,7 @@ import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play } from 'lucide-react
 import { MARCA_LEAGUES } from '../data/marcaCalendar.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
+import { fctvEmbedFallbacks } from '../plugins/bundled/fctv/index.js'
 
 const SPORTS_PLUGIN = 'fctv'
 const DLIVE_PLUGIN = 'dlive'
@@ -731,6 +732,13 @@ export default function Sports() {
                 _noCache: true,
                 _wvPlayback: /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b/i.test(l.url) || undefined,
               }))
+            }
+            // FCTV: si la resolución volvió vacía (timeout de la API, abort
+            // del manager), los embeds se construyen solo con los metadatos
+            // de la tarjeta — sin red. Una tarjeta FCTV no puede quedar
+            // "sin enlaces" mientras exista su página de partido.
+            if (!list.length && /^fctv:/.test(src.id || '')) {
+              list = fctvEmbedFallbacks(src).map(s => ({ ...s, _noCache: true }))
             }
             for (const s of list) acc.push({ ...s, _fctvItem: src })
             flush()
