@@ -24,3 +24,6 @@ capacitor-plugins/*/android/build/
 *.iml
 local.properties
 *.swp
+
+# APKs de release — se suben como assets de release en Disroot (el repo supera la cuota)
+releases/*.apk

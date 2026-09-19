@@ -1,8 +1,8 @@
 {
-  "versionCode": 121,
-  "versionName": "1.21",
+  "versionCode": 122,
+  "versionName": "1.22",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/releases/octostream-1.21.apk",
-  "sha256": "2431b5cf30b256b3beca1ee8c7bf12965d66f8a12d847ce0e42edd2d4258a2b4",
-  "notes": "Deportes: Primera Federación, Segunda Federación y fútbol femenino español (Liga F, Copa de la Reina) se ordenan junto a LaLiga EA Sports y Hypermotion"
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.22/octostream-1.22.apk",
+  "sha256": "5eefa08ebf1bf776e5e0d2ccb48ebafd8ee38dce990fa736971fdc870dd0a52c",
+  "notes": "Deportes: todas las jornadas con resultados, logo de liga y apertura directa en la jornada de la semana"
 }
