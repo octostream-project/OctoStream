@@ -1,12 +1,57 @@
 // Silence Fontconfig warnings (harmless on some Linux distros)
 process.env.FONTCONFIG_PATH = process.env.FONTCONFIG_PATH || '/etc/fonts'
 
-const { app, BrowserWindow, shell, session, ipcMain } = require('electron')
+const { app, BrowserWindow, shell, session, ipcMain, components } = require('electron')
 const path = require('path')
+const fs = require('fs')
 const http = require('http')
 const https = require('https')
 const os = require('os')
+const crypto = require('crypto')
 const { URL } = require('url')
+
+// ─── Aether / WARP local proxy detection ─────────────────────────────────────
+// On this dev machine Aether (Cloudflare WARP userspace client) listens as a
+// SOCKS5 proxy on 127.0.0.1:1819. When present, route ALL renderer traffic
+// through it so provider requests go via WARP — mirroring the Android app's
+// anti-leak behaviour (system proxy → Aether → WARP tunnel).
+const AETHER_SOCKS_HOST = '127.0.0.1'
+const AETHER_SOCKS_PORT = 1819
+
+function probeAether() {
+  return new Promise((resolve) => {
+    const socket = new (require('net').Socket)()
+    socket.setTimeout(400)
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('timeout', () => { socket.destroy(); resolve(false) })
+    socket.once('error', () => { socket.destroy(); resolve(false) })
+    socket.connect(AETHER_SOCKS_PORT, AETHER_SOCKS_HOST)
+  })
+}
+
+async function configureAetherProxy() {
+  const aetherUp = await probeAether()
+  if (!aetherUp) {
+    console.log('[Aether] No SOCKS5 proxy on 127.0.0.1:1819 — direct traffic')
+    return false
+  }
+  try {
+    // Route all renderer fetch/XHR through Aether SOCKS5, except localhost
+    // (app assets, Capacitor bridge, stream proxy on 19588).
+    await session.defaultSession.setProxy({
+      proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+      proxyBypassRules: '<local>;127.0.0.1;localhost',
+    })
+    console.log('[Aether] SOCKS5 proxy detected — renderer traffic routed via WARP (127.0.0.1:1819)')
+    return true
+  } catch (e) {
+    console.error('[Aether] Failed to set proxy:', e.message)
+    return false
+  }
+}
 
 // Get local network IP (for Chromecast access to proxy)
 function getLocalIP() {
@@ -21,26 +66,38 @@ function getLocalIP() {
   return '127.0.0.1'
 }
 
-// Custom HTTPS agent that ignores certificate errors.
-// Electron's Node.js (BoringSSL) requires this approach instead of
-// passing rejectUnauthorized in request options.
-const insecureAgent = new https.Agent({
-  rejectUnauthorized: false,
-  keepAlive: true,
-})
+const secureHttpsAgent = new https.Agent({ keepAlive: true })
 
 // ─── Local stream proxy ────────────────────────────────────────────────────
 // Solves CORS + SSL issues: fetches streams server-side (Node) and serves
 // them to the renderer via http://127.0.0.1:PROXY_PORT/proxy?url=...
-// The proxy injects correct headers (User-Agent, Referer, Origin) and
-// ignores certificate errors.
+// The proxy injects provider-specific headers while retaining normal TLS
+// certificate validation.
 
 const PROXY_PORT = 19588
 const LOCAL_IP = getLocalIP()
+const PROXY_TOKEN = crypto.randomBytes(32).toString('hex')
 // Proxy prefix for renderer (localhost) and for Chromecast (LAN IP)
-const PROXY_PREFIX_LOCAL = `http://127.0.0.1:${PROXY_PORT}/proxy?url=`
-const PROXY_PREFIX_LAN = `http://${LOCAL_IP}:${PROXY_PORT}/proxy?url=`
+const PROXY_PREFIX_LOCAL = `http://127.0.0.1:${PROXY_PORT}/proxy?token=${PROXY_TOKEN}&url=`
+const PROXY_PREFIX_LAN = `http://${LOCAL_IP}:${PROXY_PORT}/proxy?token=${PROXY_TOKEN}&url=`
 let proxyServer = null
+
+function validProxyTarget(rawUrl) {
+  try {
+    const target = new URL(rawUrl)
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return null
+    const host = target.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (host === 'localhost' || host.endsWith('.local') || host === '0.0.0.0' || host === '::1' || host.startsWith('127.') || host.startsWith('10.') || host.startsWith('192.168.') || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^fc|^fd|^fe80:/i.test(host)) return null
+    return target
+  } catch {
+    return null
+  }
+}
+
+// Log only host:port — stream URLs carry signed tokens/cookies.
+function hostOf(url) {
+  try { const u = new URL(url); return u.host } catch { return 'unknown' }
+}
 
 function headersForHost(host) {
   const headers = {
@@ -53,7 +110,7 @@ function headersForHost(host) {
   } else if (/atresplayer|atresmedia|atres-live|nogeovod/i.test(host)) {
     headers['Origin'] = 'https://www.atresplayer.com'
     headers['Referer'] = 'https://www.atresplayer.com/'
-  } else if (/mediaset/i.test(host)) {
+  } else if (/mediaset|widevine\.entitlement\.theplatform\.eu/i.test(host)) {
     headers['Origin'] = 'https://www.mediasetinfinity.es'
     headers['Referer'] = 'https://www.mediasetinfinity.es/'
   } else if (/doubleclick\.net/i.test(host)) {
@@ -70,12 +127,10 @@ function headersForHost(host) {
 
 function proxyFetch(targetUrl, res, proxyPrefix) {
   const prefix = proxyPrefix || PROXY_PREFIX_LOCAL
-  console.log('[Proxy] fetching:', targetUrl.substring(0, 120))
-  let target
-  try {
-    target = new URL(targetUrl)
-  } catch {
-    if (!res.headersSent) { res.writeHead(400); res.end('Invalid url') }
+  console.log('[Proxy] fetching:', hostOf(targetUrl))
+  const target = validProxyTarget(targetUrl)
+  if (!target) {
+    if (!res.headersSent) { res.writeHead(400); res.end('Invalid or forbidden url') }
     return
   }
 
@@ -89,10 +144,7 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
     headers,
   }
 
-  // Use insecure agent for HTTPS to bypass certificate verification
-  if (isHttps) {
-    options.agent = insecureAgent
-  }
+  if (isHttps) options.agent = secureHttpsAgent
 
   const lib = isHttps ? https : http
 
@@ -101,16 +153,17 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
     if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
       const redirectUrl = proxyRes.headers.location
       const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
-      console.log('[Proxy] redirect', proxyRes.statusCode, '->', absoluteRedirect.substring(0, 100))
-      res.writeHead(302, { 'Location': `/proxy?url=${encodeURIComponent(absoluteRedirect)}` })
+      console.log('[Proxy] redirect', proxyRes.statusCode, '->', hostOf(absoluteRedirect))
+      res.writeHead(302, { 'Location': `${prefix}${encodeURIComponent(absoluteRedirect)}` })
       res.end()
       return
     }
 
     const contentType = proxyRes.headers['content-type'] || ''
     const isM3u8 = /\.m3u8/i.test(targetUrl) || /mpegurl|vnd\.apple\.mpeg/i.test(contentType)
+    const isMpd = /\.mpd/i.test(targetUrl) || /dash\+xml/i.test(contentType)
     const isGzJson = /\.gz$/i.test(targetUrl) || /gzip/i.test(contentType)
-    console.log('[Proxy] response', proxyRes.statusCode, contentType, isM3u8 ? '(m3u8)' : '', isGzJson ? '(gz)' : '', targetUrl.substring(0, 80))
+    console.log('[Proxy] response', proxyRes.statusCode, contentType, isM3u8 ? '(m3u8)' : '', isMpd ? '(mpd)' : '', isGzJson ? '(gz)' : '', hostOf(targetUrl))
 
     const respHeaders = {
       'Access-Control-Allow-Origin': '*',
@@ -152,9 +205,7 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
       let body = ''
       proxyRes.on('data', (chunk) => { body += chunk.toString() })
       proxyRes.on('end', () => {
-        console.log('[Proxy] m3u8 content (first 500 chars):\n', body.substring(0, 500))
-        const lines = body.split('\n')
-        const rewritten = lines.map(line => {
+      const rewritten = lines.map(line => {
           const trimmed = line.trim()
           if (!trimmed || trimmed.startsWith('#')) {
             // Rewrite URI= in #EXT-X-KEY, #EXT-X-MAP, #EXT-X-MEDIA and #EXT-X-SESSION-DATA tags
@@ -190,11 +241,36 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
           }
         })
         const rewrittenBody = rewritten.join('\n')
-        console.log('[Proxy] m3u8 rewritten (first 500 chars):\n', rewrittenBody.substring(0, 500))
+        // El body reescrito incrusta el token del proxy — no loguearlo en claro.
+        console.log('[Proxy] m3u8 rewritten (first 500 chars):\n',
+          rewrittenBody.substring(0, 500).split(PROXY_TOKEN).join('[TOKEN]'))
         delete respHeaders['Content-Length']
         respHeaders['Content-Length'] = Buffer.byteLength(rewrittenBody)
         res.writeHead(proxyRes.statusCode || 200, respHeaders)
         res.end(rewrittenBody)
+      })
+    } else if (isMpd) {
+      // Rewrite MPD: convert <BaseURL> to proxy URL so segments resolve through proxy
+      let body = ''
+      proxyRes.on('data', (chunk) => { body += chunk.toString() })
+      proxyRes.on('end', () => {
+        // Rewrite <BaseURL> elements - segments are relative to BaseURL
+        let rewritten = body.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (match, url) => {
+          try {
+            const absolute = url.startsWith('http') ? url : new URL(url, targetUrl).href
+            return `<BaseURL>${prefix}${encodeURIComponent(absolute)}</BaseURL>`
+          } catch { return match }
+        })
+        // Also rewrite any absolute http(s) URLs in initialization/media/sourceURL attributes
+        rewritten = rewritten.replace(/(initialization|media|sourceURL)="(https?:\/\/[^"]+)"/g, (match, attr, url) => {
+          return `${attr}="${prefix}${encodeURIComponent(url)}"`
+        })
+        console.log('[Proxy] mpd rewritten (first 500 chars):\n',
+          rewritten.substring(0, 500).split(PROXY_TOKEN).join('[TOKEN]'))
+        delete respHeaders['Content-Length']
+        respHeaders['Content-Length'] = Buffer.byteLength(rewritten)
+        res.writeHead(proxyRes.statusCode || 200, respHeaders)
+        res.end(rewritten)
       })
     } else {
       // Binary content (TS segments, keys, etc.) - pipe directly
@@ -204,7 +280,7 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
   })
 
   proxyReq.on('error', (e) => {
-    console.error('[Proxy] error fetching', targetUrl, e.message)
+    console.error('[Proxy] error fetching', hostOf(targetUrl), e.message)
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: e.message, url: targetUrl }))
@@ -222,15 +298,171 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
   proxyReq.end()
 }
 
+function proxyPost(targetUrl, postBody, postHeaders, res) {
+  const target = validProxyTarget(targetUrl)
+  if (!target) {
+    if (!res.headersSent) { res.writeHead(400); res.end('Invalid or forbidden url') }
+    return
+  }
+  console.log('[Proxy] POST:', target.hostname + target.pathname)
+
+  const baseHeaders = headersForHost(target.hostname)
+  const headers = { ...baseHeaders, ...postHeaders }
+  const bodyData = Buffer.isBuffer(postBody) ? postBody : (typeof postBody === 'string' ? postBody : JSON.stringify(postBody))
+  headers['Content-Length'] = Buffer.byteLength(bodyData)
+  if (!headers['Content-Type']) headers['Content-Type'] = 'application/json'
+  const isHttps = target.protocol === 'https:'
+  const options = {
+    hostname: target.hostname,
+    port: target.port || (isHttps ? 443 : 80),
+    path: target.pathname + target.search,
+    method: 'POST',
+    headers,
+  }
+
+  if (isHttps) options.agent = secureHttpsAgent
+  const lib = isHttps ? https : http
+
+  const proxyReq = lib.request(options, (proxyRes) => {
+    const respHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
+      'Content-Type': proxyRes.headers['content-type'] || 'application/json',
+    }
+    // Use Buffer for binary responses (Widevine license is binary)
+    const chunks = []
+    proxyRes.on('data', (chunk) => { chunks.push(chunk) })
+    proxyRes.on('end', () => {
+      const buf = Buffer.concat(chunks)
+      const statusCode = proxyRes.statusCode || 200
+      console.log('[Proxy] POST response:', statusCode, target.hostname + target.pathname, respHeaders['Content-Type'], buf.length)
+      if (statusCode >= 400 && /json|text/i.test(respHeaders['Content-Type'])) {
+        const safeError = buf.toString('utf8', 0, 500)
+          .replace(/("?token"?\s*[:=]\s*"?)[^"&\s]+/gi, '$1[REDACTED]')
+          .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+        console.error('[Proxy] POST error response:', safeError)
+      }
+      respHeaders['Content-Length'] = buf.length
+      res.writeHead(statusCode, respHeaders)
+      res.end(buf)
+    })
+  })
+
+  proxyReq.on('error', (e) => {
+    console.error('[Proxy] POST error:', e.message)
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+  })
+
+  proxyReq.setTimeout(15000, () => {
+    proxyReq.destroy()
+    if (!res.headersSent) {
+      res.writeHead(504, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.end(JSON.stringify({ error: 'Gateway timeout' }))
+    }
+  })
+
+  proxyReq.write(bodyData)
+  proxyReq.end()
+}
+
+function servePackagedApp(pathname, res) {
+  const distDir = path.resolve(__dirname, '..', 'dist')
+  const relativePath = pathname === '/app' || pathname === '/app/'
+    ? 'index.html'
+    : pathname.replace(/^\/app\//, '').replace(/^\//, '')
+  const filePath = path.resolve(distDir, relativePath)
+  if (!filePath.startsWith(distDir + path.sep) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return false
+  }
+  const contentTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.woff2': 'font/woff2',
+  }
+  res.writeHead(200, {
+    'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+    'Content-Length': fs.statSync(filePath).size,
+  })
+  fs.createReadStream(filePath).pipe(res)
+  return true
+}
+
 function startProxyServer() {
   if (proxyServer) return
 
   proxyServer = http.createServer((req, res) => {
     const parsed = new URL(req.url, `http://localhost:${PROXY_PORT}`)
+    const clientIp = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
+    const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
+
+    if (req.method === 'GET' && isLocal && (parsed.pathname.startsWith('/app') || parsed.pathname.startsWith('/assets/'))) {
+      if (!servePackagedApp(parsed.pathname, res)) {
+        res.writeHead(404)
+        res.end('Not found')
+      }
+      return
+    }
 
     if (parsed.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ status: 'ok' }))
+      return
+    }
+
+    const suppliedToken = parsed.searchParams.get('token') || req.headers['x-octostream-proxy-token']
+    if (suppliedToken !== PROXY_TOKEN) {
+      res.writeHead(403)
+      res.end('Forbidden')
+      return
+    }
+
+    if (parsed.pathname === '/post') {
+      // POST proxy: read URL from ?url=, headers from ?headers= (JSON), body from request body
+      const targetUrl = parsed.searchParams.get('url')
+      if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
+        res.writeHead(400)
+        res.end('Missing or invalid url param')
+        return
+      }
+      // Parse headers from query param
+      let extraHeaders = {}
+      const headersParam = parsed.searchParams.get('headers')
+      if (headersParam) {
+        try { extraHeaders = JSON.parse(headersParam) } catch {}
+      }
+      // Also check X-Proxy-Header-* for backwards compat
+      for (const [key, val] of Object.entries(req.headers)) {
+        if (key.startsWith('x-proxy-header-')) {
+          const realName = key.substring('x-proxy-header-'.length).replace(/_/g, '-')
+          extraHeaders[realName] = val
+        }
+      }
+      // Collect body (capped — token-protected but LAN-reachable)
+      let body = ''
+      let tooLarge = false
+      req.on('data', (chunk) => {
+        if (tooLarge) return
+        body += chunk.toString()
+        if (body.length > 1024 * 1024) {
+          tooLarge = true
+          res.writeHead(413)
+          res.end('Payload too large')
+          req.destroy()
+        }
+      })
+      req.on('end', () => {
+        if (!tooLarge) proxyPost(targetUrl, body, extraHeaders, res)
+      })
       return
     }
 
@@ -242,7 +474,7 @@ function startProxyServer() {
         res.end('Invalid url')
         return
       }
-      console.log('[Proxy] raw:', targetUrl.substring(0, 120))
+      console.log('[Proxy] raw:', hostOf(targetUrl))
       const clientIp = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
       const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
       const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
@@ -266,11 +498,20 @@ function startProxyServer() {
     // Determine which proxy prefix to use based on client IP
     // If request comes from localhost (renderer), use 127.0.0.1
     // If from LAN (Chromecast), use the machine's LAN IP
-    const clientIp = req.socket.remoteAddress.replace(/^::ffff:/, '')
-    const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
     const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
     if (!isLocal) {
       console.log('[Proxy] LAN request from', clientIp, '- using LAN prefix')
+    }
+
+    // If POST, forward as POST (used by Widevine license requests)
+    if (req.method === 'POST') {
+      const chunks = []
+      req.on('data', (chunk) => { chunks.push(chunk) })
+      req.on('end', () => {
+        const contentType = req.headers['content-type'] || 'application/octet-stream'
+        proxyPost(targetUrl, Buffer.concat(chunks), { 'Content-Type': contentType }, res)
+      })
+      return
     }
 
     proxyFetch(targetUrl, res, prefix)
@@ -294,14 +535,36 @@ function startProxyServer() {
 ipcMain.handle('get-lan-proxy-url', () => {
   return PROXY_PREFIX_LAN
 })
+ipcMain.on('get-proxy-config', (event) => {
+  event.returnValue = {
+    port: PROXY_PORT,
+    url: PROXY_PREFIX_LOCAL,
+    base: `http://127.0.0.1:${PROXY_PORT}`,
+  }
+})
 
-app.whenReady().then(() => {
+// IPC handler: log messages from renderer to terminal
+ipcMain.on('renderer-log', (_event, msg) => {
+  console.log('[Renderer]', msg)
+})
+
+app.whenReady().then(async () => {
+  if (components?.whenReady) {
+    try {
+      await components.whenReady([components.WIDEVINE_CDM_ID])
+      console.log('[Widevine] ECS component status:', JSON.stringify(components.status()))
+    } catch (error) {
+      console.error('[Widevine] ECS component installation failed:', error?.message || error)
+      if (error?.errors) console.error('[Widevine] Component errors:', JSON.stringify(error.errors))
+    }
+  } else {
+    console.error('[Widevine] Castlabs ECS components API is unavailable')
+  }
+
   startProxyServer()
 
-  // Ignore ALL certificate errors for all requests (renderer + proxy)
-  session.defaultSession.setCertificateVerifyProc((_request, callback) => {
-    callback(0) // 0 = accept
-  })
+  // Route renderer traffic through Aether/WARP SOCKS5 if present (anti-leak)
+  await configureAetherProxy()
 
   // Also set permission request handler for media
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
@@ -311,7 +574,7 @@ app.whenReady().then(() => {
   // Inject custom headers for API calls (not proxied streams)
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const url = details.url
-    if (/rtve|atresplayer|atresmedia|mediaset|doubleclick\.net\/ssai|tdtchannels|tdtspain/i.test(url) && !url.includes('127.0.0.1')) {
+    if (/rtve|atresplayer|atresmedia|mediaset|widevine\.entitlement\.theplatform\.eu|doubleclick\.net\/ssai|tdtchannels|tdtspain/i.test(url) && !url.includes('127.0.0.1')) {
       if (!details.requestHeaders['User-Agent']) {
         details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
       }
@@ -321,7 +584,7 @@ app.whenReady().then(() => {
       } else if (/atresplayer|atresmedia/i.test(url)) {
         details.requestHeaders['Origin'] = 'https://www.atresplayer.com'
         details.requestHeaders['Referer'] = 'https://www.atresplayer.com/'
-      } else if (/mediaset|doubleclick\.net\/ssai/i.test(url)) {
+      } else if (/mediaset|widevine\.entitlement\.theplatform\.eu|doubleclick\.net\/ssai/i.test(url)) {
         details.requestHeaders['Origin'] = 'https://www.mediasetinfinity.es'
         details.requestHeaders['Referer'] = 'https://www.mediasetinfinity.es/'
       } else if (/tdtchannels/i.test(url)) {
@@ -341,14 +604,14 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#0f172a',
-    title: 'Optopus Stream',
+    title: 'OctoStream',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   })
 
@@ -374,7 +637,7 @@ function createWindow() {
     if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
       headers['Origin'] = 'https://www.atresplayer.com'
       headers['Referer'] = 'https://www.atresplayer.com/'
-    } else if (/mediaset|doubleclick\.net\/ssai|dai\.google\.com/i.test(url)) {
+    } else if (/mediaset|widevine\.entitlement\.theplatform\.eu|doubleclick\.net\/ssai|dai\.google\.com/i.test(url)) {
       headers['Origin'] = 'https://www.mediasetinfinity.es'
       headers['Referer'] = 'https://www.mediasetinfinity.es/'
     } else if (/rtve\.es|rtvelivestream/i.test(url)) {
@@ -396,9 +659,33 @@ function createWindow() {
   })
 
   // Strip CORS headers from responses so renderer can access them
+  win.webContents.session.webRequest.onCompleted({ urls: ['https://widevine.entitlement.theplatform.eu/*'] }, (details) => {
+    const licensePath = (() => { try { return new URL(details.url).pathname } catch { return '' } })()
+    console.log('[Widevine] License HTTP response:', details.statusCode, licensePath)
+  })
+
+  win.webContents.session.webRequest.onErrorOccurred({ urls: ['https://widevine.entitlement.theplatform.eu/*'] }, (details) => {
+    const licensePath = (() => { try { return new URL(details.url).pathname } catch { return '' } })()
+    console.error('[Widevine] License network error:', details.error, licensePath)
+  })
+
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     const headers = { ...details.responseHeaders }
     const url = details.url || ''
+    // Solo la app necesita el bypass de CORS. Si se reescribe ACAO en TODAS las
+    // respuestas de la sesión, un iframe de proveedor (no confiable) podría
+    // leer respuestas cross-origin — incluidos hosts de la LAN del usuario.
+    // Las peticiones iniciadas por iframes de terceros llevan referrer del
+    // propio embed: esas conservan la política CORS original.
+    const ref = details.referrer || ''
+    const isAppInitiated = !ref ||
+      ref.startsWith('http://localhost:5173') ||
+      ref.startsWith(`http://127.0.0.1:${PROXY_PORT}`) ||
+      ref.startsWith('file://')
+    if (!isAppInitiated) {
+      cb({ cancel: false, responseHeaders: headers })
+      return
+    }
     // For Mediaset/DAI CDN streams (rawvod, link.api), preserve specific origin
     // for cookies (hdntl). For API calls (services-ott-prod-fe), use * so the
     // renderer can make POST requests (login, playback check) without CORS errors.
@@ -424,7 +711,7 @@ function createWindow() {
     win.loadURL('http://localhost:5173')
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
-    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+    win.loadURL(`http://127.0.0.1:${PROXY_PORT}/app/`)
   }
 }
 

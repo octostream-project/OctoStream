@@ -1,21 +1,40 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Search, Heart, Puzzle, Radio, Film, Tv, Clock, Clapperboard, Link2, Settings as SettingsIcon, Antenna } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Home, Search, Heart, Radio, Film, Tv, Clock, Link2, Settings as SettingsIcon, Antenna, Calendar as CalendarIcon, Trophy } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { pluginManager } from '../plugins/manager.js'
 
 export default function Sidebar({ open, onClose }) {
   const favorites = useStore(s => s.favorites)
   const watchHistory = useStore(s => s.watchHistory)
-  const catalogs = pluginManager.getAllCatalogs()
+  // Los plugins se cargan lazy: recomputar catálogos cuando la lista cambia
+  const installedPlugins = useStore(s => s.installedPlugins)
+  // Los catálogos de deportes (FCTV, DLive) tienen su propia sección: no
+  // duplicarlos aquí.
+  const [catalogs, setCatalogs] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    pluginManager.getAllCatalogs()
+      .then(all => { if (!cancelled) setCatalogs(all.filter(c => c.pluginId !== 'fctv' && c.pluginId !== 'dlive')) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [installedPlugins])
+  // El calendario solo muestra series TMDB de favoritos/historial: se oculta
+  // del nav cuando no hay ninguna.
+  const hasSeries = useMemo(() => {
+    const isSeries = i => i?.type === 'series' && i.id?.startsWith('tmdb-')
+    return favorites.some(isSeries) || watchHistory.some(isSeries)
+  }, [favorites, watchHistory])
 
   const navItems = [
     { to: '/', icon: Home, label: 'Inicio' },
     { to: '/live-tv', icon: Antenna, label: 'TV en vivo' },
+    { to: '/sports', icon: Trophy, label: 'Deportes' },
     { to: '/search', icon: Search, label: 'Buscar' },
     { to: '/favorites', icon: Heart, label: 'Favoritos', badge: favorites.length },
     { to: '/history', icon: Clock, label: 'Historial', badge: watchHistory.length },
-    { to: '/plugins', icon: Puzzle, label: 'Plugins' },
     { to: '/add-stream', icon: Link2, label: 'Añadir Enlace' },
+    ...(hasSeries ? [{ to: '/calendar', icon: CalendarIcon, label: 'Calendario' }] : []),
   ]
 
   const catalogIcons = {
@@ -34,15 +53,16 @@ export default function Sidebar({ open, onClose }) {
         />
       )}
       <aside
+        data-tv-menu
         className={`fixed lg:sticky top-0 left-0 h-screen w-64 bg-dark-900 border-r border-dark-800 z-40 transition-transform duration-300 flex flex-col ${
           open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div className="flex items-center gap-2 px-4 py-5 border-b border-dark-800">
-          <Clapperboard className="text-primary-500" size={28} />
+          <img src="/logo-symbol.png" alt="" className="w-8 h-11 object-contain" draggable={false} />
           <div>
-            <h1 className="text-lg font-bold text-white">Optopus</h1>
-            <p className="text-xs text-dark-400">Stream Media Center</p>
+            <h1 className="text-lg font-bold text-white">OctoStream</h1>
+            <p className="text-xs text-dark-400">Media Center</p>
           </div>
         </div>
 
@@ -52,6 +72,7 @@ export default function Sidebar({ open, onClose }) {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
+              tabIndex={0}
               className={({ isActive }) =>
                 isActive ? 'sidebar-item-active' : 'sidebar-item'
               }
@@ -78,6 +99,7 @@ export default function Sidebar({ open, onClose }) {
                   <NavLink
                     key={`${cat.pluginId}-${cat.id}`}
                     to={`/catalog/${cat.pluginId}/${cat.id}/${cat.type}`}
+                    tabIndex={0}
                     className={({ isActive }) =>
                       isActive ? 'sidebar-item-active' : 'sidebar-item'
                     }
@@ -94,6 +116,7 @@ export default function Sidebar({ open, onClose }) {
           <div className="pt-2 mt-2 border-t border-dark-800">
             <NavLink
               to="/settings"
+              tabIndex={0}
               className={({ isActive }) =>
                 isActive ? 'sidebar-item-active' : 'sidebar-item'
               }

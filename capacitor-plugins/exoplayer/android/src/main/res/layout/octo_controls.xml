@@ -1,0 +1,366 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Controles propios estilo Netfly/TiviMate:
+     Fila EPG: logo + programa actual/siguiente
+     Barra de progreso con hora inicio (izq) y hora fin (der)
+     Fila única: rew · play · ffwd · volumen+slider · amplificador · subs · velocidad -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/octo_controls"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bottom_gradient"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="28dp"
+    android:paddingBottom="14dp"
+    android:visibility="gone">
+
+    <!-- Fila EPG: logo del canal + programa actual / siguiente (solo directo) -->
+    <LinearLayout
+        android:id="@+id/octo_info_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/octo_logo"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="@android:color/transparent"
+            android:scaleType="fitCenter"
+            android:padding="6dp"
+            android:contentDescription="Logo del canal — arriba y abajo cambian de canal"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="14dp">
+
+            <TextView
+                android:id="@+id/octo_now"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/octo_next"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#99FFFFFF"
+                android:textSize="13sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/octo_live_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="EPG"
+            android:textColor="#7B5BF5"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Barra de progreso del programa EPG (solo directo) -->
+    <ProgressBar
+        android:id="@+id/octo_prog"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:layout_marginTop="2dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressTint="#7B5BF5"
+        android:progressBackgroundTint="#33FFFFFF"
+        android:visibility="gone" />
+
+    <!-- Fila tiempos: hora inicio (izq) · hora fin (der) — directo usa EPG -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="2dp">
+
+        <TextView
+            android:id="@+id/octo_epg_start"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/octo_position"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- Delta acumulado del seek: "+1:20" mientras se adelanta/retrocede -->
+        <TextView
+            android:id="@+id/octo_seek_delta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textColor="#7B5BF5"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/octo_duration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/octo_epg_end"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- Seek de progreso (solo VOD; en directo se oculta). Alto fijo para que
+         el scaleY de foco no deforme el layout. -->
+    <SeekBar
+        android:id="@+id/octo_seek"
+        android:layout_width="match_parent"
+        android:layout_height="20dp"
+        android:layout_marginTop="2dp"
+        android:max="1000"
+        android:progress="0"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:contentDescription="Posición de reproducción" />
+
+    <!-- Fila única de controles dentro de un scroll horizontal: en pantallas
+         estrechas (móvil) se desliza con el dedo; en TV el scroll sigue al
+         foco del D-pad automáticamente. -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:scrollbars="none"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:id="@+id/octo_row_transport"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+        <ImageButton
+            android:id="@+id/octo_channels"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="8dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Listado de canales"
+            android:src="@drawable/ic_channel_list" />
+
+        <ImageButton
+            android:id="@+id/octo_episodes"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="8dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Episodios de la temporada"
+            android:src="@drawable/ic_episodes"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/octo_rew"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Retroceder"
+            android:src="@drawable/exo_styled_controls_rewind" />
+
+        <ImageButton
+            android:id="@+id/octo_play"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/circle_accent"
+            android:contentDescription="Reproducir o pausar"
+            android:scaleType="fitCenter"
+            android:padding="14dp"
+            android:src="@drawable/exo_styled_controls_play" />
+
+        <ImageButton
+            android:id="@+id/octo_ffwd"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Avanzar"
+            android:src="@drawable/exo_styled_controls_fastforward" />
+
+        <ImageButton
+            android:id="@+id/octo_stop"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Finalizar reproducción"
+            android:src="@drawable/ic_stop_square" />
+
+        <Space
+            android:layout_width="16dp"
+            android:layout_height="1dp" />
+
+        <ImageButton
+            android:id="@+id/octo_volume"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Volumen"
+            android:src="@android:drawable/ic_lock_silent_mode_off" />
+
+        <LinearLayout
+            android:id="@+id/octo_volume_popup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/seekbar_popup_bg"
+            android:visibility="gone">
+
+            <SeekBar
+                android:id="@+id/octo_volume_seek"
+                android:layout_width="120dp"
+                android:layout_height="36dp"
+                android:max="100"
+                android:progress="100"
+                android:contentDescription="Volumen" />
+        </LinearLayout>
+
+        <Space
+            android:layout_width="12dp"
+            android:layout_height="1dp" />
+
+        <ImageButton
+            android:id="@+id/octo_boost"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Amplificador de volumen"
+            android:src="@drawable/ic_volume_boost" />
+
+        <LinearLayout
+            android:id="@+id/octo_boost_popup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/seekbar_popup_bg"
+            android:visibility="gone">
+
+            <SeekBar
+                android:id="@+id/octo_boost_seek"
+                android:layout_width="120dp"
+                android:layout_height="36dp"
+                android:max="200"
+                android:progress="0"
+                android:contentDescription="Amplificador" />
+
+            <TextView
+                android:id="@+id/octo_boost_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:text="100%"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <Space
+            android:layout_width="16dp"
+            android:layout_height="1dp" />
+
+        <ImageButton
+            android:id="@+id/octo_subtitle"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Subtítulos"
+            android:src="@drawable/exo_styled_controls_subtitle_on" />
+
+        <TextView
+            android:id="@+id/octo_subdelay"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:text="CC±"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:contentDescription="Sincronía de subtítulos"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/octo_speed"
+            android:layout_width="56dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:text="1x"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:contentDescription="Velocidad de reproducción"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <ImageButton
+            android:id="@+id/octo_settings"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Ajustes de reproducción"
+            android:src="@drawable/ic_settings" />
+
+        <ImageButton
+            android:id="@+id/octo_cast"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Enviar a TV"
+            android:clickable="true"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:src="@drawable/ic_cast" />
+        </LinearLayout>
+    </HorizontalScrollView>
+</LinearLayout>

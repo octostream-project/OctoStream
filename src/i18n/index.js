@@ -56,11 +56,11 @@ export const addCustomTranslations = (lang, translations) => {
 }
 
 export const getLanguage = () => {
-  return getItemSync('octo_language') || navigator.language?.split('-')[0] || 'es'
+  return getItemSync('octostream_language') || navigator.language?.split('-')[0] || 'es'
 }
 
 export const setLanguage = (lang) => {
-  setItemSync('octo_language', lang)
+  setItemSync('octostream_language', lang)
   notifyLanguageChange()
 }
 

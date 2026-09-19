@@ -1,11 +1,11 @@
-# Optopus Stream
+# OctoStream
 
-Media center multiplataforma con sistema de plugins tipo Kodi/Stremio. Soporta Web, Electron (Linux/Windows) y Android (Capacitor).
+Media center multiplataforma con sistema de plugins. Soporta Web, Electron (Linux/Windows) y Android (Capacitor).
 
 ## Características
 
-- **Sistema de plugins**: Arquitectura extensible tipo Kodi/Stremio
-- **Reproductor de video**: Soporta MP4, HLS (m3u8) y enlaces embed (iframe)
+- **Sistema de plugins**: Arquitectura extensible
+- **Reproductor de video**: Soporta MP4, HLS (m3u8), DASH/Widevine DRM en Android y enlaces embed (iframe)
 - **Catálogos**: Películas, Series, TV en vivo
 - **Búsqueda global**: Busca en todos los plugins instalados
 - **Favoritos e historial**: Guarda tu contenido preferido
@@ -52,9 +52,19 @@ Los binarios se generan en `dist-electron/`.
 npm run android:init
 npm run android:add
 
-# Sincronizar y ejecutar
+# Sincronizar y ejecutar en un dispositivo/emulador
 npm run android:run
+
+# Construir APK de debug
+npm run android:build
+
+# Construir APK de release (requiere un keystore configurado)
+npm run android:build:release
 ```
+
+La reproducción nativa en Android usa el plugin propio `@optopus/exo-player`
+(`capacitor-plugins/exoplayer`) basado en Media3 ExoPlayer, que soporta HLS, DASH y
+Widevine DRM sin problemas de CORS.
 
 ## Arquitectura de Plugins
 
@@ -109,14 +119,20 @@ Registra el plugin en `src/plugins/manager.js`.
 
 ```
 optopus-stream/
-├── electron/           # Configuración Electron
+├── android/             # Proyecto Android generado por Capacitor (ignorado en Git)
+├── capacitor-plugins/
+│   └── exoplayer/       # Plugin Capacitor propio para ExoPlayer nativo en Android
+├── electron/            # Configuración Electron
 │   ├── main.js
 │   └── preload.js
+├── public/              # Assets estáticos y service worker
 ├── src/
 │   ├── components/      # Componentes UI
 │   │   ├── Sidebar.jsx
 │   │   ├── ContentCard.jsx
 │   │   ├── ContentRow.jsx
+│   │   ├── ContinueWatching.jsx
+│   │   ├── Hero.jsx
 │   │   └── VideoPlayer.jsx
 │   ├── pages/           # Páginas/Rutas
 │   │   ├── Home.jsx
@@ -125,16 +141,23 @@ optopus-stream/
 │   │   ├── Catalog.jsx
 │   │   ├── Favorites.jsx
 │   │   ├── History.jsx
-│   │   └── Plugins.jsx
+│   │   ├── Plugins.jsx
+│   │   ├── LiveTV.jsx
+│   │   └── Settings.jsx
 │   ├── plugins/         # Sistema de plugins
 │   │   ├── base.js      # Clases base
 │   │   ├── manager.js   # Gestor de plugins
-│   │   ├── sampleMovies.js
-│   │   ├── sampleSeries.js
-│   │   ├── liveTv.js
-│   │   └── embedStream.js
+│   │   ├── builtIn/     # Plugins incluidos
+│   │   └── bundled/     # Plugins empaquetados
+│   │       └── tdtSpain/  # TDT España (modular: constants, cache, http, data, resolve, normalize, search)
 │   ├── store/
 │   │   └── useStore.js  # Estado global (Zustand)
+│   ├── utils/
+│   │   ├── storage.js   # Abstracción de almacenamiento (localStorage + Electron IPC)
+│   │   ├── httpClient.js  # Cliente HTTP multiplataforma (CapacitorHttp / fetch)
+│   │   ├── loadPlayerLibs.js  # Carga diferida de hls.js y shaka-player
+│   │   ├── exoPlayer.js # Wrapper JS del plugin ExoPlayer nativo
+│   │   └── hlsAndroidLoader.js  # Loader HLS para Android vía CapacitorHttp
 │   ├── App.jsx
 │   ├── main.jsx
 │   └── index.css

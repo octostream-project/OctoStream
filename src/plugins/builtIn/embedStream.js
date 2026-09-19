@@ -21,8 +21,6 @@ export const embedStreamPlugin = createPlugin(
 
     resolveEmbed: (url) => {
       const embedPatterns = [
-        { pattern: /youtube\.com\/watch\?v=([\w-]+)/, embed: 'https://www.youtube.com/embed/$1' },
-        { pattern: /youtu\.be\/([\w-]+)/, embed: 'https://www.youtube.com/embed/$1' },
         { pattern: /vimeo\.com\/(\d+)/, embed: 'https://player.vimeo.com/video/$1' },
         { pattern: /dailymotion\.com\/video\/([\w-]+)/, embed: 'https://www.dailymotion.com/embed/video/$1' },
         { pattern: /streamable\.com\/([\w-]+)/, embed: 'https://streamable.com/e/$1' },

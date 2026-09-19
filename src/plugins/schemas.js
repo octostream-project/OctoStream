@@ -28,8 +28,6 @@ export const pluginManifestSchema = z.object({
   api: apiSchema.optional(),
 })
 
-export const customPluginConfigSchema = pluginManifestSchema
-
 // Stremio-compatible addon manifest. Extra keys are allowed because Stremio
 // manifests contain optional fields we do not need to validate strictly.
 export const stremioManifestSchema = z.object({
@@ -59,10 +57,6 @@ export const externalPluginConfigSchema = z.union([
 
 export function validatePluginManifest(data) {
   return pluginManifestSchema.safeParse(data)
-}
-
-export function validateCustomPluginConfig(data) {
-  return customPluginConfigSchema.safeParse(data)
 }
 
 export function validateStremioManifest(data) {

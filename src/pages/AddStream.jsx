@@ -3,7 +3,7 @@ import VideoPlayer from '../components/VideoPlayer.jsx'
 import { embedStreamPlugin } from '../plugins/builtIn/index.js'
 import { Play, Link2, Plus, Trash2, Clapperboard } from 'lucide-react'
 
-const STORAGE_KEY = 'optopus_custom_streams'
+const STORAGE_KEY = 'octostream_custom_streams'
 
 function loadCustomStreams() {
   try {
@@ -71,6 +71,7 @@ export default function AddStream() {
     <div className="p-4 lg:p-6">
       {playing && (
         <VideoPlayer
+          mode="vod"
           stream={playing}
           title={playing.name}
           onClose={() => setPlaying(null)}

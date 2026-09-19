@@ -1,0 +1,18 @@
+{
+  "name": "@optopus/sync-server",
+  "version": "1.0.0",
+  "description": "Local network sync server for OctoStream",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

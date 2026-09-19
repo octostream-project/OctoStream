@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { pluginManager } from '../plugins/manager.js'
 import ContentCard from '../components/ContentCard.jsx'
-import { Loader2 } from 'lucide-react'
+import OctoLoader from '../components/OctoLoader.jsx'
+import LogoLoader from '../components/LogoLoader.jsx'
 
 export default function Catalog() {
   const { pluginId, catalogId, type } = useParams()
@@ -44,7 +45,7 @@ export default function Catalog() {
   if (loading && items.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="animate-spin text-primary-500" size={48} />
+        <LogoLoader size={80} />
       </div>
     )
   }
@@ -54,7 +55,7 @@ export default function Catalog() {
       <h1 className="text-2xl font-bold text-white mb-6">
         {items.length > 0 ? '' : 'Catálogo'}
       </h1>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
         {items.map(item => (
           <ContentCard key={`${item.type}-${item.id}`} item={item} />
         ))}
@@ -66,7 +67,7 @@ export default function Catalog() {
             disabled={loading}
             className="btn-secondary"
           >
-            {loading ? <Loader2 className="animate-spin" size={20} /> : 'Cargar más'}
+            {loading ? <OctoLoader size={20} /> : 'Cargar más'}
           </button>
         </div>
       )}

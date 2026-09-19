@@ -1,16 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createExternalPlugin, fetchManifest } from './externalAdapter.js'
 
+vi.mock('../../utils/httpClient.js', () => ({
+  httpGetJson: vi.fn(),
+  httpGetText: vi.fn(),
+}))
+
+import { httpGetJson } from '../../utils/httpClient.js'
+
 describe('externalAdapter', () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn()
+    httpGetJson.mockReset()
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('creates an Optopus-style REST plugin', async () => {
+  it('creates an OctoStream-style REST plugin', async () => {
     const config = {
       id: 'demo-rest',
       name: 'Demo REST',
@@ -31,16 +39,17 @@ describe('externalAdapter', () => {
     expect(plugin.manifest.id).toBe('demo-rest')
     expect(plugin.manifest.name).toBe('Demo REST')
 
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => [
-        { id: 'm1', type: 'movie', title: 'Test Movie', poster: '', description: '' },
-      ],
-    })
+    httpGetJson.mockResolvedValueOnce([
+      { id: 'm1', type: 'movie', title: 'Test Movie', poster: '', description: '' },
+    ])
 
     const items = await plugin.getCatalog({ type: 'movie', id: 'top', skip: 0, top: 20 })
     expect(items.length).toBe(1)
-    expect(fetch).toHaveBeenCalledWith('https://api.example.com/catalog/movie/top?skip=0&top=20')
+    expect(httpGetJson).toHaveBeenCalledWith(
+      'https://api.example.com/catalog/movie/top?skip=0&top=20',
+      {},
+      undefined,
+    )
   })
 
   it('detects and creates a Stremio-style plugin', async () => {
@@ -60,18 +69,19 @@ describe('externalAdapter', () => {
     expect(plugin.manifest.types).toContain('movie')
     expect(plugin.manifest.catalogs[0].id).toBe('top')
 
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        metas: [
-          { id: 'tt123', type: 'movie', name: 'Demo', poster: '', description: '' },
-        ],
-      }),
+    httpGetJson.mockResolvedValueOnce({
+      metas: [
+        { id: 'tt123', type: 'movie', name: 'Demo', poster: '', description: '' },
+      ],
     })
 
     const items = await plugin.getCatalog({ type: 'movie', id: 'top' })
     expect(items.length).toBe(1)
-    expect(fetch).toHaveBeenCalledWith('https://stremio.example.com/catalog/movie/top.json')
+    expect(httpGetJson).toHaveBeenCalledWith(
+      'https://stremio.example.com/catalog/movie/top.json',
+      {},
+      undefined,
+    )
   })
 
   it('normalizes Stremio stream responses', async () => {
@@ -85,14 +95,11 @@ describe('externalAdapter', () => {
 
     const plugin = createExternalPlugin({ manifest, baseUrl: 'https://streams.example.com' })
 
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        streams: [
-          { url: 'https://cdn.example.com/movie.mp4', title: 'HD', quality: '1080p' },
-          { ytId: 'abc123', title: 'YouTube' },
-        ],
-      }),
+    httpGetJson.mockResolvedValueOnce({
+      streams: [
+        { url: 'https://cdn.example.com/movie.mp4', title: 'HD', quality: '1080p' },
+        { ytId: 'abc123', title: 'YouTube' },
+      ],
     })
 
     const streams = await plugin.getStreams({ type: 'movie', id: 'tt123' })
@@ -101,7 +108,7 @@ describe('externalAdapter', () => {
     expect(streams[1].url).toBe('https://www.youtube.com/watch?v=abc123')
   })
 
-  it('refuses unsafe URLs', () => {
+  it('refuses unsafe baseUrls', () => {
     expect(() =>
       createExternalPlugin({
         id: 'unsafe',
@@ -111,6 +118,17 @@ describe('externalAdapter', () => {
         baseUrl: 'javascript:alert(1)',
       })
     ).toThrow()
+  })
+
+  it('validates manifest before creating plugin', () => {
+    expect(() =>
+      createExternalPlugin({
+        id: '',
+        name: '',
+        version: '',
+        types: [],
+      })
+    ).toThrow('Invalid external plugin config')
   })
 
   it('fetches and validates a manifest URL', async () => {
@@ -127,6 +145,6 @@ describe('externalAdapter', () => {
 
     const manifest = await fetchManifest('https://remote.example.com/manifest.json')
     expect(manifest.id).toBe('remote')
-    expect(fetch).toHaveBeenCalledWith('https://remote.example.com/manifest.json')
+    expect(fetch).toHaveBeenCalledWith('https://remote.example.com/manifest.json', expect.objectContaining({ signal: expect.anything() }))
   })
 })

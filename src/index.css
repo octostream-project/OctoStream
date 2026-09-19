@@ -1,11 +1,14 @@
-@import "video.js/dist/video-js.css";
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root {
   color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+  min-height: 100%;
+  background: #020617;
 }
 
 * {
@@ -30,13 +33,31 @@
   background: #475569;
 }
 
+/* Rendimiento: salta layout/paint de los items fuera de viewport sin sacarlos
+   del DOM (la navegación D-pad sigue pudiendo enfocarlos). content-visibility
+   solo funciona en WebViews 85+; donde no soporte, se ignora sin romper nada. */
+[data-tv-grid] > [data-tv-card],
+[data-tv-list] > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+.epg-channel-cell, .epg-program {
+  content-visibility: auto;
+}
+.epg-channel-cell { contain-intrinsic-size: 160px 72px; }
+.epg-program { contain-intrinsic-size: auto 56px; }
+
+@utility btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 justify-center;
+}
+
+@utility sidebar-item {
+  @apply flex items-center gap-3 px-4 py-3 rounded-lg transition-colors duration-200 cursor-pointer text-dark-300 hover:bg-dark-800 hover:text-white;
+}
+
 @layer components {
   .card {
     @apply bg-dark-800 rounded-xl overflow-hidden transition-all duration-300 hover:ring-2 hover:ring-primary-500 hover:scale-105 cursor-pointer;
-  }
-
-  .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 justify-center;
   }
 
   .btn-primary {
@@ -55,11 +76,158 @@
     @apply bg-dark-800 border border-dark-700 rounded-lg px-4 py-2 text-white placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
   }
 
-  .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg transition-colors duration-200 cursor-pointer text-dark-300 hover:bg-dark-800 hover:text-white;
-  }
-
   .sidebar-item-active {
     @apply sidebar-item bg-primary-600 text-white hover:bg-primary-600;
   }
+}
+
+/* Android TV focus styles - 3D tridimensional navigation */
+/* Perspective on containers enables real Z-depth */
+.tv-mode main {
+  perspective: 800px;
+  perspective-origin: 50% 50%;
+}
+
+.tv-mode [data-tv-row],
+.tv-mode [data-tv-grid],
+.tv-mode [data-tv-list],
+.tv-mode [data-tv-nav] {
+  transform-style: preserve-3d;
+}
+
+/* Base state: smooth transition for all focusable elements */
+.tv-mode .card,
+.tv-mode [data-tv-card],
+.tv-mode [data-tv-item],
+.tv-mode [data-tv-focus],
+.tv-mode button,
+.tv-mode a[href],
+.tv-mode [tabindex] {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              border-radius 120ms ease-out;
+  will-change: transform, box-shadow;
+}
+
+/* Focused state: card pops out toward viewer with 3D depth */
+.tv-mode .card:focus,
+.tv-mode button:focus,
+.tv-mode a:focus,
+.tv-mode [tabindex]:focus,
+.tv-mode [data-tv-card]:focus,
+.tv-mode [data-tv-item]:focus,
+.tv-mode [data-tv-focus]:focus {
+  outline: none !important;
+  border-radius: 14px;
+  transform: scale(1.04) !important;
+  box-shadow:
+    0 0 0 3px #60a5fa,
+    0 0 0 5px #0f172a,
+    0 0 30px rgba(96, 165, 250, 0.7),
+    0 10px 35px rgba(0, 0, 0, 0.5) !important;
+  z-index: 50;
+  position: relative;
+}
+
+/* Larger cards get more pop */
+.tv-mode [data-tv-card]:focus {
+  transform: scale(1.05) !important;
+  box-shadow:
+    0 0 0 3px #60a5fa,
+    0 0 0 5px #0f172a,
+    0 0 35px rgba(96, 165, 250, 0.8),
+    0 14px 45px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Sidebar items: subtler pop */
+.tv-mode .sidebar-item:focus {
+  background: #2563eb !important;
+  color: white !important;
+  transform: scale(1.05) !important;
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.6), 0 6px 20px rgba(0,0,0,0.4) !important;
+}
+
+/* Neighbors recede slightly (JS adds .tv-neighbor class) */
+.tv-mode .tv-neighbor {
+  opacity: 0.7;
+  transform: scale(0.96);
+}
+
+/* Elements that should not scale up on focus (text labels in rows, etc.) */
+.tv-mode .tv-no-scale:focus,
+.tv-mode .tv-no-scale[data-tv-card]:focus,
+.tv-mode .tv-no-scale[data-tv-item]:focus {
+  transform: scale(1) !important;
+}
+
+/* EPG: the generic focus rule sets position:relative which would break
+   sticky/absolute positioned elements — restore their real positioning. */
+.tv-mode .epg-channel-cell:focus {
+  position: sticky;
+  z-index: 60;
+}
+.tv-mode .epg-program:focus {
+  position: absolute;
+}
+
+/* Settings: tabs scroll horizontal en móvil (sin barra visible) */
+.settings-tabs {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Android TV: layout vertical — título arriba, pestañas en fila y los
+   ajustes debajo. La navegación D-pad es vertical en toda la página:
+   arriba/abajo entre pestañas y contenido, izquierda/derecha dentro de
+   la fila de pestañas. */
+.tv-mode .settings-page {
+  max-width: none;
+}
+.tv-mode .settings-tabs {
+  flex-wrap: wrap;
+  overflow: visible;
+  margin-bottom: 2.75rem;
+  padding-bottom: 0.75rem;
+}
+.tv-mode .settings-tabs button {
+  border-radius: 10px;
+}
+.tv-mode .settings-content {
+  max-width: 56rem;
+}
+
+/* Keep focused EPG programs clear of the 160px sticky channel column */
+.epg-program {
+  scroll-margin-left: 176px;
+}
+
+.tv-mode .content-card-slot {
+  width: 6rem !important;
+}
+
+.tv-mode .content-card-slot .card > div:last-child {
+  padding: 0.375rem;
+}
+
+.tv-mode .media-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)) !important;
+  gap: 0.5rem !important;
+  padding: 4px !important;
+}
+
+/* Sports match cards are bigger (two team crests + time) — denser min size. */
+.tv-mode .sports-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)) !important;
+  gap: 0.75rem !important;
+  padding: 4px !important;
+}
+
+.tv-mode [data-tv-row] {
+  gap: 0.75rem;
+  scroll-behavior: auto;
+  padding: 12px 12px 12px 4px;
+  margin: -8px -8px -8px 0;
 }
