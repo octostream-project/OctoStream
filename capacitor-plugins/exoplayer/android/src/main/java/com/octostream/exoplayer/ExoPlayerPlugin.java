@@ -719,11 +719,17 @@ public class ExoPlayerPlugin extends Plugin {
                     String cur = null;
                     try { cur = android.net.Uri.parse(lastPageUrl[0]).getHost(); } catch (Exception ignored) {}
                     if (host != null && cur != null && !host.equalsIgnoreCase(cur)) {
+                        // Ads primero: los trackers llevan el ID del embed
+                        // como parámetro y se colaban por el bypass de mirror.
+                        if (isAdRequest(u)) {
+                            Log.d(TAG, "Headless blocked ad nav: " + hostOf(u));
+                            return true;
+                        }
                         boolean challenge = host.contains("recaptcha") || host.contains("hcaptcha")
                             || host.contains("altcha") || host.contains("cloudflare")
                             || host.contains("challenges.cloudflare") || host.contains("datadome");
                         // Rotación de mirrors: permitir si conserva el ID del embed
-                        boolean sameEmbed = !embedIdF.isEmpty() && u.contains(embedIdF);
+                        boolean sameEmbed = embedIdF.length() >= 4 && u.contains(embedIdF);
                         if (!challenge && !sameEmbed) {
                             Log.d(TAG, "Headless blocked nav: " + hostOf(u));
                             return true;
@@ -1874,15 +1880,23 @@ public class ExoPlayerPlugin extends Plugin {
                 } catch (Exception ignored) {}
                 if (host == null) return false;
                 String h = host.toLowerCase();
-                // Rotación de mirrors: el proveedor cambia de dominio pero
-                // conserva el ID del embed (powvideo.org→powwideo.org). Sin
-                // esto la redirección se bloqueaba y la página quedaba negra.
-                // Va antes del filtro de ads: el ID puede parecer un patrón.
-                if (!embedIdF.isEmpty() && u.contains(embedIdF)) return true;
                 // Popunders: navegación top a dominios de anuncios — nunca.
+                // Va ANTES del bypass por ID: los trackers de ads suelen
+                // llevar el ID del embed como parámetro y se colaban.
                 if (isAdRequest(u)) {
                     Log.d(TAG, "Blocked top nav to ad host: " + host);
                     return false;
+                }
+                // Rotación de mirrors: el proveedor cambia de dominio pero
+                // conserva el ID del embed (powvideo.org→powwideo.org). Sin
+                // esto la redirección se bloqueaba y la página quedaba negra.
+                // Exige ID ≥4 chars y host distinto del actual.
+                if (!playbackMode && embedIdF.length() >= 4 && u.contains(embedIdF)) {
+                    try {
+                        String curH = resolverWebView.getUrl() != null
+                            ? android.net.Uri.parse(resolverWebView.getUrl()).getHost() : null;
+                        if (curH == null || !curH.equalsIgnoreCase(h)) return true;
+                    } catch (Exception ignored) {}
                 }
                 // Challenges anti-bot interactivos — el usuario debe poder
                 // verlos y resolverlos (captcha, Cloudflare Turnstile…).
@@ -1908,7 +1922,9 @@ public class ExoPlayerPlugin extends Plugin {
                     if (curHost != null && curHost.toLowerCase().equals(h)) return true;
                 } catch (Exception ignored) {}
                 // Allow Voe mirror domains (long unusual domain names that Voe uses)
-                if (h.length() > 15 && !h.contains("facebook") && !h.contains("twitter")
+                // Mirrors de dominio largo: solo en modo resolver — en
+                // playback los dominios de ads también son largos y aleatorios.
+                if (!playbackMode && h.length() > 15 && !h.contains("facebook") && !h.contains("twitter")
                     && !h.contains("instagram") && !h.contains("ads")
                     && !h.contains("analytics") && !h.contains("tracker")) return true;
                 return false;
@@ -1925,9 +1941,12 @@ public class ExoPlayerPlugin extends Plugin {
                     new VideoResolverInterface().onVideoFound(u);
                     return true;
                 }
-                if (playbackMode && isRootEscape(u, view.getUrl())) {
-                    Log.d(TAG, "Playback blocked root escape: " + hostOf(u));
-                    return true;
+                if (playbackMode) {
+                    if (isPlaybackNavBlocked(u, view.getUrl())) {
+                        Log.d(TAG, "Playback blocked nav (ad/popunder): " + hostOf(u));
+                        return true;
+                    }
+                    return false;
                 }
                 if (!isAllowedTopUrl(u)) {
                     Log.d(TAG, "Blocked top navigation: " + hostOf(u));
@@ -1943,9 +1962,12 @@ public class ExoPlayerPlugin extends Plugin {
                     new VideoResolverInterface().onVideoFound(u);
                     return true;
                 }
-                if (playbackMode && isRootEscape(u, view.getUrl())) {
-                    Log.d(TAG, "Playback blocked root escape: " + hostOf(u));
-                    return true;
+                if (playbackMode) {
+                    if (isPlaybackNavBlocked(u, view.getUrl())) {
+                        Log.d(TAG, "Playback blocked nav (ad/popunder): " + hostOf(u));
+                        return true;
+                    }
+                    return false;
                 }
                 if (!isAllowedTopUrl(u)) {
                     Log.d(TAG, "Blocked top navigation: " + hostOf(u));
@@ -2216,6 +2238,34 @@ public class ExoPlayerPlugin extends Plugin {
             return (p == null || p.equals("/") || p.isEmpty())
                 && !u.equals(currentUrl);
         } catch (Exception ignored) { return false; }
+    }
+
+    // En modo playback el vídeo ya corre dentro de la página del embed — no
+    // existe navegación top legítima. Solo se permite recargar el MISMO
+    // documento (mismo host + mismo path) y los challenges anti-bot; todo lo
+    // demás es un popunder de ads (los players DLive/tiestep navegan la
+    // página entera a trackers y se cargan la reproducción).
+    private boolean isPlaybackNavBlocked(String u, String currentUrl) {
+        if (u == null) return true;
+        try {
+            android.net.Uri nu = android.net.Uri.parse(u);
+            String scheme = nu.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return true;
+            String uh = nu.getHost();
+            if (uh == null) return true;
+            String h = uh.toLowerCase(java.util.Locale.ROOT);
+            // Challenges anti-bot: el usuario debe poder resolverlos.
+            if (h.contains("cloudflare") || h.contains("recaptcha")
+                || h.contains("hcaptcha") || h.contains("altcha")
+                || h.contains("datadome") || h.contains("challenges.")) return false;
+            android.net.Uri cu = currentUrl != null ? android.net.Uri.parse(currentUrl) : null;
+            String ch = cu != null ? cu.getHost() : null;
+            if (ch == null || !ch.equalsIgnoreCase(uh)) return true;
+            // Mismo host: solo el mismo path (recarga con nueva query/token).
+            String np = nu.getPath();
+            String cp = cu.getPath();
+            return np == null || cp == null || !np.equals(cp);
+        } catch (Exception ignored) { return true; }
     }
 
     // Peticiones de media que indican que el player embebido arrancó:
