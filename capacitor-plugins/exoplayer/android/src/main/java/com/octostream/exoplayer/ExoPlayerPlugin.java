@@ -69,6 +69,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.media3.exoplayer.source.SingleSampleMediaSource;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
 import org.chromium.net.CronetEngine;
@@ -127,6 +128,24 @@ public class ExoPlayerPlugin extends Plugin {
     private ExoPlayer player = null;
     private PlayerView playerView = null;
     private Dialog dialog = null;
+
+    // Mini-player PiP: un segundo ExoPlayer ligero en una vista flotante
+    // (decorView cuando el player está cerrado, rootLayout cuando está
+    // abierto). Regla de audio: el mini siempre suena; el principal queda
+    // muteado mientras haya PiP activo.
+    private ExoPlayer pipPlayer = null;
+    private FrameLayout pipLayout = null;
+    private PlayerView pipView = null;
+    private String pipUrl = null;
+    private String pipType = "hls";
+    private String pipTitle = "";
+    private Map<String, String> pipHeaders = new HashMap<>();
+    private boolean pipDirect = false;
+    private float mainVolBeforePip = 1f;
+    // Stream principal actual (para swap/minimizar a PiP).
+    private Map<String, String> currentHeaders = new HashMap<>();
+    private String currentStreamType = "hls";
+    private boolean currentDirect = false;
     // True for a short window after closePlayer() so the dialog's
     // dispatchKeyEvent can swallow the leaked ACTION_UP/ACTION_DOWN of the
     // same Back press that closed the dialog. Without this, the leaked key
@@ -281,6 +300,7 @@ public class ExoPlayerPlugin extends Plugin {
     private TextView octoEpgStartTv = null;
     private TextView octoEpgEndTv = null;
     private ImageButton octoCastBtn = null;
+    private ImageButton octoPipBtn = null;
     private CastContext castContext = null;
     private SessionManagerListener<CastSession> castSessionListener = null;
     private String currentLogoUrl = null;
@@ -3143,6 +3163,9 @@ public class ExoPlayerPlugin extends Plugin {
             playerMode = "live";
         }
         currentUrl = url != null ? url : "";
+        currentStreamType = streamType != null ? streamType : "hls";
+        currentDirect = direct;
+        currentHeaders = parseHeaders(headersJson);
         Log.i(TAG, "openPlayer: mode=" + playerMode + " channels param=" + (channels == null ? "null" : channels.length())
                 + " chanIndex=" + chanIndex + " existing liveChannels=" + (liveChannels == null ? "null" : liveChannels.length()));
         // Reset next episode popup state for the new playback
@@ -3766,6 +3789,14 @@ public class ExoPlayerPlugin extends Plugin {
         // La pantalla no debe dormirse mientras se reproduce vídeo.
         playerView.setKeepScreenOn(true);
 
+        // Si hay un mini-player PiP activo, se re-ancla dentro del diálogo y
+        // el principal queda muteado (el mini conserva el audio).
+        if (pipPlayer != null) {
+            attachPipToBestParent();
+            mainVolBeforePip = Math.max(player.getVolume(), 0.01f);
+            player.setVolume(0f);
+        }
+
         // Listen for events
         player.addListener(new Player.Listener() {
             @Override
@@ -4293,6 +4324,16 @@ public class ExoPlayerPlugin extends Plugin {
             }
         }
 
+        // PiP: baja el stream actual a una mini-ventana con audio y cierra el
+        // diálogo — el usuario navega y abre otro vídeo que sale muteado.
+        octoPipBtn = controlsOverlay.findViewById(R.id.octo_pip);
+        if (octoPipBtn != null) {
+            octoPipBtn.setColorFilter(Color.WHITE);
+            octoPipBtn.setOnClickListener(v -> {
+                minimizeToPip();
+            });
+        }
+
         // Focus scale en la fila única de controles (octo_seek tiene su
         // propio listener de foco con engorde + commit de scrub).
         applyFocusScaleToAll((ViewGroup) controlsOverlay.findViewById(R.id.octo_row_transport));
@@ -4318,7 +4359,8 @@ public class ExoPlayerPlugin extends Plugin {
                 controlsOverlay.findViewById(R.id.octo_subdelay),
                 speedLabel,
                 controlsOverlay.findViewById(R.id.octo_settings),
-                octoCastBtn};
+                octoCastBtn,
+                octoPipBtn};
         for (int i = 0; i < row.length; i++) {
             View view = row[i];
             if (view == null) continue;
@@ -5187,6 +5229,9 @@ public class ExoPlayerPlugin extends Plugin {
                 // implementation always used DefaultHttpDataSource here, so a
                 // channel zap silently bypassed WARP for non-TDT streams.
                 Map<String, String> headers = parseHeaders(headersJson);
+                currentStreamType = streamType;
+                currentDirect = direct;
+                currentHeaders = headers;
                 String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
                 boolean loopback = isLoopbackUrl(url);
                 DataSource.Factory dsFactory;
@@ -5240,6 +5285,258 @@ public class ExoPlayerPlugin extends Plugin {
                 call.reject("switchChannel failed: " + e.getMessage());
             }
         });
+    }
+
+    // ─── Mini-player PiP ─────────────────────────────────────────────────
+    // Segundo ExoPlayer ligero en una vista flotante. Regla de audio: el mini
+    // siempre suena; el principal queda muteado (setVolume(0)) mientras haya
+    // PiP, y no pide audio focus (setAudioAttributes con handleAudioFocus=false
+    // en el mini evita peleas de foco entre los dos players).
+
+    @PluginMethod
+    public void playPip(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        Uri parsed = Uri.parse(url);
+        String scheme = parsed.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            call.reject("invalid url scheme: only http/https are allowed");
+            return;
+        }
+        String type = call.getString("streamType", "hls");
+        boolean direct = call.getBoolean("direct", false);
+        Map<String, String> headers = parseHeaders(call.getObject("headers", new JSObject()));
+        String title = call.getString("title", "");
+        mainHandler.post(() -> {
+            try {
+                showPip(url, type, headers, direct, title);
+                call.resolve(new JSObject().put("status", "pip"));
+            } catch (Exception e) {
+                call.reject("playPip failed: " + e.getMessage());
+            }
+        });
+    }
+
+    @PluginMethod
+    public void stopPip(PluginCall call) {
+        mainHandler.post(() -> {
+            stopPipInternal();
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void isPipActive(PluginCall call) {
+        call.resolve(new JSObject().put("active", pipPlayer != null));
+    }
+
+    private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
+        String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
+        boolean loopback = isLoopbackUrl(url);
+        String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        if (!direct && !loopback && warpProxy != null && !warpProxy.isEmpty()) {
+            String[] parts = warpProxy.split(":", 2);
+            OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .proxy(new java.net.Proxy(
+                            java.net.Proxy.Type.HTTP,
+                            new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+            OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
+                    .setUserAgent(ua);
+            if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
+            return new DefaultDataSource.Factory(getContext(), okHttpFactory);
+        }
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(30000)
+                .setUserAgent(ua);
+        if (!headers.isEmpty()) httpFactory.setDefaultRequestProperties(headers);
+        return new DefaultDataSource.Factory(getContext(), httpFactory);
+    }
+
+    private void attachPipToBestParent() {
+        if (pipLayout == null) return;
+        ViewGroup parent = (dialog != null && dialog.isShowing() && rootLayoutRef != null)
+                ? rootLayoutRef
+                : (ViewGroup) getActivity().getWindow().getDecorView();
+        if (pipLayout.getParent() == parent) return;
+        if (pipLayout.getParent() != null) {
+            ((ViewGroup) pipLayout.getParent()).removeView(pipLayout);
+        }
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                dp(340), dp(191), Gravity.BOTTOM | Gravity.END);
+        lp.setMargins(0, 0, dp(24), dp(24));
+        parent.addView(pipLayout, lp);
+        pipLayout.setElevation(dp(6));
+        // Los overlays de controles deben quedar por encima del mini.
+        if (controlsOverlay != null && controlsOverlay.getParent() == parent) controlsOverlay.bringToFront();
+        if (topBar != null && topBar.getParent() == parent) topBar.bringToFront();
+        if (channelListPanel != null) channelListPanel.bringToFront();
+        if (episodeListPanel != null) episodeListPanel.bringToFront();
+    }
+
+    private void showPip(String url, String type, Map<String, String> headers, boolean direct, String title) {
+        stopPipInternal();
+        Context context = getContext();
+        pipUrl = url;
+        pipType = type != null ? type : "hls";
+        pipHeaders = headers != null ? headers : new HashMap<>();
+        pipDirect = direct;
+        pipTitle = title != null ? title : "";
+
+        pipLayout = new FrameLayout(context);
+        pipLayout.setBackgroundColor(Color.BLACK);
+        pipLayout.setFocusable(true);
+        pipLayout.setFocusableInTouchMode(true);
+        pipLayout.setClickable(true);
+
+        pipView = new PlayerView(context);
+        pipView.setUseController(false);
+        pipView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+        pipLayout.addView(pipView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        TextView label = new TextView(context);
+        label.setText(pipTitle);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(11);
+        label.setPadding(dp(6), dp(2), dp(6), dp(2));
+        label.setBackgroundColor(0x66000000);
+        label.setVisibility(pipTitle.isEmpty() ? View.GONE : View.VISIBLE);
+        pipLayout.addView(label, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.START));
+
+        TextView close = new TextView(context);
+        close.setText("✕");
+        close.setTextColor(Color.WHITE);
+        close.setTextSize(14);
+        close.setPadding(dp(8), dp(4), dp(8), dp(4));
+        close.setBackgroundColor(0x66000000);
+        close.setClickable(true);
+        close.setFocusable(true);
+        close.setOnClickListener(v -> stopPipInternal());
+        pipLayout.addView(close, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END));
+
+        // Tap/OK sobre el mini: intercambiar contenido con el principal.
+        View.OnClickListener swap = v -> swapPip();
+        pipLayout.setOnClickListener(swap);
+        pipView.setOnClickListener(swap);
+        pipLayout.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN
+                    && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                swapPip();
+                return true;
+            }
+            return false;
+        });
+
+        AudioAttributes aa = new AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .setUsage(C.USAGE_MEDIA)
+                .build();
+        pipPlayer = new ExoPlayer.Builder(context)
+                .setAudioAttributes(aa, true)
+                .setWakeMode(C.WAKE_MODE_LOCAL)
+                .build();
+        pipView.setPlayer(pipPlayer);
+        try {
+            DataSource.Factory dsf = makePipDsFactory(url, pipHeaders, direct);
+            pipPlayer.setMediaSource(buildMediaSource(url, pipType, dsf, null, null));
+            pipPlayer.setVolume(1f);
+            pipPlayer.prepare();
+            pipPlayer.play();
+        } catch (Exception e) {
+            Log.e(TAG, "showPip failed", e);
+            stopPipInternal();
+            return;
+        }
+        attachPipToBestParent();
+        // El mini conserva el audio: mutear el principal si está abierto.
+        if (player != null) {
+            mainVolBeforePip = Math.max(player.getVolume(), 0.01f);
+            player.setVolume(0f);
+        }
+    }
+
+    private void swapPip() {
+        if (pipPlayer == null || player == null || pipUrl == null) return;
+        // Contenido del mini → principal; el del principal → mini.
+        String mUrl = currentUrl, mType = currentStreamType, mTitle = currentChannelName;
+        Map<String, String> mHeaders = currentHeaders;
+        boolean mDirect = currentDirect;
+
+        currentUrl = pipUrl;
+        currentStreamType = pipType;
+        currentHeaders = pipHeaders;
+        currentDirect = pipDirect;
+        currentChannelName = pipTitle;
+        try {
+            DataSource.Factory dsf = makePipDsFactory(currentUrl, currentHeaders, currentDirect);
+            MediaSource src = buildMediaSource(currentUrl, currentStreamType, dsf, null, null);
+            player.setMediaSource(src);
+            lastDataSourceFactory = dsf;
+            lastStreamType = currentStreamType;
+            lastDrmSessionManager = null;
+            lastLicenseUrl = null;
+            lastMediaSource = src;
+            player.prepare();
+            player.play();
+            updatePlayerSubtitle(pipTitle);
+            updateControlsUi();
+        } catch (Exception e) {
+            Log.e(TAG, "swapPip main failed", e);
+        }
+
+        pipUrl = mUrl;
+        pipType = mType;
+        pipHeaders = mHeaders;
+        pipDirect = mDirect;
+        pipTitle = mTitle;
+        try {
+            DataSource.Factory dsf2 = makePipDsFactory(pipUrl, pipHeaders, pipDirect);
+            pipPlayer.setMediaSource(buildMediaSource(pipUrl, pipType, dsf2, null, null));
+            pipPlayer.prepare();
+            pipPlayer.play();
+        } catch (Exception e) {
+            Log.e(TAG, "swapPip pip failed", e);
+        }
+    }
+
+    private void minimizeToPip() {
+        if (player == null || currentUrl == null || currentUrl.isEmpty()) return;
+        // El stream actual pasa al mini con audio; el diálogo se cierra y el
+        // usuario navega para abrir otro vídeo que saldrá muteado.
+        showPip(currentUrl, currentStreamType, currentHeaders, currentDirect, currentChannelName);
+        closePlayer();
+        attachPipToBestParent();
+    }
+
+    private void stopPipInternal() {
+        if (pipView != null) {
+            try { pipView.setPlayer(null); } catch (Throwable ignored) {}
+        }
+        if (pipPlayer != null) {
+            try { pipPlayer.release(); } catch (Throwable ignored) {}
+            pipPlayer = null;
+        }
+        if (pipLayout != null && pipLayout.getParent() != null) {
+            ((ViewGroup) pipLayout.getParent()).removeView(pipLayout);
+        }
+        pipLayout = null;
+        pipView = null;
+        pipUrl = null;
+        // Restaurar el audio del principal.
+        if (player != null) player.setVolume(mainVolBeforePip);
     }
 
     private String formatSpeed(float speed) {
@@ -7323,6 +7620,7 @@ public class ExoPlayerPlugin extends Plugin {
         octoEpgStartTv = null;
         octoEpgEndTv = null;
         octoCastBtn = null;
+        octoPipBtn = null;
         // Limpiar listener de Cast
         if (castContext != null && castSessionListener != null) {
             try {
@@ -7373,6 +7671,9 @@ public class ExoPlayerPlugin extends Plugin {
             dialog.dismiss();
             dialog = null;
         }
+        // Si el mini-player PiP vivía dentro del diálogo, re-anclarlo al
+        // decorView para que siga visible sobre la app.
+        if (pipPlayer != null) attachPipToBestParent();
         if (!suppressClosedEvent) {
             JSObject event = new JSObject();
             event.put("state", "closed");
@@ -7385,6 +7686,9 @@ public class ExoPlayerPlugin extends Plugin {
         if (player != null) {
             player.setPlayWhenReady(false);
         }
+        if (pipPlayer != null) {
+            pipPlayer.setPlayWhenReady(false);
+        }
         super.handleOnPause();
     }
 
@@ -7393,12 +7697,16 @@ public class ExoPlayerPlugin extends Plugin {
         if (player != null && dialog != null && dialog.isShowing()) {
             player.setPlayWhenReady(true);
         }
+        if (pipPlayer != null) {
+            pipPlayer.setPlayWhenReady(true);
+        }
         super.handleOnResume();
     }
 
     @Override
     protected void handleOnDestroy() {
         cleanupHeadless();
+        stopPipInternal();
         closePlayer();
         logoCache.clear();
         super.handleOnDestroy();

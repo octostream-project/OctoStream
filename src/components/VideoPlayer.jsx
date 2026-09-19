@@ -167,7 +167,12 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     try { torrentListenerRef.current?.remove?.() } catch {}
     torrentListenerRef.current = null
     setTorrentProgress(null)
-    import('@octostream/torrent-engine').then(m => m.TorrentEngine.stop()).catch(() => {})
+    // Si el mini-player PiP sigue reproduciendo la URL loopback del torrent,
+    // parar el motor cortaría su stream — solo se para si no hay PiP activo.
+    import('@octostream/exo-player').then(m => m.ExoPlayer.isPipActive?.()).then(r => {
+      if (r?.active) return
+      return import('@octostream/torrent-engine').then(m2 => m2.TorrentEngine.stop())
+    }).catch(() => import('@octostream/torrent-engine').then(m2 => m2.TorrentEngine.stop()).catch(() => {}))
   }, [])
 
   useEffect(() => {
