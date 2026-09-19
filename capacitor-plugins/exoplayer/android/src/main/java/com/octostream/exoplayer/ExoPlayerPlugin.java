@@ -3757,10 +3757,7 @@ public class ExoPlayerPlugin extends Plugin {
                         .build()
         );
 
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setContentType(2)
-                .setUsage(1)
-                .build();
+        AudioAttributes audioAttributes = mainAudioAttrs();
 
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(context) {
             @Override
@@ -3779,7 +3776,10 @@ public class ExoPlayerPlugin extends Plugin {
 
         player = new ExoPlayer.Builder(context)
                 .setLoadControl(loadControl)
-                .setAudioAttributes(audioAttributes, true)
+                // Con PiP activo el mini es dueño del audio focus: si el
+                // principal lo pidiera, el mini recibiría AUDIOFOCUS_LOSS y
+                // Media3 lo pausaría automáticamente.
+                .setAudioAttributes(audioAttributes, pipPlayer == null)
                 .setTrackSelector(trackSelector)
                 .setRenderersFactory(renderersFactory)
                 .setWakeMode(C.WAKE_MODE_LOCAL) // CPU despierta durante playback
@@ -5333,6 +5333,10 @@ public class ExoPlayerPlugin extends Plugin {
         call.resolve(new JSObject().put("active", pipPlayer != null));
     }
 
+    private static AudioAttributes mainAudioAttrs() {
+        return new AudioAttributes.Builder().setContentType(2).setUsage(1).build();
+    }
+
     private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
         String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
         boolean loopback = isLoopbackUrl(url);
@@ -5440,6 +5444,14 @@ public class ExoPlayerPlugin extends Plugin {
             return false;
         });
 
+        // Antes de que el mini pida el audio focus, el principal lo suelta:
+        // si no, recibiría AUDIOFOCUS_LOSS y Media3 lo pausaría.
+        if (player != null) {
+            mainVolBeforePip = Math.max(player.getVolume(), 0.01f);
+            player.setAudioAttributes(mainAudioAttrs(), false);
+            player.setVolume(0f);
+        }
+
         AudioAttributes aa = new AudioAttributes.Builder()
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .setUsage(C.USAGE_MEDIA)
@@ -5461,11 +5473,6 @@ public class ExoPlayerPlugin extends Plugin {
             return;
         }
         attachPipToBestParent();
-        // El mini conserva el audio: mutear el principal si está abierto.
-        if (player != null) {
-            mainVolBeforePip = Math.max(player.getVolume(), 0.01f);
-            player.setVolume(0f);
-        }
     }
 
     private void swapPip() {
@@ -5535,8 +5542,11 @@ public class ExoPlayerPlugin extends Plugin {
         pipLayout = null;
         pipView = null;
         pipUrl = null;
-        // Restaurar el audio del principal.
-        if (player != null) player.setVolume(mainVolBeforePip);
+        // Restaurar el audio del principal (volumen + manejo de audio focus).
+        if (player != null) {
+            player.setAudioAttributes(mainAudioAttrs(), true);
+            player.setVolume(mainVolBeforePip);
+        }
     }
 
     private String formatSpeed(float speed) {
