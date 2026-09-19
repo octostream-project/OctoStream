@@ -910,12 +910,22 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Índice de la jornada en curso dentro de la liga abierta (para scroll y
-  // foco inicial del D-pad).
-  const currentJi = activeLeague?.marca
-    ? Math.max(0, activeLeague.jornadas.findIndex(
-        j => j.round === activeLeague.currentRound && j.items.length > 0))
-    : -1
+  // Jornadas visibles: la de esta semana y las siguientes — las pasadas ya
+  // no interesan (resultados) y ensucian la navegación con el mando.
+  const visibleJornadas = activeLeague?.marca
+    ? activeLeague.jornadas.filter(j =>
+        j.items.length > 0 &&
+        (activeLeague.currentRound == null || j.round >= activeLeague.currentRound))
+    : []
+  // Partidos visibles en ligas sin calendario: directos, recién finalizados
+  // y próximos — los jugados hace >3h ya no se muestran.
+  const visibleFlatItems = activeLeague && !activeLeague.marca
+    ? activeLeague.items.filter(i =>
+        i._isLive || i._justFinished || !i._matchDate || i._matchDate > Date.now() - 3 * 3600e3)
+    : []
+  const visibleCount = activeLeague?.marca
+    ? activeLeague.liveItems.length + visibleJornadas.reduce((n, j) => n + j.items.length, 0)
+    : visibleFlatItems.length
 
   // Al abrir una liga de calendario: bajar directo a la jornada de esta
   // semana en vez de empezar por la jornada 1. Sin directos se hace scroll;
@@ -1018,7 +1028,7 @@ export default function Sports() {
               <img src={activeLeague.logo} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none' }} className="w-8 h-8 object-contain" />
             )}
             <h2 className="text-lg font-semibold text-white/90">{activeLeague.name}</h2>
-            <span className="text-xs text-dark-500">{activeLeague.items.length}</span>
+            <span className="text-xs text-dark-500">{visibleCount}</span>
           </div>
           {activeLeague.marca ? (
             // Liga de calendario: partidos en directo arriba (tarjetas con
@@ -1043,7 +1053,7 @@ export default function Sports() {
                   </div>
                 </div>
               )}
-              {activeLeague.jornadas.map((j, ji) => (
+              {visibleJornadas.map((j, ji) => (
                 <div key={j.round} id={`sports-jrnd-${j.round}`} className="space-y-3 scroll-mt-4">
                   <h3 className="text-sm font-medium text-dark-300">{j.name || `Jornada ${j.round}`}</h3>
                   <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -1056,7 +1066,7 @@ export default function Sports() {
                         liveLabel={t('sports.live')}
                         finishedLabel={t('sports.finished')}
                         loadingLabel={t('sports.loading')}
-                        initial={activeLeague.liveItems.length === 0 && ji === currentJi && i === 0}
+                        initial={activeLeague.liveItems.length === 0 && ji === 0 && i === 0}
                       />
                     ))}
                   </div>
@@ -1066,8 +1076,8 @@ export default function Sports() {
           ) : (
             <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {(() => {
-                const firstLive = activeLeague.items.findIndex(i => i._isLive)
-                return activeLeague.items.map((item, i) => (
+                const firstLive = visibleFlatItems.findIndex(i => i._isLive)
+                return visibleFlatItems.map((item, i) => (
                   <MatchCard
                     key={item.id}
                     item={item}
