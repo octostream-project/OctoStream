@@ -156,6 +156,25 @@ describe('Palantir streams', () => {
     expect(streams).toHaveLength(1)
     expect(streams[0].url).toBe('https://1fichier.com/?ok')
   })
+
+  it('sanitizes decrypted urls with binary tails', async () => {
+    palantirMock.query.mockResolvedValue({
+      columns: ['link', 'calidad', 'audio', 'info'],
+      rows: [['A', '1080p', 'esp', null], ['B', '720p', 'esp', null], ['C', '720p', 'esp', null]],
+    })
+    palantirMock.decryptLinks.mockResolvedValue({
+      urls: [
+        "https://1fichier.com/?abc123' ��F�w",
+        'https://1fichier.com/?def456',
+        'garbage-no-url',
+      ],
+    })
+    const plugin = makePlugin()
+    const streams = await plugin.getStreams({ id: 'palantir:movie:5' })
+    expect(streams).toHaveLength(2)
+    expect(streams[0].url).toBe('https://1fichier.com/?abc123')
+    expect(streams[1].url).toBe('https://1fichier.com/?def456')
+  })
 })
 
 describe('Palantir search', () => {

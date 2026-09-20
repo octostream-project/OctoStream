@@ -98,12 +98,16 @@ function apiUrl(endpoint, params = {}) {
 }
 
 // Fetch JSON from AllDebrid API (with automatic re-authentication on bad API key)
-async function apiFetch(endpoint, params = {}, retry = true) {
+// method 'POST' envía params como form-urlencoded en el body (algunos
+// endpoints como /link/delayed solo aceptan POST).
+async function apiFetch(endpoint, params = {}, retry = true, method = 'GET') {
   const key = getAlldebridApiKey()
   if (!key) throw new Error('AllDebrid API key not configured')
 
-  const url = apiUrl(endpoint, params)
-  const res = await fetchT(url)
+  const url = apiUrl(endpoint, method === 'GET' ? params : {})
+  const res = await fetchT(url, method === 'POST'
+    ? { method: 'POST', body: new URLSearchParams(params) }
+    : {})
   if (!res.ok) throw new Error(`AllDebrid API error: ${res.status}`)
 
   const data = await res.json()
@@ -121,37 +125,43 @@ async function apiFetch(endpoint, params = {}, retry = true) {
   return data.data
 }
 
+// Poll /link/delayed until AllDebrid finishes generating the download link.
+// Hosts like 1fichier return {delayed: id} from /link/unlock when the file
+// isn't cached on their servers. status: 1=processing, 2=ready(+link), 3=error.
+async function waitDelayed(delayedId, timeoutMs = 120000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const data = await apiFetch('/link/delayed', { id: delayedId }, true, 'POST')
+    if (data?.status === 2 && data.link) return data.link
+    if (data?.status === 3) return null
+    await new Promise(r => setTimeout(r, 5000))
+  }
+  return null
+}
+
 // Unlock a link (embed URL from streamwish, filemoon, etc.)
-// Returns { link, filename, filesize, streamable, id, streams } or null on failure.
-// streams is an array of { link, quality, ext } for quality-specific options.
+// Returns { link, filename, filesize, streamable, id } or null on failure.
+// `link` is the direct, already-unlocked URL. data.streams entries are NOT
+// returned: they are still-restricted variants that need /link/streaming.
 export async function unlockLink(linkUrl) {
   try {
     const data = await apiFetch('/link/unlock', { link: linkUrl })
-    if (!data || !data.link) return null
-    // Extract quality-specific streams if available
-    const streams = []
-    if (data.streams && Array.isArray(data.streams)) {
-      for (const s of data.streams) {
-        if (s.link) {
-          streams.push({
-            link: s.link,
-            quality: s.quality ? String(s.quality) + 'p' : '',
-            ext: s.ext || '',
-          })
-        }
-      }
+    if (!data) return { link: null, error: 'no_data' }
+    let link = data.link
+    if (!link && data.delayed) {
+      link = await waitDelayed(data.delayed)
     }
+    if (!link) return { link: null, error: 'not_ready' }
     return {
-      link: data.link,
+      link,
       filename: data.filename || '',
       filesize: data.filesize || 0,
       streamable: data.streamable !== false,
       id: data.linkid || data.id || null,
-      streams,
     }
   } catch (e) {
     console.warn('[AllDebrid] unlockLink failed:', e?.message, hostOf(linkUrl))
-    return null
+    return { link: null, error: e?.message || 'unknown' }
   }
 }
 
