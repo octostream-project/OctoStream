@@ -171,30 +171,31 @@ export async function fetchLeagueEvents(leagueName, slug = 'football', signal, u
   const out = []
   const seen = new Set()
   let anyPageOk = false
-  for (const page of ['last/0', 'last/1', 'next/0', 'next/1']) {
-    try {
-      const data = await httpGetJson(
-        `${SOFA_API}/unique-tournament/${utId}/season/${seasonId}/events/${page}`, {}, signal)
-      anyPageOk = true
-      for (const e of data?.events || []) {
-        const round = e.roundInfo?.round
-        if (!round || seen.has(e.id)) continue
-        seen.add(e.id)
-        const finished = e.status?.type === 'finished'
-        out.push({
-          round,
-          roundName: e.roundInfo?.name || null,
-          ts: e.startTimestamp ? e.startTimestamp * 1000 : 0,
-          status: e.status?.type,
-          home: e.homeTeam?.name, away: e.awayTeam?.name,
-          homeImg: e.homeTeam?.id ? teamImg(e.homeTeam.id) : null,
-          awayImg: e.awayTeam?.id ? teamImg(e.awayTeam.id) : null,
-          homeScore: finished ? e.homeScore?.current ?? null : null,
-          awayScore: finished ? e.awayScore?.current ?? null : null,
-        })
-      }
-    } catch { /* offline / challenge */ }
-    if (signal?.aborted) break
+  // Las 4 páginas son independientes (2 pasadas + 2 futuras) — pedirlas en
+  // paralelo en vez de una tras otra corta el tiempo de 4 round-trips a 1.
+  const pages = ['last/0', 'last/1', 'next/0', 'next/1']
+  const results = await Promise.allSettled(pages.map(page =>
+    httpGetJson(`${SOFA_API}/unique-tournament/${utId}/season/${seasonId}/events/${page}`, {}, signal)))
+  for (const r of results) {
+    if (r.status !== 'fulfilled') continue // offline / challenge
+    anyPageOk = true
+    for (const e of r.value?.events || []) {
+      const round = e.roundInfo?.round
+      if (!round || seen.has(e.id)) continue
+      seen.add(e.id)
+      const finished = e.status?.type === 'finished'
+      out.push({
+        round,
+        roundName: e.roundInfo?.name || null,
+        ts: e.startTimestamp ? e.startTimestamp * 1000 : 0,
+        status: e.status?.type,
+        home: e.homeTeam?.name, away: e.awayTeam?.name,
+        homeImg: e.homeTeam?.id ? teamImg(e.homeTeam.id) : null,
+        awayImg: e.awayTeam?.id ? teamImg(e.awayTeam.id) : null,
+        homeScore: finished ? e.homeScore?.current ?? null : null,
+        awayScore: finished ? e.awayScore?.current ?? null : null,
+      })
+    }
   }
   // Cachear solo si alguna página respondió: un fallo total de red no debe
   // congelar el calendario una hora.

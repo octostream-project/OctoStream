@@ -348,27 +348,37 @@ async function loadSitemapIndex(signal) {
           .sort((a, b) => b.page - a.page).slice(0, 1))
       }
     }
+    // Hasta ~20 ficheros de ~650KB cada uno: descargarlos uno a uno tardaba
+    // segundos (20 round-trips secuenciales). En paralelo con un límite de
+    // concurrencia (evita saturar el puente nativo/HTTP en Android) el
+    // tiempo total baja al del fichero más lento, no a la suma de todos.
     const entries = []
-    for (const f of picked) {
-      let xml = null
-      try { xml = (await httpGetText(f.file, {}, shortSignal(signal, 10000))).data } catch { continue }
-      if (!xml || !xml.includes('<urlset')) continue
-      for (const m of xml.matchAll(SITEMAP_PAGE_RE)) {
-        const mm = m[1].match(SITEMAP_MATCH_RE)
-        if (!mm || mm[1] !== f.sport) continue
-        const [hs, as] = String(mm[4]).split('-vs-')
-        if (!hs || !as) continue
-        entries.push({
-          matchId: Number(mm[3]),
-          sportType: SPORT_TYPES[mm[1]] || SPORT_TYPES.football,
-          leagueSlug: mm[2],
-          slug: mm[4],
-          home: hs.replace(/-/g, ' '),
-          away: as.replace(/-/g, ' '),
-          dateMs: Date.parse(m[2]) || 0,
-        })
+    const CONCURRENCY = 6
+    let next = 0
+    const worker = async () => {
+      while (next < picked.length) {
+        const f = picked[next++]
+        let xml = null
+        try { xml = (await httpGetText(f.file, {}, shortSignal(signal, 10000))).data } catch { continue }
+        if (!xml || !xml.includes('<urlset')) continue
+        for (const m of xml.matchAll(SITEMAP_PAGE_RE)) {
+          const mm = m[1].match(SITEMAP_MATCH_RE)
+          if (!mm || mm[1] !== f.sport) continue
+          const [hs, as] = String(mm[4]).split('-vs-')
+          if (!hs || !as) continue
+          entries.push({
+            matchId: Number(mm[3]),
+            sportType: SPORT_TYPES[mm[1]] || SPORT_TYPES.football,
+            leagueSlug: mm[2],
+            slug: mm[4],
+            home: hs.replace(/-/g, ' '),
+            away: as.replace(/-/g, ' '),
+            dateMs: Date.parse(m[2]) || 0,
+          })
+        }
       }
     }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, picked.length) }, worker))
     sitemapIdx = { ts: Date.now(), entries }
     return entries
   })().finally(() => { sitemapPromise = null })
