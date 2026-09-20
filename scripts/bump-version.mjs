@@ -51,8 +51,9 @@ if (apkPath && existsSync(apkPath)) {
 }
 
 // Splits por ABI: si el dir de salida tiene app-<abi>-release.apk se genera
-// apkUrls/sha256s por ABI. apkUrl apunta al build armeabi-v7a (instalable en
-// todos los ABIs) como fallback para updaters antiguos.
+// apkUrls/sha256s por ABI. apkUrl apunta al build arm64-v8a como fallback
+// para updaters antiguos y descargas manuales: los móviles modernos son
+// arm64-only y RECHAZAN el APK de 32 bits ("Aplicación no instalada").
 const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64']
 const splitDir = 'android/app/build/outputs/apk/release'
 const apkUrls = {}
@@ -69,8 +70,8 @@ const manifest = {
   versionCode,
   versionName,
   minCode: 0,
-  apkUrl: apkUrl || apkUrls['armeabi-v7a'] || '',
-  sha256: sha256 || sha256s['armeabi-v7a'] || '',
+  apkUrl: apkUrl || apkUrls['arm64-v8a'] || apkUrls['armeabi-v7a'] || '',
+  sha256: sha256 || sha256s['arm64-v8a'] || sha256s['armeabi-v7a'] || '',
   notes,
 }
 if (Object.keys(apkUrls).length) {
