@@ -455,6 +455,8 @@ public class ExoPlayerPlugin extends Plugin {
         String embedTitle = call.getString("title", "");
         String embedRefererArg = call.getString("referer");
         final boolean playbackMode = call.getBoolean("playback", false);
+        Long wu = call.getLong("waitUntil", 0L);
+        final long waitUntilMs = wu != null ? wu : 0L;
 
         // Try native HTTP resolution first for Voe, Vidmoly, Doodstream and Waaw
         // (AniWorld extractors: direct HTTP bypasses the embed player page)
@@ -510,7 +512,7 @@ public class ExoPlayerPlugin extends Plugin {
                     ? lastVoeMirrorUrl : url;
                 mainHandler.post(() -> {
                     try {
-                        showEmbedWebView(call, wvUrl, embedTitle, embedRefererArg, false);
+                        showEmbedWebView(call, wvUrl, embedTitle, embedRefererArg, false, waitUntilMs);
                     } catch (Exception e) {
                         Log.e(TAG, "Error showing embed WebView", e);
                         call.reject("Failed to show embed: " + e.getMessage());
@@ -522,7 +524,7 @@ public class ExoPlayerPlugin extends Plugin {
 
         mainHandler.post(() -> {
             try {
-                showEmbedWebView(call, url, embedTitle, embedRefererArg, playbackMode);
+                showEmbedWebView(call, url, embedTitle, embedRefererArg, playbackMode, waitUntilMs);
             } catch (Exception e) {
                 Log.e(TAG, "Error showing embed WebView", e);
                 call.reject("Failed to show embed: " + e.getMessage());
@@ -1682,7 +1684,7 @@ public class ExoPlayerPlugin extends Plugin {
         }
     }
 
-    private void showEmbedWebView(PluginCall call, String url, String embedTitle, String embedRefererArg, boolean playbackMode) {
+    private void showEmbedWebView(PluginCall call, String url, String embedTitle, String embedRefererArg, boolean playbackMode, long waitUntilMs) {
         Log.d(TAG, "showEmbedWebView host=" + hostOf(url) + " playback=" + playbackMode);
         Context context = getContext();
         final boolean[] resolved = {false};
@@ -1693,6 +1695,28 @@ public class ExoPlayerPlugin extends Plugin {
         // usuario: o el vídeo arranca (media) o el embed cierra por timeout.
         // Única excepción: un captcha/challenge que requiera interacción.
         final boolean[] challengeRevealed = {false};
+        // Página de cuenta atrás pre-emisión (FCTV): el contador SÍ es
+        // contenido legítimo — se revela y el embed espera al vídeo hasta
+        // waitUntilMs en vez de cerrar por timeout.
+        final boolean[] countdownSeen = {false};
+        // Detector combinado: captcha → 'captcha'; cuenta atrás → 'countdown'.
+        final String detectJs =
+            "(function(){var c=document.querySelector('iframe[src*=captcha],"
+            + "iframe[src*=turnstile],iframe[src*=recaptcha],iframe[src*=hcaptcha],"
+            + "iframe[src*=altcha],.g-recaptcha,.h-captcha,.cf-turnstile,"
+            + "#challenge-stage,altcha-widget,[class*=captcha],[id*=captcha],"
+            + "[class*=challenge],[id*=challenge]');if(c)return 'captcha';"
+            + "var cd=document.querySelector('[class*=countdown],[id*=countdown],"
+            + "[class*=timer],[id*=timer],[class*=clock],[id*=clock],[class*=cuenta],"
+            + "[id*=cuenta],[class*=t-minus],[id*=t-minus],[data-countdown],[data-timer]');"
+            + "if(cd)return 'countdown';"
+            + "var b=document.body?document.body.innerText||'':'';"
+            + "var els=document.querySelectorAll('div,span,p,time');"
+            + "var timer=false;"
+            + "for(var i=0;i<els.length;i++){var tx=els[i].innerText||'';"
+            + "if(/^\\s*\\d{1,3}:\\d{2}(:\\d{2})?\\s*$/.test(tx)){timer=true;break;}}"
+            + "if(timer&&/empieza|comienza|comenzar|starts|begin|directo|live|qued|pronto|soon|previo|previa/i.test(b))return 'countdown';"
+            + "return 'none';})()";
         final boolean[] pageLoaded = {false};
         // ID del embed (último segmento del path) — los proveedores rotan de
         // dominio pero conservan el ID (powvideo→powwideo, voe.sx→johnfullwonder).
@@ -2176,32 +2200,30 @@ public class ExoPlayerPlugin extends Plugin {
             closeBtn.bringToFront();
             resolverWebView.invalidate();
         };
-        mainHandler.postDelayed(() -> {
-            if (resolved[0] || mediaStarted[0] || embedOverlay == null) return;
-            // La página del proveedor NO se revela salvo que haya un
-            // captcha/challenge que el usuario deba resolver a mano. Sin
-            // challenge la página se queda oculta hasta que arranque el
-            // vídeo/resuelva la URL o cierre por timeout — nunca se muestra
-            // la web del host.
-            if (resolverWebView != null) {
-                resolverWebView.evaluateJavascript(
-                    "(function(){var c=document.querySelector('iframe[src*=captcha],"
-                    + "iframe[src*=turnstile],iframe[src*=recaptcha],iframe[src*=hcaptcha],"
-                    + "iframe[src*=altcha],.g-recaptcha,.h-captcha,.cf-turnstile,"
-                    + "#challenge-stage,altcha-widget,[class*=captcha],[id*=captcha],"
-                    + "[class*=challenge],[id*=challenge]');return c?'captcha':'none';})()",
-                    r -> {
-                        if (resolved[0] || mediaStarted[0]) return;
-                        if (r != null && r.contains("captcha")) {
-                            Log.d(TAG, "Playback embed: captcha detected — revealing page");
-                            challengeRevealed[0] = true;
-                            revealPage.run();
-                        } else {
-                            Log.d(TAG, "Playback embed: no media, no captcha — staying hidden until timeout");
-                        }
-                    });
-            }
-        }, 18000);
+        // Sondeo cada 7s hasta el timeout: la página del proveedor NO se
+        // revela salvo captcha (interacción manual) o cuenta atrás pre-
+        // emisión (FCTV — el contador es el contenido esperado). Sin vídeo,
+        // captcha ni contador, el embed se queda oculto y cierra por timeout.
+        final Runnable[] detect = new Runnable[1];
+        detect[0] = () -> {
+            if (resolved[0] || mediaStarted[0] || challengeRevealed[0]
+                || countdownSeen[0] || embedOverlay == null || resolverWebView == null) return;
+            resolverWebView.evaluateJavascript(detectJs, r -> {
+                if (resolved[0] || mediaStarted[0]) return;
+                if (r != null && r.contains("captcha")) {
+                    Log.d(TAG, "Embed: captcha detected — revealing page");
+                    challengeRevealed[0] = true;
+                    revealPage.run();
+                } else if (r != null && r.contains("countdown")) {
+                    Log.d(TAG, "Embed: pre-match countdown — revealing and waiting");
+                    countdownSeen[0] = true;
+                    revealPage.run();
+                } else {
+                    mainHandler.postDelayed(detect[0], 7000);
+                }
+            });
+        };
+        mainHandler.postDelayed(detect[0], 7000);
         // Cursor virtual para D-pad: anillo visible que se mueve con las
         // flechas del mando; OK envía un toque real en su posición.
         final float density = context.getResources().getDisplayMetrics().density;
@@ -2250,13 +2272,42 @@ public class ExoPlayerPlugin extends Plugin {
             }
             cleanupResolver();
         };
-        // Sin captcha revelado: 30s sin resolver ni arrancar media = sin
-        // vídeo — se cierra siempre, la página del proveedor no se muestra
-        // nunca. Con captcha revelado se dan 60s extra para resolverlo a mano.
+        // 30s sin resolver ni arrancar media = sin vídeo — se cierra, la
+        // página del proveedor no se muestra nunca. Excepciones: captcha
+        // revelado (+60s para resolverlo a mano) y cuenta atrás pre-emisión
+        // (FCTV): se mantiene el embed abierto hasta waitUntilMs, y cuando el
+        // contador desaparece hay ~10 min de gracia para que arranque el
+        // vídeo.
         mainHandler.postDelayed(() -> {
             if (resolved[0] || mediaStarted[0]) return;
             if (challengeRevealed[0]) {
                 mainHandler.postDelayed(closeWithTimeout, 60000);
+            } else if (countdownSeen[0]) {
+                final long deadline = waitUntilMs > 0
+                    ? waitUntilMs : System.currentTimeMillis() + 4L * 3600 * 1000;
+                final int[] misses = {0};
+                final Runnable[] watch = new Runnable[1];
+                watch[0] = () -> {
+                    if (resolved[0] || mediaStarted[0]) return;
+                    if (System.currentTimeMillis() > deadline
+                        || resolverWebView == null) {
+                        closeWithTimeout.run();
+                        return;
+                    }
+                    resolverWebView.evaluateJavascript(detectJs, r -> {
+                        if (resolved[0] || mediaStarted[0]) return;
+                        // 'none' = el contador/challenge ya no está — cuenta
+                        // como fallo; 10 fallos (~10 min) sin vídeo → cerrar.
+                        if (r != null && !r.contains("none")) {
+                            misses[0] = 0;
+                        } else if (++misses[0] >= 10) {
+                            closeWithTimeout.run();
+                            return;
+                        }
+                        mainHandler.postDelayed(watch[0], 60000);
+                    });
+                };
+                mainHandler.postDelayed(watch[0], 30000);
             } else {
                 closeWithTimeout.run();
             }

@@ -238,7 +238,7 @@ export function isExoPlayerAvailable() {
  * @param {string} title - Title for the player
  * @returns {Promise<{status: string, url?: string, streamType?: string}>}
  */
-export async function playEmbed(url, title = '', referer = '', playback = false) {
+export async function playEmbed(url, title = '', referer = '', playback = false, waitUntil = 0) {
   if (!isAndroidNative()) {
     throw new Error('ExoPlayer playEmbed only available on Android native')
   }
@@ -250,6 +250,7 @@ export async function playEmbed(url, title = '', referer = '', playback = false)
     title,
     referer: safeRef || undefined,
     playback: playback === true,
+    waitUntil: waitUntil || 0,
   })
 }
 

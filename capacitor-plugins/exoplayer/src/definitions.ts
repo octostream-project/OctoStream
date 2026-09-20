@@ -119,6 +119,12 @@ export interface PlayEmbedOptions {
    * que el usuario cierra.
    */
   playback?: boolean
+  /**
+   * Límite (ms epoch) para páginas de cuenta atrás pre-emisión (FCTV muestra
+   * un contador hasta que arranca el directo): el embed se mantiene abierto
+   * esperando el vídeo hasta esta hora como máximo. 0 = sin espera extra.
+   */
+  waitUntil?: number
 }
 
 export interface PlayEmbedResult {
