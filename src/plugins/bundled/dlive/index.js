@@ -12,7 +12,7 @@
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../../base.js'
 import { logWarn } from '../../../utils/logger.js'
 import { httpGetText, httpGetJson, shortSignal } from '../../../utils/httpClient.js'
-import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, sofaSportFor } from './parse.js'
+import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, eventKeyNoLeague, sofaSportFor, sortLinks, isGenericLabel } from './parse.js'
 import { probeHlsQuality } from '../../../utils/streamProbe.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 
@@ -67,18 +67,41 @@ async function fetchAllEvents(signal) {
   ])
 
   const byKey = new Map()
-  for (const e of parseSchedule(mainHtml, base)) byKey.set(eventId(e), e)
+  // Índice sin liga: localiza el mismo partido cuando una fuente no da la
+  // liga (extra_backup solo trae "Betis vs Getafe", sin "Spain LaLiga") sin
+  // fundir partidos realmente distintos entre las mismas dos ligas ese día.
+  const byNoLeague = new Map()
+  const noLeagueKeys = new Set() // claves cuya liga es '' — comodín seguro
+  const hasLeague = (e) => !!String(e.league || '').trim()
+  const register = (k, e) => {
+    byKey.set(k, e)
+    const nk = eventKeyNoLeague(e)
+    if (nk && !byNoLeague.has(nk)) byNoLeague.set(nk, k)
+    if (nk && !hasLeague(e) && !noLeagueKeys.has(nk)) noLeagueKeys.add(nk)
+  }
+  for (const e of parseSchedule(mainHtml, base)) register(eventId(e), e)
   for (const html of extras) {
     for (const e of parseSchedule(html, base)) {
       const k = eventId(e)
-      const prev = byKey.get(k)
-      if (!prev) { byKey.set(k, e); continue }
+      let prev = byKey.get(k)
+      // Sin match exacto: si ESTE evento no lleva liga, o el ya registrado
+      // para ese par de equipos tampoco la llevaba, es el mismo partido con
+      // liga inconsistente entre fuentes — fusionar. Dos ligas reales que
+      // difieren (liga y copa el mismo día) no entran aquí y quedan aparte.
+      if (!prev) {
+        const nk = eventKeyNoLeague(e)
+        const altKey = nk && (!hasLeague(e) || noLeagueKeys.has(nk)) ? byNoLeague.get(nk) : null
+        if (altKey) prev = byKey.get(altKey)
+      }
+      if (!prev) { register(k, e); continue }
       // Same match in the main schedule and in LIVE NOW/extras: keep the live
       // flag, earliest time and the union of links.
       const seen = new Set(prev.links.map(l => l.url))
       for (const l of e.links) if (!seen.has(l.url)) { prev.links.push(l); seen.add(l.url) }
+      prev.links = sortLinks(prev.links)
       prev.live = prev.live || e.live
       if (!prev.time && e.time) prev.time = e.time
+      if (!hasLeague(prev) && hasLeague(e)) prev.league = e.league
     }
   }
 
@@ -136,8 +159,14 @@ function toItem(e, catId) {
 // resuelve con el WebView headless). El picker de Sports prefiere siempre los
 // directos; los embeds quedan como fallback cuando no hay HLS.
 async function resolveEventStreams(item, signal) {
-  const streams = []
-  const jobs = (item._links || []).map(async (link) => {
+  const links = item._links || []
+  // Los jobs corren en paralelo pero el resultado se coloca en el índice
+  // original: sortLinks ya puso los canales con nombre real antes que los
+  // códigos genéricos de respaldo (admin/delta/foxtrot…) — si se empujara al
+  // array según resuelve cada uno, ese orden se perdería por timing de red.
+  const slots = new Array(links.length)
+  let genericIdx = 0
+  const jobs = links.map(async (link, i) => {
     if (/watchlivelive\.php/.test(link.url)) {
       try {
         const html = await httpGetText(link.url, UA, shortSignal(signal, 8000))
@@ -145,7 +174,7 @@ async function resolveEventStreams(item, signal) {
         if (r) {
           const quality = await probeHlsQuality(r.url,
             r.referer ? { Referer: r.referer } : UA, signal)
-          streams.push({
+          slots[i] = {
             name: `DLive ${link.label}`,
             title: 'Directo',
             url: r.url,
@@ -155,7 +184,7 @@ async function resolveEventStreams(item, signal) {
             quality: quality || undefined,
             isLive: true,
             _noCache: true,
-          })
+          }
           return
         }
       } catch (e) {
@@ -167,8 +196,12 @@ async function resolveEventStreams(item, signal) {
     // watchextra) sirven el m3u8 SOLO a su propio documento — la URL
     // extraída da 403 en ExoPlayer, así que van directo al WebView playback.
     const wvPlayback = /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b/i.test(link.url)
-    streams.push({
-      name: link.label,
+    // Códigos genéricos de respaldo (isGenericLabel) sin nombre real: el
+    // proveedor ya no da el canal, así que se numeran en vez de mostrar la
+    // palabra en crudo ("admin Stream" → "DLive · Enlace 1").
+    const name = isGenericLabel(link.label) ? null : link.label
+    slots[i] = {
+      name,
       title: 'DLive · Web',
       url: link.url,
       referer: baseCache?.base ? baseCache.base + '/' : undefined,
@@ -176,9 +209,13 @@ async function resolveEventStreams(item, signal) {
       isLive: true,
       _noCache: true,
       _wvPlayback: wvPlayback || undefined,
-    })
+    }
   })
   await Promise.all(jobs)
+  const streams = slots.filter(Boolean)
+  for (const s of streams) {
+    if (s.name === null) s.name = `DLive · Enlace ${++genericIdx}`
+  }
   return streams
 }
 

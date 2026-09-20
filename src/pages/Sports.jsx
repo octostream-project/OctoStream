@@ -8,6 +8,7 @@ import { MARCA_LEAGUES } from '../data/marcaCalendar.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents, tournamentImg } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
+import { sortLinks, isGenericLabel } from '../plugins/bundled/dlive/parse.js'
 
 const SPORTS_PLUGIN = 'fctv'
 const DLIVE_PLUGIN = 'dlive'
@@ -773,8 +774,9 @@ export default function Sports() {
             // ya traía sus enlaces del schedule, ofrecerlos como embed — la
             // resolución headless/WebView los abre en el player.
             if (!list.length && src._links?.length) {
-              list = src._links.map(l => ({
-                name: `DLive ${l.label || 'Web'}`,
+              let genericIdx = 0
+              list = sortLinks(src._links).map(l => ({
+                name: isGenericLabel(l.label) ? `DLive · Enlace ${++genericIdx}` : `DLive ${l.label || 'Web'}`,
                 title: 'DLive · Web',
                 url: l.url,
                 referer: l.referer,

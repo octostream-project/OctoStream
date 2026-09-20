@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseSchedule, parseEventTitle, extractLiveLiveUrl, catalogFor, eventId, stripIcons,
+  eventKeyNoLeague, isGenericLabel, sortLinks,
 } from './parse.js'
 
 const BASE = 'https://dlive.sx'
@@ -139,5 +140,44 @@ describe('eventId', () => {
     expect(eventId(a)).toBe(eventId({ ...a }))
     expect(eventId(a)).not.toBe(eventId(b))
     expect(eventId(a)).toMatch(/^dlive:/)
+  })
+})
+
+describe('eventKeyNoLeague', () => {
+  it('ignores league so the same match merges across sources', () => {
+    const withLeague = eventKeyNoLeague({ home: 'Betis', away: 'Getafe', league: 'La Liga' })
+    const withoutLeague = eventKeyNoLeague({ home: 'Betis', away: 'Getafe', league: '' })
+    expect(withLeague).toBe(withoutLeague)
+  })
+  it('returns null without home/away (title-only events)', () => {
+    expect(eventKeyNoLeague({ title: 'x', category: 'c' })).toBeNull()
+  })
+})
+
+// DLive's extra_backup source stopped sending the real channel/broadcaster
+// name and now labels its links with generic codenames (NATO alphabet +
+// "admin") — regression covered here so it doesn't creep back unnoticed.
+describe('isGenericLabel', () => {
+  it('flags NATO-alphabet and admin backup codenames', () => {
+    for (const label of ['admin Stream', 'Delta Stream', 'foxtrot stream', 'Golf Stream', 'Hotel Stream']) {
+      expect(isGenericLabel(label)).toBe(true)
+    }
+  })
+  it('does not flag real channel names', () => {
+    for (const label of ['Sky Sports+', 'beIN Sports 1', 'HD', 'SD', 'Movistar Deportes']) {
+      expect(isGenericLabel(label)).toBe(false)
+    }
+  })
+})
+
+describe('sortLinks', () => {
+  it('keeps real channel names before generic backup codenames', () => {
+    const links = [
+      { label: 'admin Stream', url: 'a' },
+      { label: 'Sky Sports+', url: 'b' },
+      { label: 'delta Stream', url: 'c' },
+      { label: 'HD', url: 'd' },
+    ]
+    expect(sortLinks(links).map(l => l.label)).toEqual(['Sky Sports+', 'HD', 'admin Stream', 'delta Stream'])
   })
 })
