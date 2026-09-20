@@ -7,7 +7,7 @@ import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play } from 'lucide-react
 import { MARCA_LEAGUES } from '../data/marcaCalendar.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents, tournamentImg } from '../utils/sofascore.js'
-import { fctvEmbedFallbacks } from '../plugins/bundled/fctv/index.js'
+import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
 
 const SPORTS_PLUGIN = 'fctv'
 const DLIVE_PLUGIN = 'dlive'
@@ -30,7 +30,7 @@ const SNAPSHOT_TTL = 10 * 60 * 1000
 // — cuando el orden difiere, el merge no casaba y el partido salía dos veces
 // (el mismo equipo aparecía en "dos partidos diferentes"). Si ambos traen
 // fecha y difieren >6h son partidos distintos (ida/vuelta, doble jornada).
-const WOMEN_RE = /femenin|feminine|women|ladies/i
+const WOMEN_RE = /femenin|feminine|women|ladies|liga f\b/i
 const isWomen = (item) => WOMEN_RE.test(item._home?.name || '') ||
   WOMEN_RE.test(item._away?.name || '') || WOMEN_RE.test(item._league?.name || '')
 
@@ -394,6 +394,7 @@ export default function Sports() {
   const [resolvingId, setResolvingId] = useState(null)
   const [selectedLeague, setSelectedLeague] = useState(null) // group | null
   const [marcaResults, setMarcaResults] = useState(new Map()) // leagueSlug → [{home,away,homeScore,awayScore}]
+  const [sitemapTick, setSitemapTick] = useState(0) // bump cuando el índice FCTV (sitemap) está listo
   const [streamPicker, setStreamPicker] = useState(null) // { item, streams }
   const playAbortRef = useRef(null)
   const playRequestRef = useRef(0)
@@ -598,6 +599,13 @@ export default function Sports() {
           pluginManager.getCatalogContent(DLIVE_PLUGIN, dliveCat, 'channel', 0, 500)
             .then(r => { dliveItems = r; paint() })
             .catch(() => { dliveItems = []; paint() }),
+          // Índice sitemap de FCTV: /api/match/live va tras un challenge de
+          // Cloudflare que no se puede resolver — los sitemaps del dominio
+          // web publican los matchIds del mes. Al cargar, el re-render
+          // adjunta _fctvItem a las tarjetas (enlaces FCTV junto a DLive).
+          fctvWarmupSitemap().then(ok => {
+            if (ok && !cancelled) setSitemapTick(tk => tk + 1)
+          }).catch(() => {}),
         ])
       } catch (e) {
         if (!cancelled) {
@@ -708,6 +716,12 @@ export default function Sports() {
     } else {
       srcs.push(item)
       if (item._dliveItem) srcs.push(item._dliveItem)
+      // Tarjeta solo-DLive (FCTV sin catálogo por el challenge): adjuntar el
+      // partido FCTV del índice sitemap para ofrecer ambos enlaces.
+      if (item.pluginId === DLIVE_PLUGIN && !item._fctvItem) {
+        const f = fctvLookupItem(item)
+        if (f && !srcs.includes(f)) srcs.push(f)
+      }
     }
     return srcs
   }
@@ -839,7 +853,14 @@ export default function Sports() {
         name: j.name || null,
         items: j.matches.map((m, i) => {
           const item = normalizeMarcaMatch(m, j.round, lg.slug, i)
+          // Contexto de liga para los matchers: sin él una tarjeta de Liga F
+          // ("Real Madrid") podría fundirse con el partido masculino.
+          item._league = { name: lg.name, logo: lg.logo || null }
           let f = fctvGroup?.items.find(fi => sameMatch(fi, item))
+          // Sin item FCTV en el catálogo (la API de directos va tras un
+          // challenge de Cloudflare): buscar el matchId en el índice del
+          // sitemap — sus streams se resuelven por endpoints sin protección.
+          if (!f) f = fctvLookupItem(item)
           let d = null
           // El match puede venir de un item DLive colgado en el grupo FCTV.
           if (f?.pluginId === DLIVE_PLUGIN) { d = f; f = null }
@@ -919,7 +940,9 @@ export default function Sports() {
     // datos —offline u off-season— no muestran tarjeta vacía.
     groups.sort(leagueGroupCmp)
     return { groups: groups.filter(g => g.items.length), usedNames: used }
-  }, [leagueGroups, marcaResults])
+    // sitemapTick: re-ejecutar cuando el índice sitemap de FCTV termine de
+    // cargar — adjunta _fctvItem a tarjetas que antes quedaban sin enlaces.
+  }, [leagueGroups, marcaResults, sitemapTick])
 
   // Ligas FCTV no cubiertas por el calendario Marca (solo en catálogo fútbol).
   const extraFctvGroups = useMemo(
@@ -927,9 +950,11 @@ export default function Sports() {
     [leagueGroups, marcaGroups])
 
   // Localiza el item FCTV equivalente a un partido del calendario (para sacar
-  // sus enlaces de stream al seleccionarlo).
+  // sus enlaces de stream al seleccionarlo). Si el catálogo está vacío por
+  // el challenge de Cloudflare, el índice del sitemap cubre el hueco.
   const findFctvItem = (marcaItem) => marcaItem._fctvItem || items.find(i =>
-    sameMatch(i, marcaItem))
+    i !== marcaItem && i.pluginId !== DLIVE_PLUGIN && sameMatch(i, marcaItem))
+    || fctvLookupItem(marcaItem)
 
   // La liga seleccionada se re-resuelve contra los grupos actuales: el refresco
   // silencioso reconstruye los objetos y la referencia guardada queda obsoleta
