@@ -5663,6 +5663,19 @@ public class ExoPlayerPlugin extends Plugin {
         if (topBar != null && topBar.getParent() == parent) topBar.bringToFront();
         if (channelListPanel != null) channelListPanel.bringToFront();
         if (episodeListPanel != null) episodeListPanel.bringToFront();
+        // Mover la PlayerView entre ventanas (diálogo del partido → decorView
+        // y viceversa) no siempre repinta su SurfaceView: se queda con el
+        // último frame — negro o transparente ("hole punch" de la surface
+        // vieja sin sustituir) — hasta el siguiente keyframe, que puede no
+        // llegar nunca en directo si el decoder no fuerza uno nuevo. Forzar
+        // el rebind (setPlayer(null) + setPlayer(pipPlayer)) hace que
+        // PlayerView pida una Surface nueva a la ventana actual y reintente
+        // el primer frame; sin rebind el mini queda "colgado" hasta que el
+        // usuario lo cierra y lo reabre.
+        if (pipView != null && pipPlayer != null) {
+            pipView.setPlayer(null);
+            pipView.setPlayer(pipPlayer);
+        }
     }
 
     private void showPip(String url, String type, Map<String, String> headers, boolean direct, String title) {
