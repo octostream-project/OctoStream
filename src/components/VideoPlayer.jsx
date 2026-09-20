@@ -218,6 +218,10 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         let relayCtx = null
         let lastPlayAt = 0
         const embedReferer = stream.referer || stream.headers?.Referer || ''
+        // Embeds de deportes con cuenta atrás pre-emisión (FCTV): el nativo
+        // mantiene el embed abierto esperando el vídeo hasta kickoff+90min.
+        const kickoff = stream._fctvItem?._matchDate || 0
+        const embedWaitUntil = kickoff > Date.now() ? kickoff + 90 * 60 * 1000 : 0
 
         // Reproducir el embed DENTRO del WebView nativo: CDNs como el de
         // DLive/tiestep solo sirven el m3u8 a documentos del propio proveedor
@@ -227,7 +231,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
           setResolvingEmbed(true)
           lastPlayAt = Date.now()
           setPlaybackStateListener(onEmbedState) // stopPlayback() lo limpia
-          return playEmbed(stream.url, title || '', embedReferer, true).then(result => {
+          return playEmbed(stream.url, title || '', embedReferer, true, embedWaitUntil).then(result => {
             if (embedCancelled) return
             setResolvingEmbed(false)
             if (result?.status === 'closed') {
@@ -325,7 +329,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         }
 
         const openVisibleEmbed = () => {
-          return playEmbed(stream.url, title || '', embedReferer).then(result => {
+          return playEmbed(stream.url, title || '', embedReferer, false, embedWaitUntil).then(result => {
           if (embedCancelled) return
           setResolvingEmbed(false)
           if (result && result.status === 'resolved') {
