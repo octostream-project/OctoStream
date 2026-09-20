@@ -4,9 +4,9 @@ import VideoPlayer from '../components/VideoPlayer.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 import { useTranslation } from '../i18n/index.js'
 import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play } from 'lucide-react'
-import { MARCA_LEAGUES } from '../data/marcaCalendar.js'
+import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
-import { enrichLogos, fetchLeagueEvents, tournamentImg } from '../utils/sofascore.js'
+import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
 import { sortLinks, isGenericLabel } from '../plugins/bundled/dlive/parse.js'
 
@@ -225,27 +225,8 @@ function normalizeMarcaMatch(m, round, leagueSlug, idx) {
 // Eventos de Sofascore → misma forma {round, matches} que las jornadas del
 // calendario Marca, así normalizeMarcaMatch y la fusión FCTV/DLive sirven
 // igual. m.ts lleva el kickoff exacto y m._live el estado en directo.
-// Nombre comercial en Marca → nombre del torneo en Sofascore.
-const MARCA_TO_SOFA = {
-  'LaLiga EA Sports': 'LaLiga',
-  'LaLiga Hypermotion': 'LaLiga 2',
-  'Champions League': 'UEFA Champions League',
-  'Europa League': 'UEFA Europa League',
-}
-
-// Competiciones españolas sin página de calendario en Marca: su tarjeta se
-// alimenta solo de Sofascore en runtime. El utId fijo evita la búsqueda por
-// nombre, ambigua (hay una "Copa del Rey" por deporte). Sin datos (offline u
-// off-season) la tarjeta no se muestra. Tercera RFEF no tiene torneo único
-// en Sofascore (son 18 grupos separados): solo aparece con directos.
-const EXTRA_SOFA_LEAGUES = [
-  { slug: 'primera-rfef', name: 'Primera Federación', utId: 17073 },
-  { slug: 'segunda-rfef', name: 'Segunda Federación', utId: 544 },
-  { slug: 'liga-f', name: 'Liga F', utId: 1127 },
-  { slug: 'copa-del-rey', name: 'Copa del Rey', utId: 329 },
-  { slug: 'supercopa', name: 'Supercopa de España', utId: 213 },
-].map(l => ({ ...l, jornadas: [], logo: tournamentImg(l.utId) }))
-const CAL_LEAGUES = [...MARCA_LEAGUES, ...EXTRA_SOFA_LEAGUES]
+// Las ligas del calendario (CAL_LEAGUES, MARCA_TO_SOFA) viven en
+// data/sportsLeagues.js — las comparte el plan de carga en background.
 
 function sofaToJornadas(events) {
   const byRound = new Map()
@@ -367,6 +348,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
 // Tarjeta de categoría de liga: logo + nombre + nº de partidos.
 const LeagueCard = memo(function LeagueCard({ group, onOpen, matchesLabel, liveLabel, initial }) {
   const liveCount = group.items.filter(i => i._isLive).length
+  const isLiveAll = !!group.liveAll
   return (
     <button
       type="button"
@@ -374,19 +356,32 @@ const LeagueCard = memo(function LeagueCard({ group, onOpen, matchesLabel, liveL
       data-tv-card
       {...(initial ? { 'data-tv-initial': true } : {})}
       onClick={() => onOpen(group)}
-      className="card group p-5 flex flex-col items-center gap-3 text-center w-full"
+      className={`card group p-5 flex flex-col items-center gap-3 text-center w-full ${isLiveAll ? 'border border-red-500/40 bg-red-500/5' : ''}`}
     >
       <div className="w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
-        {group.logo && (
+        {isLiveAll ? (
+          <span className="relative flex w-10 h-10">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60" />
+            <span className="relative inline-flex rounded-full h-10 w-10 bg-red-500/80 items-center justify-center">
+              <Play size={18} className="text-white fill-white translate-x-0.5" />
+            </span>
+          </span>
+        ) : group.logo ? (
           <img src={group.logo} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none' }} className="max-w-full max-h-full object-contain" />
-        )}
+        ) : null}
       </div>
       <span className="text-base font-semibold text-white leading-tight line-clamp-2 w-full">
         {group.name}
       </span>
       <span className="text-xs text-dark-400">
-        {group.items.length} {matchesLabel}
-        {liveCount > 0 && <span className="text-red-400 font-bold"> · {liveCount} {liveLabel}</span>}
+        {isLiveAll ? (
+          <span className="text-red-400 font-bold">{liveCount} {liveLabel}</span>
+        ) : (
+          <>
+            {group.items.length} {matchesLabel}
+            {liveCount > 0 && <span className="text-red-400 font-bold"> · {liveCount} {liveLabel}</span>}
+          </>
+        )}
       </span>
     </button>
   )
@@ -967,13 +962,36 @@ export default function Sports() {
     i !== marcaItem && i.pluginId !== DLIVE_PLUGIN && sameMatch(i, marcaItem))
     || fctvLookupItem(marcaItem)
 
+  // Grupo fijo "EN DIRECTO": todos los partidos en emisión de cualquier liga,
+  // siempre el primero de la parrilla. Los eventos con fuente DLive van antes
+  // que los demás — sus canales emiten 24/7, así que siempre hay algo que ver
+  // aunque FCTV aún no haya arrancado el partido.
+  const liveAllGroup = useMemo(() => {
+    const pool = []
+    if (activeCat?.id === 'fctv-football') {
+      for (const g of marcaGroups.groups) pool.push(...(g.liveItems || []))
+      for (const g of extraFctvGroups) pool.push(...g.items)
+    } else {
+      for (const g of leagueGroups) pool.push(...g.items)
+    }
+    const hasDlive = (i) => i.pluginId === DLIVE_PLUGIN || !!i._dliveItem
+    const lives = dedupeMatches(pool.filter(i => i._isLive))
+      .sort((a, b) =>
+        (hasDlive(b) ? 1 : 0) - (hasDlive(a) ? 1 : 0) ||
+        leagueRank(a._league?.name || a.genre || '') - leagueRank(b._league?.name || b.genre || '') ||
+        (a._matchDate || 0) - (b._matchDate || 0))
+    return lives.length ? { name: t('sports.live'), logo: null, items: lives, liveAll: true } : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueGroups, marcaGroups, extraFctvGroups, activeCat])
+
   // La liga seleccionada se re-resuelve contra los grupos actuales: el refresco
   // silencioso reconstruye los objetos y la referencia guardada queda obsoleta
   // (un finalizado no desaparecería nunca del detalle). Si la liga ya no
   // existe, volver a la parrilla.
-  const allGroups = activeCat?.id === 'fctv-football'
-    ? [...marcaGroups.groups, ...extraFctvGroups]
-    : leagueGroups
+  const allGroups = [
+    ...(liveAllGroup ? [liveAllGroup] : []),
+    ...(activeCat?.id === 'fctv-football' ? [...marcaGroups.groups, ...extraFctvGroups] : leagueGroups),
+  ]
   const activeLeague = selectedLeague
     ? allGroups.find(g => g.name === selectedLeague.name) || null
     : null
@@ -1171,36 +1189,21 @@ export default function Sports() {
         </section>
       ) : (
         <>
-          {/* Nivel 1: categorías por liga */}
-          {activeCat?.id === 'fctv-football' ? (
-            // Fútbol: ligas principales (Marca) fusionadas con sus directos
-            // FCTV, más ligas FCTV sin calendario.
-            <div data-tv-grid className="sports-card-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {[...marcaGroups.groups, ...extraFctvGroups].map((group, i) => (
-                <LeagueCard
-                  key={group.name}
-                  group={group}
-                  onOpen={openLeague}
-                  matchesLabel={t('sports.matches')}
-                  liveLabel={t('sports.live')}
-                  initial={lastLeagueRef.current ? group.name === lastLeagueRef.current : i === 0}
-                />
-              ))}
-            </div>
-          ) : (
-            <div data-tv-grid className="sports-card-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {leagueGroups.map((group, i) => (
-                <LeagueCard
-                  key={group.name}
-                  group={group}
-                  onOpen={openLeague}
-                  matchesLabel={t('sports.matches')}
-                  liveLabel={t('sports.live')}
-                  initial={lastLeagueRef.current ? group.name === lastLeagueRef.current : i === 0}
-                />
-              ))}
-            </div>
-          )}
+          {/* Nivel 1: "EN DIRECTO" fijo arriba (si hay emisiones), luego las
+              ligas — en fútbol, las de calendario (Marca) fusionadas con sus
+              directos FCTV/DLive más las ligas sin calendario. */}
+          <div data-tv-grid className="sports-card-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {allGroups.map((group, i) => (
+              <LeagueCard
+                key={group.name}
+                group={group}
+                onOpen={openLeague}
+                matchesLabel={t('sports.matches')}
+                liveLabel={t('sports.live')}
+                initial={lastLeagueRef.current ? group.name === lastLeagueRef.current : i === 0}
+              />
+            ))}
+          </div>
         </>
       )}
       </div>
