@@ -1689,8 +1689,10 @@ public class ExoPlayerPlugin extends Plugin {
         // En modo playback el vídeo se reproduce DENTRO del WebView (el CDN
         // solo sirve a documentos del propio proveedor) — no se extrae URL.
         final boolean[] mediaStarted = {false};
-        // La página terminó de cargar: si no resuelve pero cargó, se revela al
-        // usuario en vez de cerrar por timeout (el WebView es el fallback).
+        // En modo playback la página del proveedor nunca se muestra al
+        // usuario: o el vídeo arranca (media) o el embed cierra por timeout.
+        // Única excepción: un captcha/challenge que requiera interacción.
+        final boolean[] challengeRevealed = {false};
         final boolean[] pageLoaded = {false};
         // ID del embed (último segmento del path) — los proveedores rotan de
         // dominio pero conservan el ID (powvideo→powwideo, voe.sx→johnfullwonder).
@@ -1871,6 +1873,14 @@ public class ExoPlayerPlugin extends Plugin {
                         });
                     }
                 }
+            }
+
+            // Modo playback: el helper inyectado avisa cuando un <video> de
+            // la página realmente reproduce (cubre MSE/blob cuyas peticiones
+            // de segmentos no llevan extensión reconocible).
+            @android.webkit.JavascriptInterface
+            public void onPlaybackStarted() {
+                markEmbedPlaying(mediaStarted);
             }
         }
 
@@ -2167,9 +2177,29 @@ public class ExoPlayerPlugin extends Plugin {
             resolverWebView.invalidate();
         };
         mainHandler.postDelayed(() -> {
-            if (!resolved[0] && !mediaStarted[0] && embedOverlay != null) {
-                Log.d(TAG, "Embed unresolved at 18s — revealing page to user");
-                revealPage.run();
+            if (resolved[0] || mediaStarted[0] || embedOverlay == null) return;
+            // La página del proveedor NO se revela salvo que haya un
+            // captcha/challenge que el usuario deba resolver a mano. Sin
+            // challenge la página se queda oculta hasta que arranque el
+            // vídeo/resuelva la URL o cierre por timeout — nunca se muestra
+            // la web del host.
+            if (resolverWebView != null) {
+                resolverWebView.evaluateJavascript(
+                    "(function(){var c=document.querySelector('iframe[src*=captcha],"
+                    + "iframe[src*=turnstile],iframe[src*=recaptcha],iframe[src*=hcaptcha],"
+                    + "iframe[src*=altcha],.g-recaptcha,.h-captcha,.cf-turnstile,"
+                    + "#challenge-stage,altcha-widget,[class*=captcha],[id*=captcha],"
+                    + "[class*=challenge],[id*=challenge]');return c?'captcha':'none';})()",
+                    r -> {
+                        if (resolved[0] || mediaStarted[0]) return;
+                        if (r != null && r.contains("captcha")) {
+                            Log.d(TAG, "Playback embed: captcha detected — revealing page");
+                            challengeRevealed[0] = true;
+                            revealPage.run();
+                        } else {
+                            Log.d(TAG, "Playback embed: no media, no captcha — staying hidden until timeout");
+                        }
+                    });
             }
         }, 18000);
         // Cursor virtual para D-pad: anillo visible que se mueve con las
@@ -2208,20 +2238,27 @@ public class ExoPlayerPlugin extends Plugin {
                 }
             });
 
-        // Timeout 30s solo si la página nunca terminó de cargar (host muerto).
-        // Si cargó pero no resolvió, el WebView ya se reveló — el usuario ve la
-        // página y puede interactuar/reproducir dentro; cierra con el botón.
+        final Runnable closeWithTimeout = () -> {
+            if (resolved[0] || mediaStarted[0]) return;
+            Log.d(TAG, "Embed timeout — no media started, closing");
+            resolved[0] = true;
+            notifyState("embed_timeout", null);
+            call.resolve(new JSObject().put("status", "timeout"));
+            if (embedDialog != null) {
+                try { embedDialog.dismiss(); } catch (Exception ignored) {}
+                embedDialog = null;
+            }
+            cleanupResolver();
+        };
+        // Sin captcha revelado: 30s sin resolver ni arrancar media = sin
+        // vídeo — se cierra siempre, la página del proveedor no se muestra
+        // nunca. Con captcha revelado se dan 60s extra para resolverlo a mano.
         mainHandler.postDelayed(() -> {
-            if (!resolved[0] && !mediaStarted[0] && !pageLoaded[0]) {
-                Log.d(TAG, "Embed timeout (30s, page never loaded), closing");
-                resolved[0] = true;
-                notifyState("embed_timeout", null);
-                call.resolve(new JSObject().put("status", "timeout"));
-                if (embedDialog != null) {
-                    try { embedDialog.dismiss(); } catch (Exception ignored) {}
-                    embedDialog = null;
-                }
-                cleanupResolver();
+            if (resolved[0] || mediaStarted[0]) return;
+            if (challengeRevealed[0]) {
+                mainHandler.postDelayed(closeWithTimeout, 60000);
+            } else {
+                closeWithTimeout.run();
             }
         }, 30000);
 
@@ -2774,7 +2811,9 @@ public class ExoPlayerPlugin extends Plugin {
             + "  if(v){v.style.cssText='position:fixed!important;top:0!important;left:0!important;"
             + "width:100vw!important;height:100vh!important;z-index:2147483647!important;"
             + "background:#000!important;object-fit:contain!important';"
-            + "    try{var pr=v.play();if(pr&&pr.catch)pr.catch(function(){});}catch(e){}}"
+            + "    try{var pr=v.play();if(pr&&pr.catch)pr.catch(function(){});}catch(e){}"
+            + "    if(v.currentTime>0||(!v.paused&&v.readyState>=3)){"
+            + "      try{AndroidVideoResolver.onPlaybackStarted()}catch(e){}}}"
             + "  var best=null,ba=0,fs=document.querySelectorAll('iframe');"
             + "  for(var i=0;i<fs.length;i++){var f=fs[i],s=f.src||'';"
             + "    if(!/^https?:/.test(s))continue;"
