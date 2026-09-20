@@ -220,6 +220,10 @@ public class ExoPlayerPlugin extends Plugin {
     private int bufferingRetries = 0;
     private int behindLiveRetries = 0;
     private int sourceErrorRetries = 0;
+    // true si lastMediaSource está enrutado por el proxy WARP local — permite
+    // al retry de IO error distinguir "el proxy está caído" de un fallo normal
+    // de red y reconstruir en directo en vez de repetir el mismo factory roto.
+    private boolean lastSourceUsedWarp = false;
     private MediaSource lastMediaSource = null;
 
     // Cliente OkHttp compartido para peticiones puntuales (búsqueda de
@@ -3767,69 +3771,10 @@ public class ExoPlayerPlugin extends Plugin {
             Log.w(TAG, "Could not set cookie manager", e);
         }
 
-        // TDT Spain domains - these should ALWAYS stay direct (no proxy)
-        boolean isTdtSpainUrl = direct || isTdtSpainDomain(url);
         // URLs loopback (relay local de embeds, servidores LAN): nunca por WARP —
         // el proxy intentaría resolver 127.0.0.1 en su extremo remoto.
-        boolean isLoopbackUrl = isLoopbackUrl(url);
-
-        // Check if WARP HTTP proxy is available (CloudProxy connected)
-        String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
-        // Route through WARP if:
-        // - WARP is connected (proxy available)
-        // - URL is NOT a TDT Spain URL (TDT Spain stays direct)
-        boolean useSocks = socksProxy != null && !socksProxy.isEmpty() && !isTdtSpainUrl && !isLoopbackUrl;
-
-        DataSource.Factory dataSourceFactory;
-        // Use OkHttpDataSource with WARP HTTP proxy when connected (and not TDT Spain).
-        // OkHttp's HTTP CONNECT proxy sends the hostname to the proxy for remote DNS
-        // resolution, bypassing ISP DNS blocking without needing a device-wide VPN.
-        if (useSocks) {
-            try {
-                // TLS normal (validación de certificados por defecto): un
-                // trust-all aquí permitiría MITM de streams y licencias DRM
-                // por cualquiera en la ruta WARP→origen.
-                OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                        .connectTimeout(15, TimeUnit.SECONDS)
-                        .readTimeout(30, TimeUnit.SECONDS)
-                        .followRedirects(true)
-                        .followSslRedirects(true);
-
-                // Route through WARP HTTP proxy (HTTP CONNECT, not SOCKS5, so the
-                // proxy resolves the hostname remotely instead of locally).
-                String[] parts = socksProxy.split(":");
-                java.net.Proxy httpProxy = new java.net.Proxy(
-                        java.net.Proxy.Type.HTTP,
-                        new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1])));
-                clientBuilder.proxy(httpProxy);
-                Log.i(TAG, "Using WARP HTTP proxy " + socksProxy + " for movie/stream URL (remote DNS)");
-
-                OkHttpClient okHttpClient = clientBuilder.build();
-                OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(okHttpClient)
-                        .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                if (!headers.isEmpty()) {
-                    okHttpFactory.setDefaultRequestProperties(headers);
-                }
-                dataSourceFactory = new DefaultDataSource.Factory(context, okHttpFactory);
-                Log.i(TAG, "Using OkHttpDataSource with WARP HTTP proxy for movie/stream URL");
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to create OkHttpDataSource with WARP proxy: " + e.getMessage());
-                dataSourceFactory = new DefaultDataSource.Factory(context,
-                        new DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true));
-            }
-        } else {
-            // Fallback factory using DefaultHttpDataSource for normal URLs (direct, no proxy)
-            DefaultHttpDataSource.Factory fallbackFactory = new DefaultHttpDataSource.Factory()
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(15000)
-                    .setReadTimeoutMs(30000)
-                    .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            if (!headers.isEmpty()) {
-                fallbackFactory.setDefaultRequestProperties(headers);
-            }
-            dataSourceFactory = new DefaultDataSource.Factory(context, fallbackFactory);
-            Log.i(TAG, "Using DefaultHttpDataSource (OkHttp) for reliable header handling");
-        }
+        lastSourceUsedWarp = shouldUseWarpProxy(url, direct, false);
+        DataSource.Factory dataSourceFactory = buildStreamDataSourceFactory(url, headers, direct, false);
 
         // Build DRM session manager if license URL is provided
         DrmSessionManager drmSessionManager = null;
@@ -4034,6 +3979,23 @@ public class ExoPlayerPlugin extends Plugin {
                     cancelBufferingCheck();
                     dismissStreamLoading();
                     showStreamLoading();
+                    // Si la ruta actual iba por el proxy WARP local y el fallo es
+                    // que ese proxy rechazó la conexión (túnel Aether caído o
+                    // reconectando tras un hueco de red), reintentar con el mismo
+                    // factory nunca se recupera solo — reconstruir en directo.
+                    if (lastSourceUsedWarp && isWarpConnRefused(error)
+                            && currentUrl != null && !currentUrl.isEmpty()) {
+                        Log.w(TAG, "WARP proxy local caído (conexión rechazada) — reintento en directo sin proxy");
+                        try {
+                            DataSource.Factory dsf = buildStreamDataSourceFactory(
+                                    currentUrl, currentHeaders, currentDirect, true);
+                            MediaSource src = buildMediaSource(
+                                    currentUrl, currentStreamType, dsf, lastDrmSessionManager, lastLicenseUrl);
+                            lastDataSourceFactory = dsf;
+                            lastMediaSource = src;
+                            lastSourceUsedWarp = false;
+                        } catch (Exception ignored) {}
+                    }
                     mainHandler.postDelayed(() -> {
                         if (player == null || lastMediaSource == null) return;
                         try {
@@ -5420,32 +5382,8 @@ public class ExoPlayerPlugin extends Plugin {
                 currentStreamType = streamType;
                 currentDirect = direct;
                 currentHeaders = headers;
-                String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
-                boolean loopback = isLoopbackUrl(url);
-                DataSource.Factory dsFactory;
-                if (!direct && !loopback && warpProxy != null && !warpProxy.isEmpty()) {
-                    String[] parts = warpProxy.split(":", 2);
-                    OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                            .connectTimeout(15, TimeUnit.SECONDS)
-                            .readTimeout(30, TimeUnit.SECONDS)
-                            .followRedirects(true)
-                            .followSslRedirects(true)
-                            .proxy(new java.net.Proxy(
-                                    java.net.Proxy.Type.HTTP,
-                                    new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
-                    OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
-                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                    if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
-                    dsFactory = new DefaultDataSource.Factory(getContext(), okHttpFactory);
-                } else {
-                    DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
-                            .setAllowCrossProtocolRedirects(true)
-                            .setConnectTimeoutMs(15000)
-                            .setReadTimeoutMs(30000)
-                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                    if (!headers.isEmpty()) httpFactory.setDefaultRequestProperties(headers);
-                    dsFactory = new DefaultDataSource.Factory(getContext(), httpFactory);
-                }
+                lastSourceUsedWarp = shouldUseWarpProxy(url, direct, false);
+                DataSource.Factory dsFactory = buildStreamDataSourceFactory(url, headers, direct, false);
                 // Al hacer zapping el subtítulo externo ya no aplica.
                 externalSubUrl = null;
                 pendingSelectExternalSub = false;
@@ -5523,6 +5461,69 @@ public class ExoPlayerPlugin extends Plugin {
 
     private static AudioAttributes mainAudioAttrs() {
         return new AudioAttributes.Builder().setContentType(2).setUsage(1).build();
+    }
+
+    // Política de enrutado WARP compartida por openPlayer/zapChannel: decide si
+    // una URL debe salir por el proxy HTTP local de CloudProxy.
+    private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
+        if (forceBypassProxy || direct) return false;
+        if (isTdtSpainDomain(url) || isLoopbackUrl(url)) return false;
+        String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
+        return socksProxy != null && !socksProxy.isEmpty();
+    }
+
+    // Construye el DataSource.Factory del stream principal (o de un zap),
+    // enrutando por WARP salvo que forceBypassProxy fuerce directo — se usa
+    // cuando el túnel WARP local está caído y reintentar por el mismo proxy
+    // roto nunca se recuperaría (ver onPlayerError / isWarpConnRefused).
+    private DataSource.Factory buildStreamDataSourceFactory(String url, Map<String, String> headers,
+            boolean direct, boolean forceBypassProxy) {
+        String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        if (shouldUseWarpProxy(url, direct, forceBypassProxy)) {
+            try {
+                String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
+                String[] parts = socksProxy.split(":", 2);
+                OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
+                        .connectTimeout(15, TimeUnit.SECONDS)
+                        .readTimeout(30, TimeUnit.SECONDS)
+                        .followRedirects(true)
+                        .followSslRedirects(true)
+                        .proxy(new java.net.Proxy(
+                                java.net.Proxy.Type.HTTP,
+                                new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+                Log.i(TAG, "Using WARP HTTP proxy " + socksProxy + " for movie/stream URL (remote DNS)");
+                OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
+                        .setUserAgent(ua);
+                if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
+                return new DefaultDataSource.Factory(getContext(), okHttpFactory);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to create OkHttpDataSource with WARP proxy: " + e.getMessage());
+                // cae al factory directo de abajo
+            }
+        }
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(30000)
+                .setUserAgent(ua);
+        if (!headers.isEmpty()) httpFactory.setDefaultRequestProperties(headers);
+        if (forceBypassProxy) Log.i(TAG, "Using DefaultHttpDataSource — bypass de WARP tras fallo del proxy local");
+        return new DefaultDataSource.Factory(getContext(), httpFactory);
+    }
+
+    // Detecta si un PlaybackException viene de que el proxy HTTP local de WARP
+    // (127.0.0.1:puerto) rechazó la conexión — el túnel Aether está caído o
+    // reconectando. Reintentar con el mismo factory nunca se recupera solo.
+    private static boolean isWarpConnRefused(Throwable t) {
+        int depth = 0;
+        while (t != null && depth++ < 8) {
+            if (t instanceof java.net.ConnectException) {
+                String m = t.getMessage();
+                if (m != null && m.contains("127.0.0.1")) return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
@@ -7882,6 +7883,7 @@ public class ExoPlayerPlugin extends Plugin {
         bufferingRetries = 0;
         behindLiveRetries = 0;
         sourceErrorRetries = 0;
+        lastSourceUsedWarp = false;
         if (playerView != null) {
             playerView.setPlayer(null);
             playerView = null;
