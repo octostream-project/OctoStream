@@ -6,7 +6,7 @@ import { useTranslation } from '../i18n/index.js'
 import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play } from 'lucide-react'
 import { MARCA_LEAGUES } from '../data/marcaCalendar.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
-import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
+import { enrichLogos, fetchLeagueEvents, tournamentImg } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks } from '../plugins/bundled/fctv/index.js'
 
 const SPORTS_PLUGIN = 'fctv'
@@ -127,9 +127,10 @@ function trackFinished(merged, catId) {
 const LEAGUE_ORDER = [
   { re: /laliga ea|la liga|laliga|primera divisi/, not: /hyper|segunda|\b2\b|rfef|federac|women|femen/ },
   { re: /hypermotion|la ?liga 2|segunda divisi/, not: /federac|rfef|women|femen/ },
-  { re: /primera (federaci|rfef)|1[aª]? ?federac|primer?a fed/ },
-  { re: /segunda (federaci|rfef)|2[aª]? ?federac/ },
-  { re: /liga f\b|liga femenina|primera divisi.*femen|femenina|copa de la reina|supercopa.*femen/ },
+  { re: /primera (federaci|rfef)|1[aª]? ?federac|primer?a fed/, not: /femen|women/ },
+  { re: /segunda (federaci|rfef)|2[aª]? ?federac/, not: /femen|women/ },
+  { re: /tercera (federaci|rfef)|3[aª]? ?federac/, not: /femen|women/ },
+  { re: /liga f\b|liga femenina|primera divisi.*femen|femenina|femenino|copa de la reina|supercopa.*femen|spain.*women|women.*spain/ },
   { re: /copa del rey|supercopa/, not: /femen/ },
   { re: /champions league/, not: /afc|caf|women|youth|qualif|asian|concacaf|oceania|\btwo\b/ },
   { re: /europa league/, not: /conference/ },
@@ -170,6 +171,13 @@ const MARCA_TO_FCTV = {
   'Ligue 1': { re: /\bligue 1\b/, not: /women|reserve/ },
   'Champions League': { re: /champions league/, not: /afc|caf|women|youth|qualif|two|asian|concacaf|oceania/ },
   'Europa League': { re: /europa league/, not: /conference/ },
+  // Ligas extra (Sofascore): fundir los directos FCTV/DLive equivalentes en
+  // su tarjeta. Los nombres llegan con tilde ("Federación") — regex tolerante.
+  'Primera Federación': { re: /primera (rfef|federaci[oó]n)|1[aª]?\s*(rfef|federac)/, not: /femen|women/ },
+  'Segunda Federación': { re: /segunda (rfef|federaci[oó]n)|2[aª]?\s*(rfef|federac)/, not: /femen|women/ },
+  'Liga F': { re: /liga f\b|liga femenina|primera divisi[oó]n femenina|femenina/, not: /copa|supercopa|primera|segunda|tercera|juvenil/ },
+  'Copa del Rey': { re: /copa del rey/, not: /femen|reina|women/ },
+  'Supercopa de España': { re: /supercopa/, not: /femen|women/ },
 }
 
 // Comparación de nombres de equipo (Marca ↔ FCTV) en utils/teamMatch.js.
@@ -217,6 +225,20 @@ const MARCA_TO_SOFA = {
   'Champions League': 'UEFA Champions League',
   'Europa League': 'UEFA Europa League',
 }
+
+// Competiciones españolas sin página de calendario en Marca: su tarjeta se
+// alimenta solo de Sofascore en runtime. El utId fijo evita la búsqueda por
+// nombre, ambigua (hay una "Copa del Rey" por deporte). Sin datos (offline u
+// off-season) la tarjeta no se muestra. Tercera RFEF no tiene torneo único
+// en Sofascore (son 18 grupos separados): solo aparece con directos.
+const EXTRA_SOFA_LEAGUES = [
+  { slug: 'primera-rfef', name: 'Primera Federación', utId: 17073 },
+  { slug: 'segunda-rfef', name: 'Segunda Federación', utId: 544 },
+  { slug: 'liga-f', name: 'Liga F', utId: 1127 },
+  { slug: 'copa-del-rey', name: 'Copa del Rey', utId: 329 },
+  { slug: 'supercopa', name: 'Supercopa de España', utId: 213 },
+].map(l => ({ ...l, jornadas: [], logo: tournamentImg(l.utId) }))
+const CAL_LEAGUES = [...MARCA_LEAGUES, ...EXTRA_SOFA_LEAGUES]
 
 function sofaToJornadas(events) {
   const byRound = new Map()
@@ -602,9 +624,9 @@ export default function Sports() {
     const ctl = new AbortController()
     const refresh = async () => {
       const map = new Map()
-      for (let i = 0; i < MARCA_LEAGUES.length; i += 4) {
-        await Promise.all(MARCA_LEAGUES.slice(i, i + 4).map(async lg => {
-          const res = await fetchLeagueEvents(MARCA_TO_SOFA[lg.name] || lg.name, 'football', ctl.signal)
+      for (let i = 0; i < CAL_LEAGUES.length; i += 4) {
+        await Promise.all(CAL_LEAGUES.slice(i, i + 4).map(async lg => {
+          const res = await fetchLeagueEvents(MARCA_TO_SOFA[lg.name] || lg.name, 'football', ctl.signal, lg.utId || null)
           if (res.length) map.set(lg.slug, res)
         }))
         if (cancelled) return
@@ -790,7 +812,7 @@ export default function Sports() {
   // vez de duplicarse arriba; solo quedan sueltos los que no están en Marca.
   const marcaGroups = useMemo(() => {
     const used = new Set()
-    const groups = MARCA_LEAGUES.map(lg => {
+    const groups = CAL_LEAGUES.map(lg => {
       const rule = MARCA_TO_FCTV[lg.name] || { re: new RegExp(lg.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }
       // Solo grupos con items FCTV reclaman una liga Marca: una liga solo-DLive
       // ("RUS Premier League") no debe secuestrar la tarjeta de otra liga.
@@ -808,7 +830,10 @@ export default function Sports() {
       // y también si la liga está en off-season (pocas jornadas con datos).
       const sofaJornadas = marcaResults.get(lg.slug)
       const conv = sofaJornadas?.length ? sofaToJornadas(sofaJornadas) : null
-      const jornadasSrc = conv?.some(j => j.matches.length >= 3) ? conv : lg.jornadas
+      // Ligas Marca exigen una jornada "llena" (≥3 partidos) para preferir el
+      // dato runtime sobre el empaquetado; las extra no tienen fallback
+      // empaquetado — con un solo partido (p.ej. Supercopa) ya se usa.
+      const jornadasSrc = conv?.some(j => j.matches.length >= (lg.utId ? 1 : 3)) ? conv : lg.jornadas
       const jornadas = jornadasSrc.map(j => ({
         round: j.round,
         name: j.name || null,
@@ -875,7 +900,7 @@ export default function Sports() {
       if (currentRound == null && allRounds.length) {
         currentRound = allRounds[allRounds.length - 1].round
       }
-      return {
+      const group = {
         name: lg.name,
         logo: lg.logo || fctvGroup?.logo || null,
         marca: true,
@@ -884,11 +909,16 @@ export default function Sports() {
         items: [...liveItems, ...jornadas.flatMap(j => j.items)],
         jornadas,
       }
+      // Sin datos no se muestra tarjeta: liberar el grupo FCTV reclamado para
+      // que sus partidos sigan apareciendo como liga propia.
+      if (!group.items.length && fctvGroup) used.delete(fctvGroup.name)
+      return group
     })
     // Mismo orden que el resto de ligas: españolas → Champions/UEFA →
-    // grandes ligas europeas → resto.
+    // grandes ligas europeas → resto. Las ligas extra (solo-Sofascore) sin
+    // datos —offline u off-season— no muestran tarjeta vacía.
     groups.sort(leagueGroupCmp)
-    return { groups, usedNames: used }
+    return { groups: groups.filter(g => g.items.length), usedNames: used }
   }, [leagueGroups, marcaResults])
 
   // Ligas FCTV no cubiertas por el calendario Marca (solo en catálogo fútbol).
