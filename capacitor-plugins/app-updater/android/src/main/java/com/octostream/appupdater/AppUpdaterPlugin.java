@@ -88,9 +88,17 @@ public class AppUpdaterPlugin extends Plugin {
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 try {
                     ctx.startActivity(confirm);
+                    return;
                 } catch (Exception e) {
                     Log.e(TAG, "cannot launch install confirmation", e);
                 }
+            }
+            // No se pudo mostrar la confirmación: liberar la llamada pendiente.
+            final int pendingSession = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1);
+            final PluginCall pendingCall = mPendingInstalls.get(pendingSession);
+            if (pendingCall != null) {
+                mPendingInstalls.remove(pendingSession);
+                pendingCall.reject("install failed: cannot show confirmation");
             }
             return;
         }
