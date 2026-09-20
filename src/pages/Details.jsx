@@ -119,27 +119,42 @@ function getLangPriority() {
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
 async function unlockDebrid(url) {
+  // res.link es la URL directa ya desbloqueada. Los alternatives de
+  // RealDebrid también son directos; los streams[] de AllDebrid NO (siguen
+  // restringidos), por eso solo se usan alternatives como fallback.
   const pickBest = (res) => {
-    if (!res?.link) return null
-    const alts = res.streams || res.alternatives || []
+    if (!res) return null
+    const alts = res.alternatives || []
     const sorted = [...alts].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
-    return sorted[0]?.link || res.link
+    return res.link || sorted[0]?.link || null
   }
+  let lastError = null
   if (isAlldebridEnabled()) {
     try {
       const r = await adUnlockLink(url)
       const best = pickBest(r)
-      if (best) return best
-    } catch (e) { console.warn('[Details] AllDebrid unlock failed:', e?.message) }
+      if (best) return { link: best }
+      if (r?.error) lastError = `AllDebrid: ${r.error}`
+    } catch (e) { lastError = e?.message; console.warn('[Details] AllDebrid unlock failed:', e?.message) }
   }
   if (isRealdebridEnabled()) {
     try {
       const r = await rdUnlockLink(url)
       const best = pickBest(r)
-      if (best) return best
-    } catch (e) { console.warn('[Details] RealDebrid unlock failed:', e?.message) }
+      if (best) return { link: best }
+      if (r?.error) lastError = r.error
+    } catch (e) { lastError = e?.message; console.warn('[Details] RealDebrid unlock failed:', e?.message) }
   }
-  return null
+  return { link: null, error: lastError }
+}
+
+// Mensaje legible según el error del debrid.
+function debridErrorMessage(err) {
+  const e = String(err || '')
+  if (/infringing/i.test(e)) return 'RealDebrid bloquea este archivo (DMCA). Prueba otro enlace o usa AllDebrid.'
+  if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
+  if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
+  return 'No se pudo desbloquear el enlace (debrid). Prueba otro servidor.'
 }
 
 // Sort streams by language priority. Streams with no language go last.
@@ -532,26 +547,35 @@ export default function Details() {
         return
       }
       setResolvingStream(true)
-      try {
-        const direct = await unlockDebrid(stream.url)
-        if (!direct) {
-          console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
-          setEpisodeError('No se pudo desbloquear el enlace (debrid). Prueba otro servidor.')
-          setResolvingStream(false)
-          return
+      // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: si uno
+      // falla, prueba automáticamente el resto de enlaces debrid del episodio.
+      const seen = new Set([stream.url])
+      const others = [...(episodeStreams || []), ...(streams || [])]
+        .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
+      const candidates = [stream, ...others].slice(0, 5)
+      let lastError = null
+      let resolved = null
+      for (const cand of candidates) {
+        try {
+          const r = await unlockDebrid(cand.url)
+          if (r?.link) { resolved = { cand, direct: r.link }; break }
+          lastError = r?.error || lastError
+        } catch (e) {
+          lastError = e?.message
+          console.warn('[Details] Debrid unlock error:', e?.message)
         }
-        stream = {
-          ...stream,
-          url: direct,
-          streamType: /\.m3u8(\?|$)/i.test(direct) ? 'hls' : 'mp4',
-        }
-      } catch (e) {
-        console.warn('[Details] Debrid unlock error:', e?.message)
-        setEpisodeError('No se pudo desbloquear el enlace (debrid). Prueba otro servidor.')
-        setResolvingStream(false)
-        return
       }
       setResolvingStream(false)
+      if (!resolved) {
+        console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
+        setEpisodeError(debridErrorMessage(lastError))
+        return
+      }
+      stream = {
+        ...resolved.cand,
+        url: resolved.direct,
+        streamType: /\.m3u8(\?|$)/i.test(resolved.direct) ? 'hls' : 'mp4',
+      }
     }
     // If the stream has an originalUrl (embed page), always resolve fresh
     // because tokens from CDNs like fastream expire quickly

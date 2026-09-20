@@ -207,7 +207,13 @@ async function apiFetch(endpoint, options = {}, retry = true) {
       }
       throw new Error('RealDebrid: Invalid token (refresh failed)')
     }
-    throw new Error(`RealDebrid API error: ${res.status}`)
+    // El body suele traer el código real (infringing_file, unavailable_file...)
+    let code = `HTTP ${res.status}`
+    try {
+      const j = JSON.parse(await res.text())
+      if (j?.error) code = j.error
+    } catch {}
+    throw new Error(`RealDebrid: ${code}`)
   }
 
   const text = await res.text()
@@ -233,7 +239,7 @@ export async function unlockLink(linkUrl) {
       method: 'POST',
       body,
     })
-    if (!data || !data.download) return null
+    if (!data || !data.download) return { link: null, error: data?.error || 'no_download' }
     // Extract alternative quality links if available
     const alternatives = []
     if (data.alternative && Array.isArray(data.alternative)) {
@@ -256,7 +262,7 @@ export async function unlockLink(linkUrl) {
     }
   } catch (e) {
     console.warn('[RealDebrid] unlockLink failed:', e?.message, hostOf(linkUrl))
-    return null
+    return { link: null, error: e?.message || 'unknown' }
   }
 }
 

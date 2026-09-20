@@ -191,8 +191,12 @@ export const palantirFactory = (config) => {
       if (!rows.length) return []
       const urls = await decryptLinks(rows.map(r => r.link))
       return rows.map((r, i) => {
-        const url = urls[i]
-        if (!url || !/^https?:\/\//.test(url)) return null
+        // Algunos registros de la DB descifran con cola binaria — la URL va
+        // primero, seguida de bytes no-URL. Corta en el primer carácter que
+        // no sea válido en una URL (sin comillas ni no-ASCII).
+        const m = (urls[i] || '').match(/^https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]+/)
+        const url = m ? m[0] : null
+        if (!url) return null
         const audio = (r.audio || '').toUpperCase()
         const info = r.info ? ` · ${r.info}` : ''
         return {
