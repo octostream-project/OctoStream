@@ -945,10 +945,12 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: todas las que tienen partidos — las pasadas muestran
-  // sus resultados y el scroll/foco inicial cae en la jornada en curso.
+  // Jornadas visibles: solo la actual y las futuras — las ya jugadas se
+  // ocultan.
   const visibleJornadas = activeLeague?.marca
-    ? activeLeague.jornadas.filter(j => j.items.length > 0)
+    ? activeLeague.jornadas.filter(j =>
+        j.items.length > 0 &&
+        (activeLeague.currentRound == null || j.round >= activeLeague.currentRound))
     : []
   // Partidos visibles en ligas sin calendario: directos, recién finalizados
   // y próximos — los jugados hace >3h ya no se muestran.
