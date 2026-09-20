@@ -54,7 +54,7 @@ export function parseSchedule(html, base = 'https://dlive.sx') {
         links.push({ label: decodeEntities(lm[2]).trim() || 'Stream', url: base + lm[1] })
       }
       if (!links.length) continue
-      events.push({ ...parsed, category, time: (timeM?.[1] || '').trim(), live: liveCat, links })
+      events.push({ ...parsed, category, time: (timeM?.[1] || '').trim(), live: liveCat, links: sortLinks(links) })
     }
   }
   return events
@@ -162,6 +162,29 @@ const norm = (s) => String(s || '').toLowerCase()
 export const eventKey = (e) => (e.home && e.away)
   ? `${norm(e.home)}|${norm(e.away)}|${norm(e.league)}`
   : `t|${norm(e.title)}|${norm(e.category)}`
+
+// Clave sin liga: para casar el mismo partido cuando una fuente no la da
+// (extra_backup no lleva "Spain LaLiga", solo "Betis vs Getafe"). Solo se usa
+// como comodín cuando a UNO de los dos lados le falta la liga — si ambas
+// fuentes la dan y difiere (liga vs copa, mismo día), son partidos distintos.
+export const eventKeyNoLeague = (e) => (e.home && e.away)
+  ? `${norm(e.home)}|${norm(e.away)}`
+  : null
+
+// Las fuentes de respaldo (extra_backup) dejaron de dar el nombre real del
+// canal/emisora y ahora etiquetan sus enlaces con códigos genéricos
+// ("admin Stream", "delta Stream", "foxtrot Stream", "golf Stream", "hotel
+// Stream"…) — alfabeto fonético + "admin". Se reconocen para mandarlos al
+// final del picker en vez de tapar el nombre real cuando existe.
+const GENERIC_LABEL_RE = /^(alpha|bravo|charlie|delta|echo|foxtrot|golf|hotel|india|juliet|kilo|lima|mike|november|oscar|papa|quebec|romeo|sierra|tango|uniform|victor|whiskey|x-?ray|yankee|zulu|admin)\s*stream$/i
+export const isGenericLabel = (label) => GENERIC_LABEL_RE.test(String(label || '').trim())
+
+// Canales con nombre real primero; los códigos genéricos de respaldo van al
+// final — siguen disponibles (a veces son el único enlace) pero no tapan un
+// nombre real cuando lo hay. Orden estable dentro de cada grupo.
+export function sortLinks(links) {
+  return [...links].sort((a, b) => (isGenericLabel(a.label) ? 1 : 0) - (isGenericLabel(b.label) ? 1 : 0))
+}
 
 // djb2 — id estable y corto (mismo id en getCatalog/getStreams).
 export const eventId = (e) => {
