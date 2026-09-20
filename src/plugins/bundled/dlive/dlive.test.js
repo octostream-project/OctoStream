@@ -91,9 +91,16 @@ describe('extractLiveLiveUrl', () => {
       referer: 'https://livelive24.com/',
     })
   })
+  it('decodes base64 url= param (new site format)', () => {
+    const m3u8 = 'https://pull.example.com/sport/abc/playlist.m3u8?wsSecret=deadbeef&wsABSTime=6AB4F91C'
+    const html = `<iframe id="playerFrame" src="https://livelive24.com/dlhd.html?url=${btoa(m3u8)}"></iframe>`
+    expect(extractLiveLiveUrl(html)).toEqual({ url: m3u8, referer: 'https://livelive24.com/' })
+  })
   it('returns null when no m3u8 present', () => {
     expect(extractLiveLiveUrl('<iframe src="https://x.com/p.html"></iframe>')).toBeNull()
     expect(extractLiveLiveUrl('')).toBeNull()
+    // base64 válido pero no es una URL http
+    expect(extractLiveLiveUrl(`<iframe src="https://x.com/p.html?url=${btoa('notaurl')}"></iframe>`)).toBeNull()
   })
 })
 

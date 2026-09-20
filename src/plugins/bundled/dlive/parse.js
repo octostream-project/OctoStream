@@ -71,7 +71,11 @@ export function extractLiveLiveUrl(pageHtml) {
   // (?txSecret=…&txTime=…): coger TODO hasta el final del src, no parar en '&'.
   const u = src.match(/[?&]url=(.+)$/)
   if (!u) return null
-  const m3u8 = decodeURIComponent(u[1]).replace(/&amp;/g, '&')
+  let m3u8 = decodeURIComponent(u[1]).replace(/&amp;/g, '&')
+  // Formato nuevo: url= lleva el m3u8 firmado en base64.
+  if (!/^https?:\/\//.test(m3u8)) {
+    try { m3u8 = atob(m3u8) } catch { return null }
+  }
   if (!/^https?:\/\//.test(m3u8) || !/\.m3u8/.test(m3u8)) return null
   let referer = ''
   try { referer = new URL(src).origin + '/' } catch { /* optional */ }
