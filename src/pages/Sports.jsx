@@ -112,6 +112,12 @@ function trackFinished(merged, catId) {
       // Si la API sigue listándolo (ya no live), conservar el objeto actual:
       // lleva el marcador final fresco.
       const cur = merged.find(i => i.id === id)
+      // Un partido que aún no ha empezado no puede haber finalizado: el
+      // proveedor lo marcó live antes de tiempo (FCTV lo lista ~5 min
+      // antes del saque) y luego lo retiró. Vuelve a render normal con
+      // su hora de inicio.
+      const md = (cur || prev.item)._matchDate
+      if (md && md > now) { prevLiveItems.delete(id); continue }
       finishedMatches.set(id, { at: now, catId, item: cur || prev.item })
     }
     prevLiveItems.delete(id)
@@ -280,6 +286,9 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
   const hasScore = score?.home != null && score?.away != null
   const kickoff = formatKickoff(item._matchDate)
   const live = item._isLive
+  // Un finalizado con kickoff en el futuro es un falso positivo (el proveedor
+  // lo marcó live antes del saque): mostrar la hora, no FINALIZADO.
+  const finished = item._justFinished && (!item._matchDate || item._matchDate <= Date.now())
 
   return (
     <button
@@ -316,7 +325,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
             <span className="text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full">
               {liveLabel}
             </span>
-          ) : item._justFinished ? (
+          ) : finished ? (
             <span className="text-xs font-bold text-dark-300 bg-dark-700/80 border border-dark-600 px-2 py-0.5 rounded-full">
               {finishedLabel}
             </span>
