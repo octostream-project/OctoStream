@@ -13,6 +13,7 @@ import {
 } from './proto.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '../../../utils/httpClient.js'
+import { teamsMatch, canonTeam } from '../../../utils/teamMatch.js'
 import { probeHlsQuality } from '../../../utils/streamProbe.js'
 
 // slug → API sportType (values reverse-engineered from the official app)
@@ -297,6 +298,153 @@ export function fctvEmbedFallbacks(item) {
     if (/^https?:\/\//.test(item?.url || '')) webDomain = new URL(item.url).origin
   } catch { /* fallback domain */ }
   return buildEmbedStreams({ ...OFFLINE_CFG, webDomain }, m, matchId)
+}
+
+// ─── Índice de partidos por sitemap ───────────────────────────────────────
+// /api/match/live va tras un challenge interactivo de Cloudflare (Turnstile):
+// ni el stack HTTP ni un WebView oculto lo resuelven sin interacción, así que
+// el catálogo de directos queda vacío. El dominio web NO está protegido y
+// publica sitemaps mensuales por deporte con todas las páginas de partido:
+//   /{sport}/{leagueSlug}-match-{matchId}/{teamSlug}-{MM-YYYY}.html
+// y <lastmod> = fecha del partido. Con el matchId basta — /api/match/detail
+// y /api/stream/detail responden sin challenge, así que la resolución de
+// streams funciona igual; lo único perdido es la lista "en vivo".
+const SITEMAP_TTL = 6 * 60 * 60 * 1000
+const SITEMAP_PAGE_RE = /<loc>(https?:\/\/[^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>/g
+const SITEMAP_MATCH_RE = /\/(football|basketball|tennis|motorsport|american-football|hockey|volleyball|fighting|baseball|others)\/([a-z0-9-]+?)-match-(\d+)\/([a-z0-9-]+?)-\d{2}-\d{4}\.html$/
+
+let sitemapIdx = null      // { ts, entries: [{matchId, sportType, leagueSlug, slug, home, away, dateMs}] }
+let sitemapPromise = null
+
+async function loadSitemapIndex(signal) {
+  if (sitemapIdx && Date.now() - sitemapIdx.ts < SITEMAP_TTL) return sitemapIdx.entries
+  if (sitemapPromise) return sitemapPromise
+  sitemapPromise = (async () => {
+    let cfg
+    try { cfg = await resolveConfig(signal) } catch { cfg = OFFLINE_CFG }
+    // El sitemap index lista los ficheros por deporte-mes-página; las
+    // páginas van en orden cronológico, así que las últimas cubren las
+    // fechas recientes — las únicas que pueden tener directos.
+    const { data: idxXml } = await httpGetText(`${cfg.webDomain}/sitemap/es/index.xml`, {}, shortSignal(signal, 10000))
+    if (!idxXml || !idxXml.includes('<loc>')) throw new Error('sitemap index empty')
+    const wanted = new Set(['football', 'basketball', 'tennis', 'motorsport'])
+    const files = []
+    for (const m of idxXml.matchAll(/<loc>[^<]*\/sitemap\/es\/([a-z-]+)-(\d{4}-\d{2})-(\d{3})\.xml<\/loc>/g)) {
+      if (wanted.has(m[1])) files.push({ sport: m[1], ym: m[2], page: Number(m[3]), file: m[0].slice(5, -6) })
+    }
+    const now = new Date()
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const ymPrev = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
+    // Por deporte: últimas páginas del mes en curso (y la última del mes
+    // anterior solo a inicio de mes, cuando el actual aún está vacío).
+    // ~650KB por página → 4 páginas ≈ 2.5MB por deporte.
+    const picked = []
+    for (const sport of wanted) {
+      const cur = files.filter(f => f.sport === sport && f.ym === ym).sort((a, b) => b.page - a.page).slice(0, 4)
+      picked.push(...cur)
+      if (now.getDate() <= 7) {
+        picked.push(...files.filter(f => f.sport === sport && f.ym === ymPrev)
+          .sort((a, b) => b.page - a.page).slice(0, 1))
+      }
+    }
+    const entries = []
+    for (const f of picked) {
+      let xml = null
+      try { xml = (await httpGetText(f.file, {}, shortSignal(signal, 10000))).data } catch { continue }
+      if (!xml || !xml.includes('<urlset')) continue
+      for (const m of xml.matchAll(SITEMAP_PAGE_RE)) {
+        const mm = m[1].match(SITEMAP_MATCH_RE)
+        if (!mm || mm[1] !== f.sport) continue
+        const [hs, as] = String(mm[4]).split('-vs-')
+        if (!hs || !as) continue
+        entries.push({
+          matchId: Number(mm[3]),
+          sportType: SPORT_TYPES[mm[1]] || SPORT_TYPES.football,
+          leagueSlug: mm[2],
+          slug: mm[4],
+          home: hs.replace(/-/g, ' '),
+          away: as.replace(/-/g, ' '),
+          dateMs: Date.parse(m[2]) || 0,
+        })
+      }
+    }
+    sitemapIdx = { ts: Date.now(), entries }
+    return entries
+  })().finally(() => { sitemapPromise = null })
+  return sitemapPromise
+}
+
+// Precarga el índice (se usa en segundo plano al entrar en Deportes).
+export async function fctvWarmupSitemap(signal) {
+  try { return (await loadSitemapIndex(signal)).length > 0 } catch { return false }
+}
+
+// Los slugs del sitemap pierden letras acentuadas ("córdoba"→"crdoba") y
+// abrevian ("gimnasia-jujuy" por "Gimnasia y Esgrima Jujuy"), así que el
+// matching añade dos relajados sobre el canon: esqueleto consonántico y
+// subconjunto de tokens. Los filtros mujeres/filial siguen separando.
+const SM_WOMEN_RE = /femenin|feminine|women|ladies|\bw\b|liga f\b/i
+const SM_BTEAM_RE = /(?:\s|-)b$|\breserv|\bu2[0-3]\b|\bjuvenil|\bcastilla\b|\batletic\b|\bii{1,2}\b|cantera/i
+const smFlags = (home, away, league) => {
+  const t = `${home || ''} ${away || ''} ${league || ''}`
+  return { w: SM_WOMEN_RE.test(t), b: SM_BTEAM_RE.test(t) }
+}
+const smSkel = (s) => canonTeam(s).replace(/[aeiou]/g, '')
+const smTokens = (s) => canonTeam(s).split(' ').filter(Boolean)
+
+function smTeamish(a, b) {
+  if (teamsMatch(a, b)) return true
+  const ka = smSkel(a)
+  if (ka && ka === smSkel(b)) return true
+  const ta = smTokens(a), tb = smTokens(b)
+  if (ta.length < 2 || tb.length < 2) return false
+  const sa = new Set(ta), sb = new Set(tb)
+  return ta.every(t => sb.has(t)) || tb.every(t => sa.has(t))
+}
+
+// Busca el partido FCTV equivalente a una tarjeta ({_home,_away,_matchDate,
+// _league}) en el índice del sitemap. Devuelve un item sintético con el
+// matchId embebido en el id — getStreams lo resuelve por /api/match/detail
+// (sin challenge) y los embeds se construyen con sus metadatos.
+export function fctvLookupItem(item) {
+  const home = item?._home?.name, away = item?._away?.name
+  if (!home || !away || !sitemapIdx) return null
+  const qf = smFlags(home, away, item._league?.name)
+  const qd = item._matchDate || 0
+  let best = null
+  for (const e of sitemapIdx.entries) {
+    if (qd && e.dateMs && Math.abs(e.dateMs - qd) > 48 * 3600e3) continue
+    if (!qd && e.dateMs && Math.abs(e.dateMs - Date.now()) > 72 * 3600e3) continue
+    const ef = smFlags(e.home, e.away, e.leagueSlug)
+    if (ef.w !== qf.w || ef.b !== qf.b) continue
+    const direct = smTeamish(e.home, home) && smTeamish(e.away, away)
+    const swapped = smTeamish(e.home, away) && smTeamish(e.away, home)
+    if (!direct && !swapped) continue
+    if (!best || Math.abs(e.dateMs - (qd || Date.now())) < Math.abs(best.dateMs - (qd || Date.now()))) best = e
+  }
+  if (!best) return null
+  const matchDate = best.dateMs || qd || Date.now()
+  const m = { matchId: best.matchId, sportType: best.sportType, leagueSlug: best.leagueSlug, slug: best.slug, matchDate }
+  const webDomain = cache?.webDomain || OFFLINE_CFG.webDomain
+  const name = `${home} vs ${away}`
+  return {
+    id: `fctv:${best.matchId}:${best.sportType}:${best.leagueSlug}:${best.slug}:${matchDate}`,
+    type: CONTENT_TYPES.CHANNEL,
+    name,
+    title: name,
+    genre: SPORT_NAMES[best.sportType] || 'Deporte',
+    url: matchPageUrl(webDomain, m),
+    pluginId: 'fctv',
+    _sportType: best.sportType,
+    _leagueSlug: best.leagueSlug,
+    _slug: best.slug,
+    _matchDate: matchDate,
+    _home: { name: home, logo: null },
+    _away: { name: away, logo: null },
+    _league: { name: best.leagueSlug.replace(/-/g, ' '), logo: null },
+    _sportName: SPORT_NAMES[best.sportType] || 'Deporte',
+  }
 }
 
 function matchToItem(m, cfg, streamEntry) {
@@ -591,12 +739,15 @@ export const fctvFactory = (config) => {
           if (item) break
         }
 
+        // Metadatos del partido: del item cacheado del catálogo o, para items
+        // sintéticos del sitemap, embebidos en el propio id
+        // (fctv:{matchId}:{sportType}:{leagueSlug}:{slug}:{matchDateMs}).
         const m = {
           matchId: Number(matchId),
           sportType: item?._sportType || Number(parts[1]) || SPORT_TYPES.football,
-          leagueSlug: item?._leagueSlug,
-          slug: item?._slug,
-          matchDate: item?._matchDate,
+          leagueSlug: item?._leagueSlug || parts[2] || undefined,
+          slug: item?._slug || parts[3] || undefined,
+          matchDate: item?._matchDate || Number(parts[4]) || undefined,
         }
 
         const embeds = buildEmbedStreams(cfg, m, matchId)

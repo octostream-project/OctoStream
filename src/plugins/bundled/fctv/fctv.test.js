@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   rot47, parseLiveResponse, parseDetailStreams, parseStreamDetail, parseUserInfo,
 } from './proto.js'
@@ -177,5 +177,103 @@ describe('parseUserInfo', () => {
       ]),
     ])
     expect(parseUserInfo(buf)).toEqual({ country: 'ES', continent: 'EU' })
+  })
+})
+
+// ─── Índice sitemap + fctvLookupItem ──────────────────────────────────────
+// /api/match/live va tras Cloudflare; el índice de partidos se construye con
+// los sitemaps del dominio web (sin challenge).
+
+const SM_XML = (locs) =>
+  `<?xml version="1.0"?><urlset>${locs.map(([u, d]) =>
+    `<url><loc>${u}</loc><lastmod>${d}</lastmod><changefreq>monthly</changefreq></url>`).join('')}</urlset>`
+
+vi.mock('../../../utils/httpClient.js', async (importOriginal) => {
+  const orig = await importOriginal()
+  return {
+    ...orig,
+    httpGetText: async (url) => {
+      if (url.includes('/api/common/params')) {
+        // ROT47 de un JSON mínimo — parseConfig cae a los dominios fallback.
+        return { data: rot47('{}'), headers: {} }
+      }
+      if (url.includes('/sitemap/')) {
+        const d = new Date()
+        const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        if (url.includes('/index.xml')) {
+          const f = (s) => `<loc>https://www.fctv33hd.digital/sitemap/es/${s}-${ym}-001.xml</loc>`
+          return { data: `<?xml version="1.0"?><locs>${f('football')}${f('basketball')}${f('tennis')}${f('motorsport')}</locs>`, headers: {} }
+        }
+        if (!url.includes('-001.xml')) return { data: '<html>spa fallback</html>', headers: {} }
+        const now = Date.now()
+        return {
+          data: SM_XML([
+            ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432824/real-sociedad-vs-rc-celta-09-2026.html', new Date(now).toISOString()],
+            ['https://www.fctv33hd.digital/es/football/argentine-division-1-match-4398422/instituto-de-crdoba-vs-ca-san-lorenzo-09-2026.html', new Date(now + 3600e3).toISOString()],
+            ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432592/real-madrid-vs-barcelona-09-2026.html', new Date(now + 7200e3).toISOString()],
+            ['https://www.fctv33hd.digital/es/football/spanish-primera-divisin-de-la-liga-de-ftbol-femenino-match-4468313/real-madrid-women-vs-barcelona-women-09-2026.html', new Date(now + 7200e3).toISOString()],
+            ['https://www.fctv33hd.digital/es/basketball/acb-match-1/fcb-vs-rmb-09-2026.html', new Date(now).toISOString()],
+          ]),
+          headers: {},
+        }
+      }
+      throw new Error('HTTP 404')
+    },
+  }
+})
+
+describe('fctvLookupItem (índice sitemap)', () => {
+  it('encuentra el matchId por equipos y devuelve un item resoluble', async () => {
+    const { fctvWarmupSitemap, fctvLookupItem } = await import('./index.js')
+    expect(await fctvWarmupSitemap()).toBe(true)
+
+    const item = fctvLookupItem({
+      _home: { name: 'Real Sociedad' },
+      _away: { name: 'RC Celta' },
+      _matchDate: Date.now(),
+    })
+    expect(item).not.toBeNull()
+    expect(item.id).toContain('fctv:4432824:1')
+    expect(item._sportType).toBe(1)
+    expect(item._leagueSlug).toBe('spanish-la-liga')
+    expect(item._slug).toBe('real-sociedad-vs-rc-celta')
+    expect(item.url).toContain('real-sociedad-vs-rc-celta')
+  })
+
+  it('casa nombres con letras acentuadas caídas en el slug', async () => {
+    const { fctvLookupItem } = await import('./index.js')
+    const item = fctvLookupItem({
+      _home: { name: 'Instituto de Córdoba' },
+      _away: { name: 'CA San Lorenzo' },
+      _matchDate: Date.now() + 3600e3,
+    })
+    expect(item?.id).toContain('fctv:4398422:1')
+  })
+
+  it('no mezcla el partido masculino con el femenino', async () => {
+    const { fctvLookupItem } = await import('./index.js')
+    // Tarjeta Liga F (mujeres): solo debe casar la variante femenina.
+    const w = fctvLookupItem({
+      _home: { name: 'Real Madrid Women' },
+      _away: { name: 'Barcelona Women' },
+      _matchDate: Date.now() + 7200e3,
+      _league: { name: 'Liga F' },
+    })
+    expect(w?.id).toContain('fctv:4468313:1')
+    // Tarjeta masculina sin marcador de género: no debe pillar la femenina
+    // del mismo día (tienen matchId distinto).
+    const m = fctvLookupItem({
+      _home: { name: 'Real Madrid' },
+      _away: { name: 'Barcelona' },
+      _matchDate: Date.now() + 7200e3,
+      _league: { name: 'LaLiga' },
+    })
+    expect(m?.id).toContain('fctv:4432592:1')
+  })
+
+  it('devuelve null sin índice cargado o sin coincidencia', async () => {
+    const { fctvLookupItem } = await import('./index.js')
+    expect(fctvLookupItem({ _home: { name: 'X' }, _away: { name: 'Y' } })).toBeNull()
+    expect(fctvLookupItem(null)).toBeNull()
   })
 })
