@@ -20,7 +20,7 @@ const SOFA_SPORT = {
 
 const teamImg = (id) => `${SOFA_API}/team/${id}/image`
 const playerImg = (id) => `${SOFA_API}/player/${id}/image`
-const tournamentImg = (id) => `${SOFA_API}/unique-tournament/${id}/image`
+export const tournamentImg = (id) => `${SOFA_API}/unique-tournament/${id}/image`
 
 // El CDN de logos de FCTV (logos*.<dominio-rotativo>.cfd) está muerto:
 // NXDOMAIN incluso en DNS público. Tratar esos URLs como "sin logo".
@@ -149,8 +149,10 @@ async function sofaFindTournament(name, slug, signal) {
 const leagueEventsCache = new Map() // utId → { ts, events }
 const EVENTS_TTL = 60 * 60 * 1000
 
-export async function fetchLeagueEvents(leagueName, slug = 'football', signal) {
-  const utId = await sofaFindTournament(leagueName, slug, signal)
+// utId opcional: id de unique-tournament conocido — evita la búsqueda por
+// nombre, que es ambigua (hay varias "Copa del Rey", una por deporte).
+export async function fetchLeagueEvents(leagueName, slug = 'football', signal, utId = null) {
+  if (!utId) utId = await sofaFindTournament(leagueName, slug, signal)
   if (!utId) return []
   const hit = leagueEventsCache.get(utId)
   if (hit && Date.now() - hit.ts < EVENTS_TTL) return hit.events
