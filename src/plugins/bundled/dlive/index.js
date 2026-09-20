@@ -29,6 +29,7 @@ const SCHEDULE_TTL = 5 * 60 * 1000
 
 let baseCache = null // { ts, base }
 const scheduleCache = new Map() // 'all' → { ts, events }
+let scheduleInflight = null // fetch en curso: lo comparten plan de carga y página
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Linux; Android 10) OctoStream/1.0' }
 
@@ -56,7 +57,15 @@ async function resolveBase(signal) {
 async function fetchAllEvents(signal) {
   const hit = scheduleCache.get('all')
   if (hit && Date.now() - hit.ts < SCHEDULE_TTL) return hit.events
+  // Si ya hay una descarga en curso (plan de carga en background, otra
+  // pestaña de deportes), esperar a su resultado en vez de repetirla.
+  if (scheduleInflight) return scheduleInflight
+  scheduleInflight = fetchAllEventsUncached(signal)
+    .finally(() => { scheduleInflight = null })
+  return scheduleInflight
+}
 
+async function fetchAllEventsUncached(signal) {
   const base = await resolveBase(signal)
   const [mainHtml, ...extras] = await Promise.all([
     httpGetText(`${base}/`, UA, signal),

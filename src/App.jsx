@@ -13,6 +13,7 @@ import { isAndroidNative } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
+import { startLoadPlan } from './utils/loadPlan.js'
 
 // Lazy-loaded pages: each route becomes its own chunk.
 const Home = lazy(() => import('./pages/Home.jsx'))
@@ -128,6 +129,10 @@ export default function App() {
       }).catch(() => {})
     }
 
+    // Plan de carga en background (TMDB → anime → deportes): precalienta las
+    // cachés en orden para que cada sección abra al instante. Espera a WARP
+    // internamente — no compite con el primer pintado ni filtra la IP.
+    startLoadPlan()
   }, [initPlugins])
 
   // === Battery optimization: pause WARP when app goes to background ===
@@ -174,6 +179,9 @@ export default function App() {
       paused = false
       const token = ++lifecycleToken
       console.log('[App] App resumed (foreground)')
+      // Recalentar las cachés si el plan lleva >10 min sin correr (las de
+      // deportes caducan en minutos). No-op si está corriendo o es reciente.
+      startLoadPlan()
       // Cancel pending disconnect
       if (warpPauseTimerRef.current) {
         clearTimeout(warpPauseTimerRef.current)

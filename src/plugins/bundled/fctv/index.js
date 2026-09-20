@@ -218,6 +218,7 @@ async function apiGetRaw(cfg, path, params, signal) {
 
 const LIST_TTL = 60 * 1000 // live data changes fast
 const listCache = new Map()
+const listInflight = new Map() // sportType → promise en curso (dedup página/precarga)
 
 function formatMatchTime(ms) {
   if (!ms) return ''
@@ -643,7 +644,17 @@ async function fetchLive(cfg, sportType, signal) {
   const cacheKey = `live:${sportType}`
   const hit = listCache.get(cacheKey)
   if (hit && Date.now() - hit.ts < LIST_TTL) return hit.items
+  // Compartir la petición en curso: si el plan de carga o otra vista ya está
+  // pidiendo este deporte, esperar su resultado en vez de duplicarla.
+  if (listInflight.has(cacheKey)) return listInflight.get(cacheKey)
+  const p = fetchLiveUncached(cfg, sportType, signal)
+    .finally(() => listInflight.delete(cacheKey))
+  listInflight.set(cacheKey, p)
+  return p
+}
 
+async function fetchLiveUncached(cfg, sportType, signal) {
+  const cacheKey = `live:${sportType}`
   // sportType=0 returns all sports; `language` param makes the API 499 — omit it.
   const buf = await apiGet(cfg, '/api/match/live', { sportType }, signal)
   const parsed = parseLiveResponse(new Uint8Array(buf))
