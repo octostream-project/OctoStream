@@ -5645,7 +5645,7 @@ public class ExoPlayerPlugin extends Plugin {
                 .setUsage(C.USAGE_MEDIA)
                 .build();
         // El mini se ve a ~340dp: decodificar 1080p para él dispara CPU/GPU y
-        // RAM en boxes débiles. Track selector capado a ~360p/1.2Mbps (los
+        // RAM en boxes débiles. Track selector capado a ~270p/600kbps (los
         // masters HLS eligen la variante más baja que cumpla) y LoadControl
         // pequeño — el default reserva ~50MB, demasiado para un 2º player.
         // YouTube (manifest.googlevideo.com) se capa aún más, al mínimo
@@ -5654,8 +5654,8 @@ public class ExoPlayerPlugin extends Plugin {
             && (url.contains("googlevideo.com") || url.contains("youtube"));
         DefaultTrackSelector pipTrackSelector = new DefaultTrackSelector(context);
         pipTrackSelector.setParameters(pipTrackSelector.buildUponParameters()
-                .setMaxVideoSize(yt ? 256 : 640, yt ? 144 : 360)
-                .setMaxVideoBitrate(yt ? 300_000 : 1_200_000)
+                .setMaxVideoSize(yt ? 256 : 480, yt ? 144 : 270)
+                .setMaxVideoBitrate(yt ? 300_000 : 600_000)
                 .build());
         DefaultLoadControl pipLoadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
