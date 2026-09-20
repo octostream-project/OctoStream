@@ -127,10 +127,10 @@ function trackFinished(merged, catId) {
 const LEAGUE_ORDER = [
   { re: /laliga ea|la liga|laliga|primera divisi/, not: /hyper|segunda|\b2\b|rfef|federac|women|femen/ },
   { re: /hypermotion|la ?liga 2|segunda divisi/, not: /federac|rfef|women|femen/ },
+  { re: /liga f\b|liga femenina|primera divisi.*femen|femenina|femenino|copa de la reina|supercopa.*femen|spain.*women|women.*spain/ },
   { re: /primera (federaci|rfef)|1[aª]? ?federac|primer?a fed/, not: /femen|women/ },
   { re: /segunda (federaci|rfef)|2[aª]? ?federac/, not: /femen|women/ },
   { re: /tercera (federaci|rfef)|3[aª]? ?federac/, not: /femen|women/ },
-  { re: /liga f\b|liga femenina|primera divisi.*femen|femenina|femenino|copa de la reina|supercopa.*femen|spain.*women|women.*spain/ },
   { re: /copa del rey|supercopa/, not: /femen/ },
   { re: /champions league/, not: /afc|caf|women|youth|qualif|asian|concacaf|oceania|\btwo\b/ },
   { re: /europa league/, not: /conference/ },

@@ -1,16 +1,16 @@
 {
-  "versionCode": 128,
-  "versionName": "1.28",
+  "versionCode": 129,
+  "versionName": "1.29",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.28/octostream-1.28-arm64-v8a.apk",
-  "sha256": "ef4c034b569f4136c9c6d4b81a90b273df63b0775569916e7d5a4bbbc5cafc72",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.29/octostream-1.29-arm64-v8a.apk",
+  "sha256": "7bc66436892ee393f91fd7aa562739b161c50da24f9aab8e51c14a2ed9aaad88",
   "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.28/octostream-1.28-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.28/octostream-1.28-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.29/octostream-1.29-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.29/octostream-1.29-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ef4c034b569f4136c9c6d4b81a90b273df63b0775569916e7d5a4bbbc5cafc72",
-    "armeabi-v7a": "5edf179327e66498ad553d06be1aba2f3cff49d08283b4ed9b9003976d2976bc"
+    "arm64-v8a": "7bc66436892ee393f91fd7aa562739b161c50da24f9aab8e51c14a2ed9aaad88",
+    "armeabi-v7a": "afe240c14cfe6f443fcf85e2cc9c31a5fe0af19e5ddba7d3f8cfcde8833b5fd9"
   }
 }
