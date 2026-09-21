@@ -3509,7 +3509,17 @@ public class ExoPlayerPlugin extends Plugin {
                         || code == KeyEvent.KEYCODE_ENTER
                         || code == KeyEvent.KEYCODE_BACK
                         || code == KeyEvent.KEYCODE_BUTTON_X
-                        || code == KeyEvent.KEYCODE_ESCAPE;
+                        || code == KeyEvent.KEYCODE_ESCAPE
+                        // Teclas multimedia del mando (muchos mandos de TV las
+                        // envían como keyevents al no haber MediaSession)
+                        || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                        || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                        || code == KeyEvent.KEYCODE_MEDIA_PAUSE
+                        || code == KeyEvent.KEYCODE_MEDIA_REWIND
+                        || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                        || code == KeyEvent.KEYCODE_MEDIA_NEXT
+                        || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                        || code == KeyEvent.KEYCODE_MEDIA_STOP;
                 if (remoteKey) {
                     Log.i(TAG, "dispatchKeyEvent: code=" + code + " action=" + event.getAction()
                             + " focus=" + (getCurrentFocus() == null ? "none" : getCurrentFocus().getClass().getSimpleName()));
@@ -3527,6 +3537,41 @@ public class ExoPlayerPlugin extends Plugin {
             @Override
             public boolean onKeyDown(int keyCode, KeyEvent event) {
                 boolean canZap = "live".equals(playerMode) && liveChannels != null && liveChannels.length() > 1;
+
+                // Teclas multimedia del mando: transporte global — funcionan
+                // aunque haya un panel lateral o menú abierto. Muestran el
+                // OSD un momento como confirmación visual.
+                switch (keyCode) {
+                    case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                        if (player != null) {
+                            if (player.getPlayWhenReady()) player.pause();
+                            else player.play();
+                        }
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
+                    case KeyEvent.KEYCODE_MEDIA_PLAY:
+                        if (player != null) player.play();
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
+                    case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                        if (player != null) player.pause();
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
+                    case KeyEvent.KEYCODE_MEDIA_REWIND:
+                        seekByStep(-1);
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
+                    case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                        seekByStep(1);
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
+                    case KeyEvent.KEYCODE_MEDIA_NEXT:
+                        if (canZap) { zapChannel(1); return true; }
+                        break;
+                    case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                        if (canZap) { zapChannel(-1); return true; }
+                        break;
+                }
 
                 // Panel lateral abierto (canales o episodios): BACK/LEFT lo
                 // cierran; el resto lo gestiona el foco de las filas (OK hace click).
