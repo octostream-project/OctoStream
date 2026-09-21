@@ -391,6 +391,9 @@ public class ExoPlayerPlugin extends Plugin {
     private LinearLayout topBar = null;
     private TextView playerTitleView = null;
     private TextView playerSubtitleView = null;
+    private TextView clockView = null;
+    private final java.text.SimpleDateFormat clockFormat =
+            new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault());
 
     // Apply focus scale animation to a view (grows when D-pad focuses it)
     private void applyFocusScale(View view) {
@@ -4858,6 +4861,7 @@ public class ExoPlayerPlugin extends Plugin {
     private ViewGroup rootLayoutRef = null;
 
     private void updateControlsUi() {
+        if (clockView != null) clockView.setText(clockFormat.format(new java.util.Date()));
         if (controlsOverlay == null || player == null) return;
         long pos = player.getCurrentPosition();
         long dur = player.getDuration();
@@ -5918,6 +5922,17 @@ public class ExoPlayerPlugin extends Plugin {
         texts.addView(playerSubtitleView);
 
         bar.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        // Reloj a la derecha de la top bar — se actualiza con el tick de controles
+        clockView = new TextView(context);
+        clockView.setTextColor(Color.WHITE);
+        clockView.setTextSize(15f);
+        clockView.setTypeface(null, android.graphics.Typeface.BOLD);
+        clockView.setPadding(dp(12), 0, 0, 0);
+        clockView.setFocusable(false);
+        clockView.setText(clockFormat.format(new java.util.Date()));
+        bar.addView(clockView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         updatePlayerSubtitle(title);
         bar.setVisibility(View.GONE); // se muestra junto al controller
@@ -7930,6 +7945,7 @@ public class ExoPlayerPlugin extends Plugin {
         topBar = null;
         playerTitleView = null;
         playerSubtitleView = null;
+        clockView = null;
         controlsOverlay = null;
         rootLayoutRef = null;
         octoSeek = null;
