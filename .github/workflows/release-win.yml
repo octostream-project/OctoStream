@@ -1,0 +1,44 @@
+name: Windows release
+
+# Manual: Actions → Windows release → Run workflow.
+# Compila el instalador NSIS (.exe) y lo adjunta a la release indicada.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag de la release a la que subir el exe (p.ej. v1.50)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run electron:build -- --win nsis
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ inputs.tag }} "dist-electron/*.exe" --clobber
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist-electron/*.exe
