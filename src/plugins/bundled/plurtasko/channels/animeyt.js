@@ -26,6 +26,7 @@ function streamFromUrl(rawUrl, pageLang = '') {
 export const animeyt = {
   id: 'animeyt',
   name: 'AnimeYT',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST,
   catalogs: [

@@ -11,6 +11,7 @@ const HOST = 'https://doramaexpress.com/'
 export const doramaexpress = {
   id: 'doramaexpress',
   name: 'DoramaExpress',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.DORAMA],
   host: HOST,
 

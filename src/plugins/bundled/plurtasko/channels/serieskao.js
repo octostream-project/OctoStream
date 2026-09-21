@@ -11,6 +11,7 @@ const HOST = 'https://serieskao.top/'
 export const serieskao = {
   id: 'serieskao',
   name: 'SeriesKao',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE],
   host: HOST,
 

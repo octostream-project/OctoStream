@@ -31,6 +31,7 @@ function decodeDataSrc(b64) {
 export const subtorrents = {
   id: 'subtorrents',
   name: 'SubTorrents',
+  defaultLang: 'Esp',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOSTS[0],
 

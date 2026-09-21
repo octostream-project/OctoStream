@@ -17,6 +17,7 @@ const TYPE_MAP = {
 export const seriesyonkissx = {
   id: 'seriesyonkissx',
   name: 'SeriesYonkis',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES, CONTENT_TYPES.ANIME],
   host: HOST,
 

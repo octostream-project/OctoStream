@@ -53,6 +53,7 @@ function torrentFromHref(href) {
 export const grantorrent = {
   id: 'grantorrent',
   name: 'GranTorrent',
+  defaultLang: 'Esp',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOSTS[0],
 

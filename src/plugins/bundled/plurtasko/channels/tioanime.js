@@ -12,6 +12,7 @@ const HOST = 'https://tioanime.com'
 export const tioanime = {
   id: 'tioanime',
   name: 'TioAnime',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST + '/',
 

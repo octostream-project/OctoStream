@@ -12,6 +12,7 @@ const HOST = 'https://www.doramasyt.com/'
 export const doramasyt = {
   id: 'doramasyt',
   name: 'DoramasYT',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.DORAMA],
   host: HOST,
 

@@ -76,6 +76,7 @@ async function contentIdFor(url, signal) {
 export const dontorrent = {
   id: 'dontorrent',
   name: 'DonTorrent',
+  defaultLang: 'Esp',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOSTS[0],
 

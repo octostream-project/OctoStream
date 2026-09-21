@@ -12,6 +12,7 @@ const HOST = 'https://wwv.animeav1.one/'
 export const animeav1 = {
   id: 'animeav1',
   name: 'AnimeAV1',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST,
 
