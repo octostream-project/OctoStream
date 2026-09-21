@@ -1,16 +1,18 @@
 {
-  "versionCode": 146,
-  "versionName": "1.46",
+  "versionCode": 149,
+  "versionName": "1.49",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-arm64-v8a.apk",
-  "sha256": "6d223d8bc8a85588be74cba45f60f08fca3f35b6585fe3d9aa15e2c925b81838",
-  "notes": "Mando: play/pausa, rebobinar/avance y zap con NEXT/PREV en directo",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.49/octostream-1.49-arm64-v8a.apk",
+  "sha256": "b8b9ba3fea32a7ce9884ab937f8cb1b8b7b1d0c0486d455f69cfc0cef9fa68fd",
+  "notes": "Sync estilo LocalSend, imágenes de deportes mejoradas, jornadas acotadas",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-armeabi-v7a.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.49/octostream-1.49-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.49/octostream-1.49-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.49/octostream-1.49-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "6d223d8bc8a85588be74cba45f60f08fca3f35b6585fe3d9aa15e2c925b81838",
-    "armeabi-v7a": "e8a98944c1ec49e6acbd9e1793c8adfc1c455abbe588e3892c7e19732c1f2045"
+    "arm64-v8a": "b8b9ba3fea32a7ce9884ab937f8cb1b8b7b1d0c0486d455f69cfc0cef9fa68fd",
+    "armeabi-v7a": "f3437bf47f70cdbcdabc1b89419b775a1ac949b2cd7adfeaf8622f054c8e81f8",
+    "x86_64": "936a58173ab971fa5f3691b507a25a1e1a282a07df2e09d77a9841ada4e4da1c"
   }
 }
