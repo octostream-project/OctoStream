@@ -17,7 +17,6 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isAlldebridEnabled, isAlldebridSupported, unlockLink, resolveMagnet } from '../alldebrid.js'
-import { isRealdebridEnabled, isRealdebridSupported, unlockLink as rdUnlockLink, resolveMagnet as rdResolveMagnet } from '../realdebrid.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
 import { monoschinos } from './channels/monoschinos.js'
@@ -139,7 +138,7 @@ function normalizeStream(s) {
   return { ...s, quality, lang, server, name }
 }
 
-// Try to unlock a link via debrid services (AllDebrid or RealDebrid).
+// Try to unlock a link via AllDebrid.
 // Returns { link, via } or null.
 async function debridUnlock(url) {
   // Convert mega.nz embed URLs to file URLs (Debrid expects /file/ not /embed/)
@@ -150,69 +149,37 @@ async function debridUnlock(url) {
   }
   // Some hosts always show captcha and can't be resolved with JS, so always try debrid
   const alwaysTryDebrid = /powvideo|streamplay|mega\.nz/i.test(debridUrl)
-  // Try AllDebrid first
-  if (isAlldebridEnabled() && (alwaysTryDebrid || isAlldebridSupported(debridUrl))) {
-    try {
-      const ad = await unlockLink(debridUrl)
-      if (ad?.link) {
-        console.log(`[AllDebrid] Unlocked: ${ad.link.substring(0, 80)}`)
-        // If there are quality-specific streams, pick the best one
-        let bestLink = ad.link
-        if (ad.streams && ad.streams.length > 0) {
-          const sorted = [...ad.streams].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
-          if (sorted[0]?.link) bestLink = sorted[0].link
-        }
-        return { link: bestLink, via: 'AllDebrid' }
+  if (!isAlldebridEnabled() || (!alwaysTryDebrid && !isAlldebridSupported(debridUrl))) return null
+  try {
+    const ad = await unlockLink(debridUrl)
+    if (ad?.link) {
+      console.log(`[AllDebrid] Unlocked: ${ad.link.substring(0, 80)}`)
+      // If there are quality-specific streams, pick the best one
+      let bestLink = ad.link
+      if (ad.streams && ad.streams.length > 0) {
+        const sorted = [...ad.streams].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
+        if (sorted[0]?.link) bestLink = sorted[0].link
       }
-    } catch (e) {
-      logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
+      return { link: bestLink, via: 'AllDebrid' }
     }
-  }
-  // Try RealDebrid
-  if (isRealdebridEnabled() && (alwaysTryDebrid || isRealdebridSupported(debridUrl))) {
-    try {
-      const rd = await rdUnlockLink(debridUrl)
-      if (rd?.link) {
-        console.log(`[RealDebrid] Unlocked: ${rd.link.substring(0, 80)}`)
-        // If there are alternative quality links, pick the best one
-        let bestLink = rd.link
-        if (rd.alternatives && rd.alternatives.length > 0) {
-          const sorted = [...rd.alternatives].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
-          if (sorted[0]?.link) bestLink = sorted[0].link
-        }
-        return { link: bestLink, via: 'RealDebrid' }
-      }
-    } catch (e) {
-      logWarn(`[RealDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
-    }
+  } catch (e) {
+    logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
   }
   return null
 }
 
-// Try to resolve a magnet via debrid services.
+// Try to resolve a magnet via AllDebrid.
 // Returns { links, via } or null.
 async function debridResolveMagnet(url, ep = {}) {
-  if (isAlldebridEnabled()) {
-    try {
-      const links = await resolveMagnet(url, 30000, ep)
-      if (links?.length) {
-        console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
-        return { links, via: 'AllDebrid' }
-      }
-    } catch (e) {
-      logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
+  if (!isAlldebridEnabled()) return null
+  try {
+    const links = await resolveMagnet(url, 30000, ep)
+    if (links?.length) {
+      console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
+      return { links, via: 'AllDebrid' }
     }
-  }
-  if (isRealdebridEnabled()) {
-    try {
-      const links = await rdResolveMagnet(url, 30000, ep)
-      if (links?.length) {
-        console.log(`[RealDebrid] Resolved magnet: ${links.length} links`)
-        return { links, via: 'RealDebrid' }
-      }
-    } catch (e) {
-      logWarn(`[RealDebrid] Failed to resolve magnet:`, String(e?.message || e))
-    }
+  } catch (e) {
+    logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
   }
   return null
 }
@@ -381,7 +348,7 @@ const BLOCKED_SERVERS = [
   'upnshare', 'uns.bio', // animeav1 — sin resolver
   'vimeos',          // vimeos.net — sin resolver
   'la.movie', 'lamovie', // enlaces muertos
-  'mediafire',     // página de descarga, no stream — desbloqueable vía RealDebrid
+  'mediafire',     // página de descarga, no stream
   'ok.ru', 'okru', // sin resolver ni soporte debrid — embed que no carga
   // PowVideo/StreamPlay sirven reCAPTCHA en TODOS los embeds (form + token):
   // sin cuenta debrid son enlaces captcha garantizados. Debrid los desbloquea
@@ -390,36 +357,34 @@ const BLOCKED_SERVERS = [
   'streamplay', 'stape.fun', 'watchadsontape',
 ]
 
-// Servers that are normally blocked but can be unlocked via debrid services.
+// Servers that are normally blocked but can be unlocked via AllDebrid.
 // When a debrid account is configured, these are NOT filtered out.
-// Based on actual RealDebrid and AllDebrid supported hosts.
+// Based on the actual AllDebrid supported hosts.
 const DEBRID_UNLOCKABLE = [
-  // Voe (RealDebrid) - includes mirror domains
+  // Voe — resolver JS propio (port ResolveURL), no necesita debrid pero se
+  // mantiene aquí para que el filtro no lo descarte cuando hay cuenta.
   'voe.sx', 'voe-unblock', 'voeunblock', 'eugenemakedraw', 'morencius',
-  // Mixdrop (RealDebrid + AllDebrid)
+  // Mixdrop (AllDebrid)
   'mixdrop.co', 'mixdrop.to', 'mixdrop.sx', 'mixdrop.ag', 'mixdrop.bz',
-  // Streamtape (RealDebrid + AllDebrid)
+  // Streamtape (AllDebrid)
   'streamtape.com', 'streamtape.to',
-  // Upstream (RealDebrid)
+  // Upstream — resolver JS propio.
   'upstream.to',
-  // Doodstream NO está: ni RD ni AD lo soportan (verificado contra
-  // /hosts de alldebrid) — va por el resolver propio (port AniWorld).
-  // Mega (AllDebrid + RealDebrid)
+  // Doodstream NO está: AllDebrid no lo soporta (verificado contra /hosts) —
+  // va por el resolver propio (port AniWorld).
+  // Mega (AllDebrid)
   'mega.nz', 'mega.',
-  // 1fichier (AllDebrid + RealDebrid)
+  // 1fichier (AllDebrid)
   '1fichier',
-  // Rapidgator (AllDebrid + RealDebrid)
+  // Rapidgator (AllDebrid)
   'rapidgator',
-  // Turbobit (AllDebrid + RealDebrid)
+  // Turbobit (AllDebrid)
   'turbobit',
-  // Hitfile (AllDebrid + RealDebrid)
+  // Hitfile (AllDebrid)
   'hitfile',
   // File hosts (AllDebrid)
   'katfile.com', 'filefactory', 'file.al', 'filedot', 'filespace',
   'filerio', 'filezip', 'prefiles', 'alfafile', 'simfileshare', 'world-files',
-  // File hosts (RealDebrid only)
-  'nitroflare', 'uptobox', 'clicknupload', 'ddownload', 'ddl.to',
-  '4shared', 'mediafire', 'uploady', 'wipfiles',
 ]
 
 // Cache of search results by title+type+season+episode (5 min TTL)
@@ -513,7 +478,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
   if (!streams || !streams.length) return []
 
   // Filter out blocked servers that crash the app
-  const debridActive = isAlldebridEnabled() || isRealdebridEnabled()
+  const debridActive = isAlldebridEnabled()
   const normalizedStreams = streams.map(normalizeStreamForPlayback)
   const isBlockedStream = (url, server, name) => {
     const urlLower = (url || '').toLowerCase()
@@ -563,7 +528,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
     s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'dash' ||
     (s.streamType === 'torrent' && torrentSearchEnabled())
   )
-  const debridEnabled = isAlldebridEnabled() || isRealdebridEnabled()
+  const debridEnabled = isAlldebridEnabled()
   const debridTasks = []
   for (const s of directStreams) {
     // Extract quality from direct URL if not already set
@@ -663,7 +628,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
               } catch (e) {
                 logWarn(`[Plurtasko] JS resolver failed for ${srv.server}: ${hostOf(srv.url)}`, String(e?.message || e))
               }
-              // Try debrid services (AllDebrid or RealDebrid)
+              // Try AllDebrid
               const debrid = await debridUnlock(srv.url)
               if (debrid?.link) {
                 const isHls = /\.m3u8/i.test(debrid.link) || /m3u8/i.test(debrid.link)
@@ -768,8 +733,8 @@ async function resolveStreams(streams, onBatch, context = {}) {
         const isHls = /\.m3u8/i.test(directUrl) || /m3u8/i.test(directUrl)
         const isMp4 = /\.mp4/i.test(directUrl)
         const isMagnet = /magnet:/.test(directUrl)
-        // Debrid download links (real-debrid.com/d/...) are direct file downloads, not HLS
-        const isDebridDownload = /download\.real-debrid\.com|download\.alldebrid\.com/i.test(directUrl)
+        // Debrid download links (alldebrid.com/d/...) are direct file downloads, not HLS
+        const isDebridDownload = /download\.alldebrid\.com|alldebrid\.com\/d\//i.test(directUrl)
         const newType = isHls ? 'hls'
           : isMp4 ? 'mp4'
           : isMagnet ? 'torrent'
@@ -892,7 +857,7 @@ export const plurtaskoFactory = (config) => {
     },
 
     async getStreams({ type, id, name, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, onBatch }) {
-      const debridEnabled = isAlldebridEnabled() || isRealdebridEnabled()
+      const debridEnabled = isAlldebridEnabled()
       try {
         if (isEpisodicType(type) && (season == null || episode == null)) return []
 

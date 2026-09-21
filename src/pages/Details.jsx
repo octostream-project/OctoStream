@@ -9,7 +9,6 @@ import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
-import { isRealdebridEnabled, unlockLink as rdUnlockLink } from '../plugins/bundled/realdebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative } from '../utils/platform.js'
@@ -119,9 +118,9 @@ function getLangPriority() {
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
 async function unlockDebrid(url) {
-  // res.link es la URL directa ya desbloqueada. Los alternatives de
-  // RealDebrid también son directos; los streams[] de AllDebrid NO (siguen
-  // restringidos), por eso solo se usan alternatives como fallback.
+  // res.link es la URL directa ya desbloqueada. Los streams[] de AllDebrid NO
+  // lo son (siguen restringidos), por eso solo se usan alternatives como
+  // fallback.
   const pickBest = (res) => {
     if (!res) return null
     const alts = res.alternatives || []
@@ -137,21 +136,13 @@ async function unlockDebrid(url) {
       if (r?.error) lastError = `AllDebrid: ${r.error}`
     } catch (e) { lastError = e?.message; console.warn('[Details] AllDebrid unlock failed:', e?.message) }
   }
-  if (isRealdebridEnabled()) {
-    try {
-      const r = await rdUnlockLink(url)
-      const best = pickBest(r)
-      if (best) return { link: best }
-      if (r?.error) lastError = r.error
-    } catch (e) { lastError = e?.message; console.warn('[Details] RealDebrid unlock failed:', e?.message) }
-  }
   return { link: null, error: lastError }
 }
 
 // Mensaje legible según el error del debrid.
 function debridErrorMessage(err) {
   const e = String(err || '')
-  if (/infringing/i.test(e)) return 'RealDebrid bloquea este archivo (DMCA). Prueba otro enlace o usa AllDebrid.'
+  if (/infringing/i.test(e)) return 'AllDebrid bloquea este archivo (DMCA). Prueba otro enlace.'
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
   if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
   return 'No se pudo desbloquear el enlace (debrid). Prueba otro servidor.'
@@ -542,8 +533,8 @@ export default function Details() {
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
-      if (!isAlldebridEnabled() && !isRealdebridEnabled()) {
-        setEpisodeError('Este enlace requiere AllDebrid o RealDebrid. Configúralo en Ajustes → Debrid.')
+      if (!isAlldebridEnabled()) {
+        setEpisodeError('Este enlace requiere AllDebrid. Configúralo en Ajustes → Debrid.')
         return
       }
       setResolvingStream(true)

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
-import { getDeviceCode as rdGetDeviceCode, getDeviceCredentials as rdGetCredentials, getDeviceToken as rdGetToken } from '../plugins/bundled/realdebrid.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
@@ -84,28 +83,17 @@ export default function Settings() {
   const [hdfullTesting, setHdfullTesting] = useState(false)
   const [hdfullTestResult, setHdfullTestResult] = useState('') // 'ok' | 'fail' | ''
 
-  // RealDebrid API token
-  const [rdToken, setRdToken] = useState(localStorage.getItem('octostream_realdebrid_token') || '')
-  const [rdSaved, setRdSaved] = useState(false)
-
-  // PIN flow state (AllDebrid and RealDebrid)
+  // PIN flow state (AllDebrid)
   const [adPin, setAdPin] = useState(null) // { pin, check, user_url, expires_in }
   const [adPinLoading, setAdPinLoading] = useState(false)
   const [adPinError, setAdPinError] = useState('')
   const adPinTimerRef = useRef(null)
   const adPinPollingRef = useRef(false)
 
-  const [rdCode, setRdCode] = useState(null) // { device_code, user_code, verification_url, interval, expires_in }
-  const [rdCodeLoading, setRdCodeLoading] = useState(false)
-  const [rdCodeError, setRdCodeError] = useState('')
-  const rdCodeTimerRef = useRef(null)
-  const rdCodePollingRef = useRef(false)
-
-  // Clear PIN/device-code polling intervals on unmount
+  // Clear PIN polling interval on unmount
   useEffect(() => {
     return () => {
       if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
-      if (rdCodeTimerRef.current) clearInterval(rdCodeTimerRef.current)
     }
   }, [])
 
@@ -278,17 +266,6 @@ export default function Settings() {
     setTimeout(() => setAdSaved(false), 2000)
   }
 
-  const handleRdSave = () => {
-    const key = rdToken.trim()
-    if (!key) {
-      localStorage.removeItem('octostream_realdebrid_token')
-    } else {
-      localStorage.setItem('octostream_realdebrid_token', key)
-    }
-    setRdSaved(true)
-    setTimeout(() => setRdSaved(false), 2000)
-  }
-
   // --- AllDebrid PIN flow ---
   const handleAdPinStart = useCallback(async () => {
     setAdPinError('')
@@ -342,76 +319,6 @@ export default function Settings() {
     if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
     setAdPin(null)
     setAdPinLoading(false)
-  }, [])
-
-  // --- RealDebrid device code flow ---
-  const handleRdCodeStart = useCallback(async () => {
-    setRdCodeError('')
-    setRdCodeLoading(true)
-    setRdCode(null)
-    if (rdCodeTimerRef.current) clearInterval(rdCodeTimerRef.current)
-    try {
-      const code = await rdGetDeviceCode()
-      if (!code) {
-        setRdCodeError('No se pudo obtener el código de dispositivo')
-        setRdCodeLoading(false)
-        return
-      }
-      setRdCode(code)
-      // Poll for credentials, then exchange for token
-      const startTime = Date.now()
-      rdCodeTimerRef.current = setInterval(async () => {
-        if (rdCodePollingRef.current) return
-        if (Date.now() - startTime > code.expires_in * 1000) {
-          clearInterval(rdCodeTimerRef.current)
-          setRdCodeError('El código ha expirado')
-          setRdCode(null)
-          setRdCodeLoading(false)
-          return
-        }
-        rdCodePollingRef.current = true
-        try {
-          // Step 1: poll for client credentials
-          const creds = await rdGetCredentials(code.device_code)
-          if (!creds) {
-            clearInterval(rdCodeTimerRef.current)
-            setRdCodeError('Error al verificar credenciales')
-            setRdCode(null)
-            setRdCodeLoading(false)
-            return
-          }
-          if (creds.pending) return // keep polling
-          // Step 2: exchange credentials for access token
-          clearInterval(rdCodeTimerRef.current)
-          const tokenResult = await rdGetToken(creds.client_id, creds.client_secret, code.device_code)
-          if (tokenResult?.access_token) {
-            localStorage.setItem('octostream_realdebrid_token', tokenResult.access_token)
-            setRdToken(tokenResult.access_token)
-            setRdCode(null)
-            setRdCodeLoading(false)
-            setRdSaved(true)
-            setTimeout(() => setRdSaved(false), 2000)
-          } else {
-            setRdCodeError('No se pudo obtener el token de acceso')
-            setRdCode(null)
-            setRdCodeLoading(false)
-          }
-        } catch (e) {
-          setRdCodeError(e?.message || 'Error al verificar credenciales')
-        } finally {
-          rdCodePollingRef.current = false
-        }
-      }, (code.interval || 5) * 1000)
-    } catch (e) {
-      setRdCodeError(e?.message || 'Error al obtener código')
-      setRdCodeLoading(false)
-    }
-  }, [])
-
-  const handleRdCodeCancel = useCallback(() => {
-    if (rdCodeTimerRef.current) clearInterval(rdCodeTimerRef.current)
-    setRdCode(null)
-    setRdCodeLoading(false)
   }, [])
 
   return (
@@ -733,7 +640,7 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* AllDebrid and RealDebrid moved to Debrid tab */}
+          {/* AllDebrid moved to Debrid tab */}
 
           {/* HDFull credentials */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
@@ -997,115 +904,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* RealDebrid */}
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Download className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">RealDebrid API Token</h3>
-                <p className="text-dark-400 text-sm">
-                  Desbloquea voe, mixdrop, streamtape, upstream y torrents vía RealDebrid
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
-                  <Key size={14} />
-                  API Token
-                </label>
-                <input
-                  type="password"
-                  value={rdToken}
-                  onChange={e => setRdToken(e.target.value)}
-                  placeholder="Introduce tu RealDebrid API token"
-                  className="input w-full"
-                  onKeyDown={e => e.key === 'Enter' && handleRdSave()}
-                />
-              </div>
-
-              {rdSaved && (
-                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
-                  <Check size={16} />
-                  Configuración guardada correctamente
-                </div>
-              )}
-
-              <button onClick={handleRdSave} className="btn-primary">
-                <Check size={18} />
-                Guardar
-              </button>
-            </div>
-
-            {/* Device code flow */}
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-3">¿O conecta tu cuenta con un código de dispositivo:</p>
-              {!rdCode && !rdCodeLoading && (
-                <button onClick={handleRdCodeStart} className="btn-secondary">
-                  <Key size={16} />
-                  Obtener código de dispositivo
-                </button>
-              )}
-              {rdCodeLoading && !rdCode && (
-                <div className="flex items-center gap-2 text-dark-400 text-sm">
-                  <OctoLoader size={16} />
-                  Obteniendo código...
-                </div>
-              )}
-              {rdCode && (
-                <div className="bg-primary-600/10 border border-primary-600/30 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="text-2xl font-bold text-primary-400 tracking-wider">{rdCode.user_code}</div>
-                    <div className="flex items-center gap-1 text-dark-400 text-sm">
-                      <OctoLoader size={14} />
-                      Esperando activación...
-                    </div>
-                  </div>
-                  <a
-                    href={rdCode.verification_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-primary-400 text-sm hover:text-primary-300"
-                  >
-                    Introduce el código en real-debrid.com/device
-                    <ExternalLink size={14} />
-                  </a>
-                  <button onClick={handleRdCodeCancel} className="text-dark-400 text-sm hover:text-red-400">
-                    Cancelar
-                  </button>
-                </div>
-              )}
-              {rdCodeError && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3 mt-2">
-                  <AlertCircle size={16} />
-                  {rdCodeError}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener un API token?</p>
-              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
-                <li>Regístrate en real-debrid.com (servicio de pago, ~3€/mes)</li>
-                <li>Ve a Configuración → API</li>
-                <li>Copia tu API token</li>
-                <li>Pégalo arriba</li>
-              </ol>
-              <a
-                href="https://real-debrid.com/api"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
-              >
-                Ir a real-debrid.com
-                <ExternalLink size={14} />
-              </a>
-            </div>
-          </div>
-
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
@@ -1118,18 +916,6 @@ export default function Settings() {
                 ) : (
                   <span className="flex items-center gap-1 text-dark-500">
                     <AlertCircle size={14} /> No configurada
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-dark-400">RealDebrid API Token</span>
-                {localStorage.getItem('octostream_realdebrid_token') ? (
-                  <span className="flex items-center gap-1 text-green-400">
-                    <Check size={14} /> Configurado
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-dark-500">
-                    <AlertCircle size={14} /> No configurado
                   </span>
                 )}
               </div>
