@@ -3,7 +3,7 @@ import { pluginManager } from '../plugins/manager.js'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 import { useTranslation } from '../i18n/index.js'
-import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play } from 'lucide-react'
+import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
 import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
@@ -211,6 +211,7 @@ function normalizeMarcaMatch(m, round, leagueSlug, idx) {
     id: `marca-${leagueSlug}-j${round}-${m.home.id || m.home.name}-${m.away.id || m.away.name}-${idx}`,
     type: 'marca',
     name: `${m.home.name} vs ${m.away.name}`,
+    _sofaSport: 'football',
     _home: { name: m.home.name, logo: m.home.logo },
     _away: { name: m.away.name, logo: m.away.logo },
     _score: score,
@@ -260,6 +261,47 @@ function formatKickoff(ms) {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${time}`
 }
 
+// Icono del deporte cuando no hay escudo/foto (como hace la propia FCTV):
+// por sportType numérico (FCTV) o slug de Sofascore (DLive). Marca es fútbol.
+const SPORT_ICON_BY_TYPE = {
+  1: Goal, 2: Dribbble, 3: CircleDot, 4: CircleDot, 6: CircleDot,
+  7: Gauge, 8: Shield, 9: Shield, 10: Flag, 11: Snowflake,
+  12: Zap, 13: CircleDot, 14: Swords, 15: Bike, 16: Hand,
+}
+const SPORT_ICON_BY_SLUG = {
+  football: Goal, basketball: Dribbble, tennis: CircleDot, baseball: CircleDot,
+  cricket: CircleDot, motorsport: Gauge, rugby: Shield,
+  'american-football': Shield, 'aussie-rules': Flag, 'ice-hockey': Snowflake,
+  badminton: Zap, volleyball: CircleDot, mma: Swords, cycling: Bike,
+  handball: Hand,
+}
+const sportIconFor = (item) =>
+  SPORT_ICON_BY_TYPE[item?._sportType]
+  || SPORT_ICON_BY_SLUG[item?._sofaSport]
+  || (item?.type === 'marca' ? Goal : Trophy)
+
+// Escudo con cadena de respaldo: logo → logoAlt (parejas de dobles existen
+// como "team" en Sofascore) → icono del deporte.
+const TeamLogo = memo(function TeamLogo({ logo, logoAlt, Icon, iconClass = 'w-8 h-8' }) {
+  const urls = useMemo(() => [logo, logoAlt].filter(Boolean), [logo, logoAlt])
+  const [idx, setIdx] = useState(0)
+  useEffect(() => setIdx(0), [logo, logoAlt])
+  if (!urls.length || idx >= urls.length) {
+    const I = Icon || Trophy
+    return <I className={`${iconClass} text-dark-500`} aria-hidden="true" />
+  }
+  return (
+    <img
+      key={urls[idx]}
+      src={urls[idx]}
+      alt=""
+      loading="lazy"
+      onError={() => setIdx(i => i + 1)}
+      className="max-w-full max-h-full object-contain"
+    />
+  )
+})
+
 // Tarjeta grande de partido: escudos de ambos equipos, marcador/hora y estado.
 const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, finishedLabel, loadingLabel, initial }) {
   const home = item._home
@@ -268,6 +310,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
   const hasScore = score?.home != null && score?.away != null
   const kickoff = formatKickoff(item._matchDate)
   const live = item._isLive
+  const SportIcon = sportIconFor(item)
   // Un finalizado con kickoff en el futuro es un falso positivo (el proveedor
   // lo marcó live antes del saque): mostrar la hora, no FINALIZADO.
   const finished = item._justFinished && (!item._matchDate || item._matchDate <= Date.now())
@@ -286,9 +329,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
       <div className="flex items-center justify-center gap-4 w-full">
         <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
           <div className="w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
-            {home?.logo && (
-              <img src={home.logo} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none' }} className="max-w-full max-h-full object-contain" />
-            )}
+            <TeamLogo logo={home?.logo} logoAlt={home?.logoAlt} Icon={SportIcon} />
           </div>
           <span className="text-sm font-medium text-white leading-tight line-clamp-2 break-words w-full">
             {home?.name || '—'}
@@ -328,9 +369,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
 
         <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
           <div className="w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
-            {away?.logo && (
-              <img src={away.logo} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none' }} className="max-w-full max-h-full object-contain" />
-            )}
+            <TeamLogo logo={away?.logo} logoAlt={away?.logoAlt} Icon={SportIcon} />
           </div>
           <span className="text-sm font-medium text-white leading-tight line-clamp-2 break-words w-full">
             {away?.name || '—'}
@@ -349,6 +388,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
 const LeagueCard = memo(function LeagueCard({ group, onOpen, matchesLabel, liveLabel, initial }) {
   const liveCount = group.items.filter(i => i._isLive).length
   const isLiveAll = !!group.liveAll
+  const GroupIcon = sportIconFor(group.items[0])
   return (
     <button
       type="button"
@@ -366,9 +406,9 @@ const LeagueCard = memo(function LeagueCard({ group, onOpen, matchesLabel, liveL
               <Play size={18} className="text-white fill-white translate-x-0.5" />
             </span>
           </span>
-        ) : group.logo ? (
-          <img src={group.logo} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none' }} className="max-w-full max-h-full object-contain" />
-        ) : null}
+        ) : (
+          <TeamLogo logo={group.logo} Icon={GroupIcon} iconClass="w-10 h-10" />
+        )}
       </div>
       <span className="text-base font-semibold text-white leading-tight line-clamp-2 w-full">
         {group.name}

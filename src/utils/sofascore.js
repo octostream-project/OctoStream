@@ -22,12 +22,40 @@ const teamImg = (id) => `${SOFA_API}/team/${id}/image`
 const playerImg = (id) => `${SOFA_API}/player/${id}/image`
 export const tournamentImg = (id) => `${SOFA_API}/unique-tournament/${id}/image`
 
+// Deportes individuales: home/away son jugadores, no equipos. La foto cuelga
+// de /player/{id}/image (los dobles existen como "team" → logoAlt) y el
+// casado es por apellido — FCTV da "Apellido I." y las iniciales no comparan.
+const INDIVIDUAL_SPORTS = new Set([
+  'tennis', 'badminton', 'table-tennis', 'mma', 'boxing', 'darts',
+  'snooker', 'squash', 'esports',
+])
+
+// Apellidos = tokens de más de una letra (descarta iniciales sueltas).
+const surnameTokens = (name) => normTeam(name).split(' ').filter(t => t.length > 1)
+
+// Casado por apellido para deportes individuales: "Sinner J." ⇔ "Jannik
+// Sinner". Dobles ("A / B") casan si cualquier apellido coincide.
+const playersMatch = (a, b) => {
+  if (teamsMatch(a, b)) return true
+  const sa = surnameTokens(a)
+  if (!sa.length) return false
+  const sb = new Set(surnameTokens(b))
+  return sa.some(t => sb.has(t))
+}
+
 // El CDN de logos de FCTV (logos*.<dominio-rotativo>.cfd) está muerto:
 // NXDOMAIN incluso en DNS público. Tratar esos URLs como "sin logo".
 const isDeadLogo = (u) => !u || /^https?:\/\/logos\d*\.[a-z0-9-]+\.cfd\//i.test(u)
 
 const LIVE_TTL = 60 * 1000
 const liveCache = new Map() // sport slug → { ts, events }
+
+const sofaEvent = (e) => ({
+  home: e.homeTeam?.name, homeId: e.homeTeam?.id,
+  away: e.awayTeam?.name, awayId: e.awayTeam?.id,
+  utId: e.tournament?.uniqueTournament?.id,
+  tournament: e.tournament?.uniqueTournament?.name || e.tournament?.name || null,
+})
 
 // Los caches por sesión crecen con cada nombre único buscado; en un TV box
 // con poca RAM conviene acotarlos (borra la entrada más antigua al llenarse).
@@ -43,12 +71,7 @@ async function sofaLiveEvents(slug, signal) {
   let events = []
   try {
     const data = await httpGetJson(`${SOFA_API}/sport/${slug}/events/live`, {}, signal)
-    events = (data?.events || []).map(e => ({
-      home: e.homeTeam?.name, homeId: e.homeTeam?.id,
-      away: e.awayTeam?.name, awayId: e.awayTeam?.id,
-      utId: e.tournament?.uniqueTournament?.id,
-      tournament: e.tournament?.uniqueTournament?.name || e.tournament?.name || null,
-    }))
+    events = (data?.events || []).map(sofaEvent)
   } catch { /* offline / challenge — pasada de búsqueda cubre */ }
   cacheSet(liveCache, slug, { ts: Date.now(), events })
   return events
@@ -57,26 +80,51 @@ async function sofaLiveEvents(slug, signal) {
 // Búsqueda de equipo/jugador por nombre → id de imagen. Cacheada por sesión;
 // los ids de Sofascore son estables.
 const entityCache = new Map() // `${slug}|${norm}` → {id,type} | null
-const lastToken = (s) => normTeam(s).split(' ').pop() || ''
+
+// Variantes de query: el nombre tal cual, el primer jugador de una pareja de
+// dobles ("A / B"), el nombre sin cualificadores ("(F)", "Women", "U21"…
+// → el equipo base como escudo de respaldo) y el apellido suelto para
+// jugadores individuales ("Sinner J." → "sinner").
+function nameQueries(name, slug) {
+  const qs = [name]
+  const pair = String(name).split(/\s*[\/&]\s*/).filter(Boolean)
+  if (pair.length > 1) qs.push(pair[0])
+  const clean = String(name)
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/\b(women|woman|fem|femenina?|f|w)\b/gi, ' ')
+    .replace(/\b(u1[6-9]|u2[0-3]|reserves?|ii|b)\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim()
+  if (clean && clean !== name) qs.push(clean)
+  if (INDIVIDUAL_SPORTS.has(slug)) {
+    const sn = surnameTokens(name).join(' ')
+    if (sn && !qs.includes(sn)) qs.push(sn)
+  }
+  return qs
+}
 
 async function sofaFindEntity(name, slug, signal) {
   const key = `${slug}|${normTeam(name)}`
   if (entityCache.has(key)) return entityCache.get(key)
   let found = null
   let ok = false
-  try {
-    const data = await httpGetJson(`${SOFA_API}/search/all?q=${encodeURIComponent(name)}`, {}, signal)
-    ok = true
-    const cands = (data?.results || [])
-      .filter(r => r.type === 'team' || r.type === 'player')
-    const wantTok = lastToken(name)
-    const hit = cands.find(r => teamsMatch(r.entity?.name, name))
-      // Deportes individuales: FCTV suele dar "Apellido N." — casar por la
-      // última palabra si no hubo match directo. wantTok vacío nunca casa
-      // ('' === '' sería falso positivo → logo equivocado).
-      || (wantTok && cands.find(r => r.type === 'player' && lastToken(r.entity?.name) === wantTok))
-    if (hit) found = { id: hit.entity.id, type: hit.type }
-  } catch { /* sin resultado */ }
+  for (const q of nameQueries(name, slug)) {
+    try {
+      const data = await httpGetJson(`${SOFA_API}/search/all?q=${encodeURIComponent(q)}`, {}, signal)
+      ok = true
+      const cands = (data?.results || [])
+        .filter(r => r.type === 'team' || r.type === 'player')
+      // Preferir candidatos del mismo deporte cuando el resultado lo declara
+      // ("Arsenal" también existe en baloncesto).
+      const sameSport = cands.filter(r =>
+        !slug || !r.entity?.sport?.slug || r.entity.sport.slug === slug)
+      const pool = sameSport.length ? sameSport : cands
+      const hit = pool.find(r => teamsMatch(r.entity?.name, name))
+        || (INDIVIDUAL_SPORTS.has(slug)
+            && pool.find(r => r.type === 'player' && playersMatch(r.entity?.name, name)))
+        || (q !== name && pool.find(r => teamsMatch(r.entity?.name, q)))
+      if (hit) { found = { id: hit.entity.id, type: hit.type }; break }
+    } catch { /* sin resultado */ }
+  }
   // Solo cachear respuestas reales: un error de red transitorio no debe
   // dejar el logo muerto hasta reiniciar la app.
   if (ok) cacheSet(entityCache, key, found)
@@ -203,7 +251,7 @@ export async function fetchLeagueEvents(leagueName, slug = 'football', signal, u
   return out
 }
 
-const SEARCH_CAP = 30 // máx. consultas de búsqueda por carga de catálogo
+const SEARCH_CAP = 60 // máx. consultas de búsqueda por carga de catálogo
 const LEAGUE_CAP = 20 // máx. búsquedas de liga por carga
 
 async function mapLimit(list, limit, fn) {
@@ -218,7 +266,7 @@ async function mapLimit(list, limit, fn) {
 // pasada: búsqueda por nombre, acotada por SEARCH_CAP. Best-effort.
 // opts.deep=false → solo la pasada live (rápida): las búsquedas por nombre
 // se hacen en segundo plano tras pintar las tarjetas.
-const ENRICH_BUDGET_MS = 8000  // la llamada getCatalog del manager corta a 15s
+const ENRICH_BUDGET_MS = 12000  // la pasada deep solo corre en background tras pintar
 const QUICK_BUDGET_MS = 4000
 
 export async function enrichLogos(items, signal, { deep = true } = {}) {
@@ -251,12 +299,23 @@ async function enrichLogosInner(items, signal, deep) {
 
   await Promise.all([...bySlug].map(async ([slug, list]) => {
     const events = await sofaLiveEvents(slug, signal)
+    const individual = INDIVIDUAL_SPORTS.has(slug)
+    const sideOk = individual ? playersMatch : teamsMatch
+    const img = individual ? playerImg : teamImg
     for (const it of list) {
       const ev = events.find(e =>
-        teamsMatch(e.home, it._home?.name) && teamsMatch(e.away, it._away?.name))
+        sideOk(e.home, it._home?.name) && sideOk(e.away, it._away?.name))
       if (!ev) continue
-      if (it._home && ev.homeId) it._home.logo = teamImg(ev.homeId)
-      if (it._away && ev.awayId) it._away.logo = teamImg(ev.awayId)
+      // Dobles: la pareja existe como entidad "team" — logoAlt por si el
+      // endpoint de jugador no la tiene.
+      if (it._home && ev.homeId) {
+        it._home.logo = img(ev.homeId)
+        if (individual) it._home.logoAlt = teamImg(ev.homeId)
+      }
+      if (it._away && ev.awayId) {
+        it._away.logo = img(ev.awayId)
+        if (individual) it._away.logoAlt = teamImg(ev.awayId)
+      }
       if (it._league && ev.utId) it._league.logo = tournamentImg(ev.utId)
       // Sofascore sabe la competición real: los providers a veces etiquetan
       // mal la liga (Copa del Rey listada bajo La Liga). Re-etiquetar cuando
