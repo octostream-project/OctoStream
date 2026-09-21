@@ -1039,13 +1039,32 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: solo la actual y las futuras — las ya jugadas se
-  // ocultan.
-  const visibleJornadas = activeLeague?.marca
-    ? activeLeague.jornadas.filter(j =>
-        j.items.length > 0 &&
-        (activeLeague.currentRound == null || j.round >= activeLeague.currentRound))
-    : []
+  // Jornadas visibles: solo la anterior y la siguiente. La "anterior" es la
+  // jornada en curso (con partidos de hoy) o la última jugada — esta se borra
+  // al terminar el día de su último partido. La "superior" es la próxima:
+  // si la jornada en curso ya está en juego, la superior es cur+1; si aún no
+  // ha empezado, la propia cur es la superior y la anterior es cur-1.
+  const visibleJornadas = activeLeague?.marca ? (() => {
+    const cur = activeLeague.currentRound
+    const list = activeLeague.jornadas.filter(j => j.items.length)
+    if (cur == null) return list
+    const todayStart = new Date().setHours(0, 0, 0, 0)
+    // Fechas de todos los partidos de la jornada, incluidos los movidos a
+    // la sección EN DIRECTO (salieron de j.items).
+    const datesOf = (j) => [
+      ...j.items.map(i => i._matchDate || 0),
+      ...activeLeague.liveItems.filter(i => i._round === j.round).map(i => i._matchDate || 0),
+    ]
+    const curJ = list.find(j => j.round === cur)
+    const curInPlay = !!curJ && (activeLeague.liveItems.some(i => i._round === cur)
+      || datesOf(curJ).some(d => d && d <= Date.now()))
+    return list.filter(j => {
+      if (j.round === cur) return true
+      if (j.round === cur + 1) return curInPlay
+      if (j.round === cur - 1) return Math.max(0, ...datesOf(j)) >= todayStart
+      return false
+    })
+  })() : []
   // Partidos visibles en ligas sin calendario: directos, recién finalizados
   // y próximos — los jugados hace >3h ya no se muestran.
   const visibleFlatItems = activeLeague && !activeLeague.marca
