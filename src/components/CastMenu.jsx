@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Tv, Wifi, Copy, Check, X, MonitorSmartphone, ScanSearch, ChevronDown, ChevronUp, ScreenShare } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
-import { scanDevices, sendPlay, pingDevice, getLastDevice } from '../utils/remotePlay.js'
+import { scanDevices, sendPlay, pingDevice, getLastDevice, getDiscovered } from '../utils/remotePlay.js'
 import { isAndroidNative } from '../utils/platform.js'
 import { openMiracast, openDlna } from '../utils/exoPlayer.js'
 
@@ -46,6 +46,10 @@ export default function CastMenu({
     setScanPct(0)
     scanAbort.current = false
     try {
+      // UDP broadcast: los que se anuncian aparecen al instante; el barrido
+      // del /24 sigue después para versiones viejas sin anuncio.
+      const udp = await getDiscovered()
+      if (!scanAbort.current && udp.length) setDevices(udp)
       const found = await scanDevices((done, total) => {
         if (!scanAbort.current) setScanPct(Math.round((done / total) * 100))
       })
@@ -62,8 +66,9 @@ export default function CastMenu({
     setSendState('sending')
     setSendTarget(device)
     try {
-      const ok = await sendPlay(device.url || `http://${device.ip}:8765`, payload())
+      const ok = await sendPlay(device.url || `http://${device.ip}:8765`, payload(), device)
       if (ok === 'pair') { setSendState('pair'); return }
+      if (ok === 'denied') { setSendState('denied'); return }
       if (!ok) throw new Error('respuesta inválida')
       setSendState('sent')
       setLastDevice(device)
@@ -86,7 +91,7 @@ export default function CastMenu({
       setSendState('error')
       return
     }
-    await handleSend({ ip, url, name: ping.model || 'OctoStream' }, true)
+    await handleSend({ ip, url, name: ping.alias || ping.model || 'OctoStream', deviceId: ping.deviceId, fingerprint: ping.fingerprint, alias: ping.alias }, true)
   }
 
   return (
@@ -184,6 +189,9 @@ export default function CastMenu({
             )}
             {sendState === 'pair' && (
               <p className="text-xs text-amber-400 px-3 py-1">Acepta la solicitud en la pantalla del otro dispositivo y reintenta</p>
+            )}
+            {sendState === 'denied' && (
+              <p className="text-xs text-red-400 px-3 py-1">{sendTarget?.name || 'El dispositivo'} rechazó el emparejamiento</p>
             )}
             {sendState === 'error' && (
               <p className="text-xs text-red-400 px-3 py-1">No se pudo enviar. ¿Está OctoStream abierto en el otro dispositivo?</p>
