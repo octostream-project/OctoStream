@@ -11,9 +11,11 @@ export default defineConfig({
   base: './',
   resolve: {
     alias: {
-      '@octostream/exo-player': path.resolve(projectRoot, 'capacitor-plugins/exoplayer/dist/esm/index.js'),
-      '@octostream/youtube': path.resolve(projectRoot, 'capacitor-plugins/youtube/dist/esm/index.js'),
-      '@octostream/torrent-engine': path.resolve(projectRoot, 'capacitor-plugins/torrent-engine/dist/esm/index.js'),
+      // Alias a src/ (no dist/): los dist no están en git y Vite transpila TS.
+      // Así el build funciona en CI/fresh clone sin compilar los plugins antes.
+      '@octostream/exo-player': path.resolve(projectRoot, 'capacitor-plugins/exoplayer/src/index.ts'),
+      '@octostream/youtube': path.resolve(projectRoot, 'capacitor-plugins/youtube/src/index.ts'),
+      '@octostream/torrent-engine': path.resolve(projectRoot, 'capacitor-plugins/torrent-engine/src/index.ts'),
       '@optopus/sync-server': path.resolve(projectRoot, 'capacitor-plugins/sync-server/src/index.js'),
       '@optopus/app-updater': path.resolve(projectRoot, 'capacitor-plugins/app-updater/src/index.js'),
       '@octostream/palantir': path.resolve(projectRoot, 'capacitor-plugins/palantir/src/index.js'),
