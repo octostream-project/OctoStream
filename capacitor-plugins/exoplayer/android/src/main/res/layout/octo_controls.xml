@@ -205,10 +205,10 @@
             android:layout_height="56dp"
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp"
-            android:background="@drawable/circle_accent"
+            android:background="@android:color/transparent"
             android:contentDescription="Reproducir o pausar"
             android:scaleType="fitCenter"
-            android:padding="14dp"
+            android:padding="10dp"
             android:src="@drawable/exo_styled_controls_play" />
 
         <ImageButton
