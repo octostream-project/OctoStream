@@ -10,7 +10,7 @@ import { isAndroidNative } from './platform.js'
 import { httpGetJson } from './httpClient.js'
 
 export const UPDATE_MANIFEST_URL =
-  'https://git.disroot.org/aka.kuro/OctoStream/raw/branch/main/version.json'
+  'https://raw.githubusercontent.com/octostream-project/OctoStream/main/version.json'
 
 let lastCheck = null
 

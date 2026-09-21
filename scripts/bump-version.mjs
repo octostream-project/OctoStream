@@ -5,14 +5,14 @@
 // Uso:
 //   node scripts/bump-version.mjs <versionName> [apkPath] [apkUrl] [notes]
 //   node scripts/bump-version.mjs 1.1 build/app-release.apk \
-//     https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.1/octostream-1.1.apk \
+//     https://github.com/octostream-project/OctoStream/releases/download/v1.1/octostream-1.1.apk \
 //     "Novedades de la versión"
 //
 // Flujo de release:
 //   1. node scripts/bump-version.mjs 1.1
 //   2. npm run android:build:release   (genera android/app/build/outputs/apk/release/app-release.apk)
-//   3. node scripts/bump-version.mjs 1.1 <apk> <url-del-release-en-disroot>
-//   4. git commit + tag + push, y sube el APK a la release en Disroot
+//   3. node scripts/bump-version.mjs 1.1 <apk> <url-del-release-en-github>
+//   4. git commit + tag + push, y sube el APK a la release en GitHub
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -61,7 +61,7 @@ const sha256s = {}
 for (const abi of ABIS) {
   const p = `${splitDir}/app-${abi}-release.apk`
   if (existsSync(p)) {
-    apkUrls[abi] = `https://git.disroot.org/aka.kuro/OctoStream/releases/download/v${versionName}/octostream-${versionName}-${abi}.apk`
+    apkUrls[abi] = `https://github.com/octostream-project/OctoStream/releases/download/v${versionName}/octostream-${versionName}-${abi}.apk`
     sha256s[abi] = createHash('sha256').update(readFileSync(p)).digest('hex')
   }
 }
