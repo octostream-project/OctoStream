@@ -1,16 +1,16 @@
 {
-  "versionCode": 143,
-  "versionName": "1.43",
+  "versionCode": 144,
+  "versionName": "1.44",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-arm64-v8a.apk",
-  "sha256": "1a998c06c90e9ed3025697a2d101ea35fd5e001eb7ad9562b42e5331e585055b",
-  "notes": "Gnula restaurada (nuevo mirror), FlizzMovies arreglado, idioma en todos los enlaces",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.44/OctoStream-1.44-arm64-v8a.apk",
+  "sha256": "0031d5f08fdc96a20042ff34e6ed6711ac587367a14df696a2e866ea16d21964",
+  "notes": "Player: sin círculo morado en play; reloj arriba a la derecha",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.44/OctoStream-1.44-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.44/OctoStream-1.44-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "1a998c06c90e9ed3025697a2d101ea35fd5e001eb7ad9562b42e5331e585055b",
-    "armeabi-v7a": "1368d75baa3dcaa1b8944132bd86f076046a03185fd90d641e0350a9bec21627"
+    "arm64-v8a": "0031d5f08fdc96a20042ff34e6ed6711ac587367a14df696a2e866ea16d21964",
+    "armeabi-v7a": "d234f9c33e02ab5dff8d07c84d1df9b3e3e5695e9aa3408a34675fc7557a59ed"
   }
 }
