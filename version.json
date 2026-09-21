@@ -1,16 +1,16 @@
 {
-  "versionCode": 145,
-  "versionName": "1.45",
+  "versionCode": 146,
+  "versionName": "1.46",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.45/OctoStream-1.45-arm64-v8a.apk",
-  "sha256": "dcafdbfd2a2e94d9b265ae0d87b7a125c41c1ce5c36b201db448c16738dcf72d",
-  "notes": "Salvapantallas: tocar la pantalla en móvil siempre lo desactiva",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-arm64-v8a.apk",
+  "sha256": "6d223d8bc8a85588be74cba45f60f08fca3f35b6585fe3d9aa15e2c925b81838",
+  "notes": "Mando: play/pausa, rebobinar/avance y zap con NEXT/PREV en directo",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.45/OctoStream-1.45-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.45/OctoStream-1.45-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.46/OctoStream-1.46-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "dcafdbfd2a2e94d9b265ae0d87b7a125c41c1ce5c36b201db448c16738dcf72d",
-    "armeabi-v7a": "9e5decb0066c12ee5f2a8a81a1fb7877c591c518f74f8c170259276d4760d325"
+    "arm64-v8a": "6d223d8bc8a85588be74cba45f60f08fca3f35b6585fe3d9aa15e2c925b81838",
+    "armeabi-v7a": "e8a98944c1ec49e6acbd9e1793c8adfc1c455abbe588e3892c7e19732c1f2045"
   }
 }
