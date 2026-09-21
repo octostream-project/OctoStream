@@ -1,51 +1,41 @@
 # OctoStream
 
-Media center multiplataforma con sistema de plugins. Soporta Web, Electron (Linux/Windows) y Android (Capacitor).
+Media center para **Android y Android TV** con sistema de plugins.
 
-**[Web oficial](https://octostream-project.github.io/OctoStream/) · [Descargar APK](https://github.com/octostream-project/OctoStream/releases/latest) · [Guía](https://octostream-project.github.io/OctoStream/guia.html)**
+**[Web oficial](https://octostream-project.github.io/OctoStream/) · [Descargar APK](https://github.com/octostream-project/OctoStream/releases/latest) · [Guía de uso](https://octostream-project.github.io/OctoStream/guia.html)**
+
+## Descargar
+
+La app no está en Google Play — se instala con el APK y después **se actualiza sola** desde la app.
+
+| APK | Dispositivo |
+|-----|-------------|
+| `arm64-v8a` | Casi todo: móviles modernos, Chromecast Google TV, Nvidia Shield, Fire TV recientes |
+| `armeabi-v7a` | Dispositivos antiguos de 32 bits (boxes baratas, Fire TV Stick viejas) |
+| `x86_64` | Emuladores, Android x86 en PC, boxes Intel |
+
+→ [Descargar la última versión](https://github.com/octostream-project/OctoStream/releases/latest)
 
 ## Características
 
-- **Sistema de plugins**: Arquitectura extensible
-- **Reproductor de video**: Soporta MP4, HLS (m3u8), DASH/Widevine DRM en Android y enlaces embed (iframe)
-- **Catálogos**: Películas, Series, TV en vivo
-- **Búsqueda global**: Busca en todos los plugins instalados
-- **Favoritos e historial**: Guarda tu contenido preferido
-- **Multiplataforma**: Web, Linux, Windows, Android
+- **Reproductor nativo Media3/ExoPlayer**: HLS, DASH, MP4, subtítulos y Widevine DRM sin problemas de CORS.
+- **Android TV de verdad**: navegación D-pad con foco visible, teclas multimedia del mando (⏯ ⏪ ⏩, zap de canal), salvapantallas que se quita con un toque y gestión correcta del botón atrás.
+- **Deportes en directo**: agenda de fútbol, tenis, baloncesto, F1… con escudos de equipos, fotos de jugadores y solo las jornadas relevantes.
+- **Sync estilo LocalSend**: los dispositivos OctoStream se descubren solos en la red local con nombre propio, emparejamiento por código de verificación y tokens — envía contenido a la TV y sincroniza historial/favoritos.
+- **Torrents integrados**: reproducción directa de magnets con jlibtorrent.
+- **Sistema de plugins**: catálogos, búsqueda unificada, historial, favoritos y "seguir viendo".
 
-## Instalación
+## Desarrollo
 
 ```bash
 npm install
-```
 
-## Desarrollo (Web)
-
-```bash
-npm run dev
-```
-
-Abre http://localhost:5173
-
-## Desarrollo (Electron)
-
-```bash
-npm run electron:dev
-```
-
-## Build Web
-
-```bash
+# Build web (dist/)
 npm run build
+
+# Tests
+npm test
 ```
-
-## Build Electron (Linux/Windows)
-
-```bash
-npm run electron:build
-```
-
-Los binarios se generan en `dist-electron/`.
 
 ## Android (Capacitor)
 
@@ -57,33 +47,33 @@ npm run android:add
 # Sincronizar y ejecutar en un dispositivo/emulador
 npm run android:run
 
-# Construir APK de debug
+# APK de debug
 npm run android:build
 
-# Construir APK de release (requiere un keystore configurado)
+# APK de release (requiere el keystore de firma)
 npm run android:build:release
 ```
 
-La reproducción nativa en Android usa el plugin propio `@optopus/exo-player`
-(`capacitor-plugins/exoplayer`) basado en Media3 ExoPlayer, que soporta HLS, DASH y
-Widevine DRM sin problemas de CORS.
+La reproducción nativa usa el plugin propio `@optopus/exo-player`
+(`capacitor-plugins/exoplayer`) basado en Media3 ExoPlayer 1.10.1.
+SDK objetivo 34, mínimo 23. ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`.
 
-## Arquitectura de Plugins
+## Arquitectura de plugins
 
 Los plugins extienden la clase `Plugin` e implementan:
 
-- `getCatalog({ type, id, skip, top })` - Devuelve items del catálogo
-- `getMeta({ type, id })` - Devuelve metadata de un item
-- `getStreams({ type, id })` - Devuelve fuentes de streaming
-- `search({ query })` - Búsqueda dentro del plugin
+- `getCatalog({ type, id, skip, top })` — items del catálogo
+- `getMeta({ type, id })` — metadata de un item
+- `getStreams({ type, id })` — fuentes de streaming
+- `search({ query })` — búsqueda dentro del plugin
 
 ### Tipos de stream soportados
 
 | Tipo | Descripción |
 |------|-------------|
-| `mp4` | Video directo MP4 |
-| `hls` | Stream HLS (m3u8) con hls.js |
-| `embed` / `iframe` | URL embebida en iframe |
+| `mp4` | Vídeo directo MP4 |
+| `hls` | Stream HLS (m3u8) |
+| `embed` / `iframe` | URL embebida |
 
 ### Crear un plugin personalizado
 
@@ -123,50 +113,21 @@ Registra el plugin en `src/plugins/manager.js`.
 optopus-stream/
 ├── android/             # Proyecto Android generado por Capacitor (ignorado en Git)
 ├── capacitor-plugins/
-│   └── exoplayer/       # Plugin Capacitor propio para ExoPlayer nativo en Android
-├── electron/            # Configuración Electron
-│   ├── main.js
-│   └── preload.js
+│   ├── exoplayer/       # Plugin Capacitor propio — ExoPlayer nativo
+│   ├── app-updater/     # Actualizador in-app (descarga + instala APK)
+│   ├── sync-server/     # Servidor LAN :8765 + discovery UDP :8766
+│   └── cloud-proxy/     # Proxy WARP para hosts con bloqueo regional
+├── docs/                # Web de GitHub Pages (octostream-project.github.io/OctoStream)
 ├── public/              # Assets estáticos y service worker
 ├── src/
-│   ├── components/      # Componentes UI
-│   │   ├── Sidebar.jsx
-│   │   ├── ContentCard.jsx
-│   │   ├── ContentRow.jsx
-│   │   ├── ContinueWatching.jsx
-│   │   ├── Hero.jsx
-│   │   └── VideoPlayer.jsx
-│   ├── pages/           # Páginas/Rutas
-│   │   ├── Home.jsx
-│   │   ├── Search.jsx
-│   │   ├── Details.jsx
-│   │   ├── Catalog.jsx
-│   │   ├── Favorites.jsx
-│   │   ├── History.jsx
-│   │   ├── Plugins.jsx
-│   │   ├── LiveTV.jsx
-│   │   └── Settings.jsx
-│   ├── plugins/         # Sistema de plugins
-│   │   ├── base.js      # Clases base
-│   │   ├── manager.js   # Gestor de plugins
-│   │   ├── builtIn/     # Plugins incluidos
-│   │   └── bundled/     # Plugins empaquetados
-│   │       └── tdtSpain/  # TDT España (modular: constants, cache, http, data, resolve, normalize, search)
-│   ├── store/
-│   │   └── useStore.js  # Estado global (Zustand)
-│   ├── utils/
-│   │   ├── storage.js   # Abstracción de almacenamiento (localStorage + Electron IPC)
-│   │   ├── httpClient.js  # Cliente HTTP multiplataforma (CapacitorHttp / fetch)
-│   │   ├── loadPlayerLibs.js  # Carga diferida de hls.js y shaka-player
-│   │   ├── exoPlayer.js # Wrapper JS del plugin ExoPlayer nativo
-│   │   └── hlsAndroidLoader.js  # Loader HLS para Android vía CapacitorHttp
-│   ├── App.jsx
-│   ├── main.jsx
-│   └── index.css
+│   ├── components/      # UI (VideoPlayer, CastMenu, UpdateChecker…)
+│   ├── pages/           # Home, Search, Details, LiveTV, Sports, Sync…
+│   ├── plugins/         # Sistema de plugins (manager + bundled)
+│   ├── store/           # Estado global (Zustand)
+│   └── utils/           # httpClient, exoPlayer, remotePlay, sofascore…
 ├── capacitor.config.json
 ├── vite.config.js
-├── tailwind.config.js
-└── package.json
+└── version.json         # Manifiesto del auto-updater
 ```
 
 ## Licencia
