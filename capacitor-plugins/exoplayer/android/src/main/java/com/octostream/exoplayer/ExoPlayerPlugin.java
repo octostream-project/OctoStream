@@ -3517,6 +3517,10 @@ public class ExoPlayerPlugin extends Plugin {
                         || code == KeyEvent.KEYCODE_MEDIA_PAUSE
                         || code == KeyEvent.KEYCODE_MEDIA_REWIND
                         || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                        || code == KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD
+                        || code == KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD
+                        || code == KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD
+                        || code == KeyEvent.KEYCODE_MEDIA_STEP_FORWARD
                         || code == KeyEvent.KEYCODE_MEDIA_NEXT
                         || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS
                         || code == KeyEvent.KEYCODE_MEDIA_STOP;
@@ -3558,19 +3562,29 @@ public class ExoPlayerPlugin extends Plugin {
                         if (isControlsVisible()) resetControlsTimer(); else showControls();
                         return true;
                     case KeyEvent.KEYCODE_MEDIA_REWIND:
+                    case KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD:
+                    case KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD:
                         seekByStep(-1);
                         if (isControlsVisible()) resetControlsTimer(); else showControls();
                         return true;
                     case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                    case KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD:
+                    case KeyEvent.KEYCODE_MEDIA_STEP_FORWARD:
                         seekByStep(1);
                         if (isControlsVisible()) resetControlsTimer(); else showControls();
                         return true;
+                    // Muchos mandos emiten ⏪/⏩ como PREVIOUS/NEXT, no como
+                    // REWIND/FFWD: en directo hacen zap; en VOD, seek.
                     case KeyEvent.KEYCODE_MEDIA_NEXT:
                         if (canZap) { zapChannel(1); return true; }
-                        break;
+                        seekByStep(1);
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
                     case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
                         if (canZap) { zapChannel(-1); return true; }
-                        break;
+                        seekByStep(-1);
+                        if (isControlsVisible()) resetControlsTimer(); else showControls();
+                        return true;
                 }
 
                 // Panel lateral abierto (canales o episodios): BACK/LEFT lo
