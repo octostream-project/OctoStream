@@ -2,6 +2,8 @@
 
 Media center multiplataforma con sistema de plugins. Soporta Web, Electron (Linux/Windows) y Android (Capacitor).
 
+**[Web oficial](https://octostream-project.github.io/OctoStream/) · [Descargar APK](https://github.com/octostream-project/OctoStream/releases/latest) · [Guía](https://octostream-project.github.io/OctoStream/guia.html)**
+
 ## Características
 
 - **Sistema de plugins**: Arquitectura extensible

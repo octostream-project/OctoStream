@@ -150,7 +150,7 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   silenciosa sin privilegios de sistema.
 - Flujo de release: `node scripts/bump-version.mjs <version>` →
   `npm run android:build:release` → subir el APK como asset a la release en
-  Disroot → `node scripts/bump-version.mjs <version> <apk> <url-asset>` →
+  GitHub → `node scripts/bump-version.mjs <version> <apk> <url-asset>` →
   commit + push del `version.json` resultante. El APK debe firmarse siempre
   con la misma keystore o la instalación fallará por conflicto de firma.
 
