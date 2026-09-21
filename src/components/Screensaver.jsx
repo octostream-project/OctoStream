@@ -9,17 +9,22 @@ import { useEffect, useRef } from 'react'
 export default function Screensaver({ onDismiss }) {
   const dismissedRef = useRef(false)
 
-  // Dismiss on any interaction
+  // Dismiss on any interaction. Capture + stopImmediatePropagation +
+  // preventDefault: el toque/tecla que despierta NO se propaga a la app
+  // (antes el tap en móvil descartaba en touchstart y el click sintetizado
+  // abría lo que quedaba debajo del dedo).
   useEffect(() => {
-    const dismiss = () => {
+    const dismiss = (e) => {
+      e?.preventDefault?.()
+      e?.stopImmediatePropagation?.()
       if (dismissedRef.current) return
       dismissedRef.current = true
       onDismiss?.()
     }
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'touchmove', 'wheel', 'click']
-    events.forEach(e => window.addEventListener(e, dismiss, { once: true, passive: true }))
+    events.forEach(e => window.addEventListener(e, dismiss, { once: true, capture: true }))
     return () => {
-      events.forEach(e => window.removeEventListener(e, dismiss))
+      events.forEach(e => window.removeEventListener(e, dismiss, { capture: true }))
     }
   }, [onDismiss])
 
@@ -53,7 +58,7 @@ export default function Screensaver({ onDismiss }) {
       {/* Hint at bottom */}
       <div className="absolute bottom-8 left-0 right-0 text-center">
         <p className="text-dark-600 text-sm animate-pulse">
-          Mueve el ratón o pulsa una tecla para continuar
+          Toca la pantalla o pulsa una tecla para continuar
         </p>
       </div>
 
