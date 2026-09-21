@@ -86,6 +86,7 @@ export async function playStream(options, onStateChange) {
     episodes: options.episodes || null,
     episodeIndex: options.episodeIndex ?? -1,
     longBuffering: options.longBuffering === true,
+    fastStart: options.fastStart === true,
     loadingText: options.loadingText || null,
   })
 }

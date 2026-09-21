@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { Search, Youtube, Clock, Eye, X, History, Radio, Filter, ArrowUpDown } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
-import { searchYouTube, searchYouTubeFull, resolveYouTubeStream, suggestYouTube } from '../utils/youtube.js'
+import { searchYouTube, searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube } from '../utils/youtube.js'
 import { isAndroidNative } from '../utils/platform.js'
 import { useStore } from '../store/useStore.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -321,6 +321,15 @@ export default function YouTube() {
     }
   }, [location.state])
 
+  // Prefetch de la resolución al mantener el foco en una tarjeta (~400ms):
+  // para cuando el usuario pulsa OK el stream ya está en caché y el vídeo
+  // arranca sin esperar el resolve de NewPipe.
+  const prefetchTimerRef = useRef(null)
+  const handleCardFocus = useCallback((url) => {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current)
+    prefetchTimerRef.current = setTimeout(() => prefetchYouTubeStream(url), 400)
+  }, [])
+
   // Ref to handlePlayVideo (defined later) for the "Continuar viendo" effect
   const handlePlayVideoRef = useRef(null)
 
@@ -439,6 +448,13 @@ export default function YouTube() {
           startTime,
           subtitles: stream.subtitles || [],
           direct: stream.direct === true,
+          fastStart: true,
+          // Si la URL firmada caduca (p.ej. servida desde la caché de
+          // resoluciones), el player re-resuelve el watch URL una vez.
+          _refreshUrl: async () => {
+            const fresh = await resolveYouTubeStream(item.url, { force: true })
+            return fresh?.url || null
+          },
           meta: { id: videoId, type: 'youtube', name: item.name },
         })
       } else {
@@ -641,6 +657,8 @@ export default function YouTube() {
                     className="bg-dark-800 rounded-lg overflow-hidden border border-dark-700 hover:border-primary-500 transition-colors cursor-pointer"
                     onClick={() => handlePlayVideo(item)}
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlayVideo(item))}
+                    onFocus={() => handleCardFocus(item.url)}
+                    onMouseEnter={() => handleCardFocus(item.url)}
                   >
                     <div className="relative aspect-video bg-dark-900">
                       {item.thumbnailUrl ? (
@@ -916,6 +934,8 @@ export default function YouTube() {
                     className="bg-dark-800 rounded-lg overflow-hidden border border-dark-700 hover:border-red-500 transition-colors cursor-pointer"
                     onClick={() => handlePlayVideo(item)}
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlayVideo(item))}
+                    onFocus={() => handleCardFocus(item.url)}
+                    onMouseEnter={() => handleCardFocus(item.url)}
                   >
                     <div className="relative aspect-video bg-dark-900">
                       {item.thumbnailUrl ? (
@@ -974,6 +994,8 @@ export default function YouTube() {
                     className="bg-dark-800 rounded-lg overflow-hidden border border-dark-700 hover:border-red-500 transition-colors cursor-pointer"
                     onClick={() => handlePlayVideo(item)}
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlayVideo(item))}
+                    onFocus={() => handleCardFocus(item.url)}
+                    onMouseEnter={() => handleCardFocus(item.url)}
                   >
                     <div className="relative aspect-video bg-dark-900">
                       {item.thumbnailUrl ? (

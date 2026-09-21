@@ -961,7 +961,14 @@ export default function Details() {
         const stream = await resolveYouTubeStream(url)
         if (stream) {
           console.log(`[Details] Trailer resolved via NewPipeExtractor: ${urlHost(stream.url)}`)
-          setTrailerStream(stream)
+          setTrailerStream({
+            ...stream,
+            fastStart: true,
+            _refreshUrl: async () => {
+              const fresh = await resolveYouTubeStream(url, { force: true })
+              return fresh?.url || null
+            },
+          })
         } else {
           console.warn('[Details] NewPipeExtractor failed, falling back to iframe')
           // Fallback: open iframe

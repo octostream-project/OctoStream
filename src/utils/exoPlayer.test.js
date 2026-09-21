@@ -93,6 +93,7 @@ describe('playStream', () => {
       episodes: null,
       episodeIndex: -1,
       longBuffering: false,
+      fastStart: false,
       loadingText: null,
     })
   })
