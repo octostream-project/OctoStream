@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OctoStream — Tu media center para Android y Android TV</title>
+<meta name="description" content="OctoStream: media center para Android y Android TV. Películas, series, deportes en directo, torrents y sincronización entre dispositivos.">
+<link rel="icon" href="assets/logo-symbol.png">
+<style>
+  :root {
+    --bg: #0a0e17;
+    --bg2: #0f1524;
+    --card: #141b2e;
+    --border: #1f2a44;
+    --text: #e6ecf5;
+    --muted: #8b96ad;
+    --cyan: #22d3ee;
+    --violet: #8b5cf6;
+    --grad: linear-gradient(120deg, #22d3ee, #8b5cf6);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(10,14,23,.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; gap: 14px; height: 64px; }
+  nav img { height: 34px; }
+  nav .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: .3px; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
+  nav .links a { color: var(--muted); font-size: .95rem; transition: color .15s; }
+  nav .links a:hover { color: var(--text); }
+  .btn-gh {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text) !important; font-size: .9rem; font-weight: 600;
+    transition: border-color .15s, background .15s;
+  }
+  .btn-gh:hover { border-color: var(--cyan); background: rgba(34,211,238,.08); }
+
+  /* Hero */
+  .hero { padding: 90px 0 70px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -200px 0 auto; height: 500px;
+    background: radial-gradient(ellipse at 50% 0%, rgba(139,92,246,.18), transparent 60%),
+                radial-gradient(ellipse at 50% 20%, rgba(34,211,238,.10), transparent 55%);
+    pointer-events: none;
+  }
+  .hero img.logo { width: 190px; filter: drop-shadow(0 12px 40px rgba(139,92,246,.35)); }
+  .hero h1 {
+    font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 800; margin: 26px 0 14px;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.sub { color: var(--muted); font-size: 1.15rem; max-width: 640px; margin: 0 auto 34px; }
+  .badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 34px; }
+  .badge {
+    font-size: .8rem; color: var(--muted); border: 1px solid var(--border);
+    padding: 4px 12px; border-radius: 999px; background: var(--bg2);
+  }
+
+  .downloads { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .dl-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 26px; border-radius: 14px; font-weight: 700; font-size: 1rem;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    transition: transform .15s, border-color .15s, box-shadow .15s;
+  }
+  .dl-btn:hover { transform: translateY(-2px); border-color: var(--cyan); box-shadow: 0 8px 30px rgba(34,211,238,.15); }
+  .dl-btn.primary { background: var(--grad); border: none; color: #06121a; }
+  .dl-btn.primary:hover { box-shadow: 0 8px 34px rgba(139,92,246,.35); }
+  .dl-btn small { display: block; font-weight: 500; font-size: .72rem; opacity: .75; }
+  .dl-note { margin-top: 16px; font-size: .85rem; color: var(--muted); }
+
+  /* Sections */
+  section { padding: 72px 0; }
+  section.alt { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  h2 { font-size: 1.9rem; font-weight: 800; margin-bottom: 8px; }
+  h2 span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--muted); margin-bottom: 40px; max-width: 620px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 26px; transition: border-color .2s, transform .2s;
+  }
+  .card:hover { border-color: rgba(139,92,246,.5); transform: translateY(-3px); }
+  .card .ico { font-size: 1.7rem; margin-bottom: 14px; display: block; }
+  .card h3 { font-size: 1.1rem; margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: .93rem; }
+
+  .steps { counter-reset: step; display: grid; gap: 14px; max-width: 720px; }
+  .step {
+    display: flex; gap: 18px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 20px 22px; align-items: flex-start;
+  }
+  .step::before {
+    counter-increment: step; content: counter(step);
+    min-width: 34px; height: 34px; border-radius: 50%;
+    background: var(--grad); color: #06121a; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; font-size: .95rem;
+  }
+  .step div h3 { font-size: 1rem; margin-bottom: 4px; }
+  .step div p { color: var(--muted); font-size: .92rem; }
+  .step code { background: var(--bg); padding: 2px 8px; border-radius: 6px; font-size: .85rem; color: var(--cyan); }
+
+  footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: .88rem; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+
+  @media (max-width: 640px) {
+    .hero { padding: 60px 0 50px; }
+    nav .links a:not(.btn-gh) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <img src="assets/logo-symbol.png" alt="OctoStream">
+    <span class="brand">OctoStream</span>
+    <div class="links">
+      <a href="#features">Características</a>
+      <a href="#install">Instalación</a>
+      <a href="guia.html">Guía</a>
+      <a class="btn-gh" href="https://github.com/octostream-project/OctoStream" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <img class="logo" src="assets/logo-full.png" alt="OctoStream">
+    <h1>Todo tu media center.<br>Una sola app.</h1>
+    <p class="sub">Películas, series, anime, deportes en directo, canales y torrents — optimizado para Android y Android TV con reproductor nativo ExoPlayer.</p>
+    <div class="badges">
+      <span class="badge" id="ver-badge">v1.49</span>
+      <span class="badge">Android 6.0+</span>
+      <span class="badge">Android TV</span>
+      <span class="badge">Gratis y open source</span>
+    </div>
+    <div class="downloads" id="downloads">
+      <a class="dl-btn primary" href="https://github.com/octostream-project/OctoStream/releases/latest" id="dl-main">
+        <span>⬇</span>
+        <span>Descargar APK<small id="dl-main-sub">última versión</small></span>
+      </a>
+      <a class="dl-btn" href="https://github.com/octostream-project/OctoStream/releases/latest" id="dl-32">
+        <span>⬇</span>
+        <span>ARM 32 bits<small>dispositivos antiguos</small></span>
+      </a>
+      <a class="dl-btn" href="https://github.com/octostream-project/OctoStream/releases/latest" id="dl-x86">
+        <span>⬇</span>
+        <span>x86_64<small>emuladores y PC</small></span>
+      </a>
+    </div>
+    <p class="dl-note">¿No sabes cuál elegir? El botón principal (arm64) cubre el 95% de móviles y TV boxes modernos.</p>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Hecho para el <span>sofá</span></h2>
+    <p class="lead">Navegación pensada para el mando a distancia, reproductor nativo y descubrimiento automático entre dispositivos.</p>
+    <div class="grid">
+      <div class="card">
+        <span class="ico">▶️</span>
+        <h3>Reproductor nativo ExoPlayer</h3>
+        <p>Media3/ExoPlayer con HLS, DASH, MP4, subtítulos y DRM. Teclas multimedia del mando: play/pausa, rebobinar y avance rápido.</p>
+      </div>
+      <div class="card">
+        <span class="ico">📺</span>
+        <h3>Android TV de verdad</h3>
+        <p>Navegación D-pad con foco visible, salvapantallas, zap de canales en directo y gestión correcta del botón atrás.</p>
+      </div>
+      <div class="card">
+        <span class="ico">⚽</span>
+        <h3>Deportes en directo</h3>
+        <p>Agenda de fútbol, tenis, baloncesto, F1 y más — con escudos, fotos de jugadores y enlaces a los streams disponibles.</p>
+      </div>
+      <div class="card">
+        <span class="ico">🐙</span>
+        <h3>Sync estilo LocalSend</h3>
+        <p>Los dispositivos OctoStream se descubren solos en tu red. Cada uno tiene nombre propio y emparejamiento con código de verificación.</p>
+      </div>
+      <div class="card">
+        <span class="ico">🧲</span>
+        <h3>Torrents integrados</h3>
+        <p>Reproducción directa de magnet links y archivos torrent con jlibtorrent, sin apps externas.</p>
+      </div>
+      <div class="card">
+        <span class="ico">🔌</span>
+        <h3>Proveedores y plugins</h3>
+        <p>Sistema de plugins con catálogos, búsqueda unificada, historial, favoritos y reanudar donde lo dejaste.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt">
+  <div class="wrap">
+    <h2>Instalación en <span>2 minutos</span></h2>
+    <p class="lead">La app no está en Google Play — se instala descargando el APK. Una vez instalada, se actualiza sola desde la app.</p>
+    <div class="steps">
+      <div class="step">
+        <div><h3>Descarga el APK</h3><p>Pulsa el botón de descarga de arriba (arm64 para casi todos los dispositivos).</p></div>
+      </div>
+      <div class="step">
+        <div><h3>Permite orígenes desconocidos</h3><p>Android pedirá permiso para instalar apps desde el navegador o gestor de archivos. Acéptalo solo para esta instalación.</p></div>
+      </div>
+      <div class="step">
+        <div><h3>Abre e instala</h3><p>Abre el APK descargado y pulsa <code>Instalar</code>. En Android TV puedes pasarlo con Send Files to TV, LocalSend o un USB.</p></div>
+      </div>
+      <div class="step">
+        <div><h3>Actualizaciones automáticas</h3><p>La app comprueba nuevas versiones al abrirse y te ofrece instalarlas con un toque.</p></div>
+      </div>
+    </div>
+    <p style="margin-top:28px"><a href="guia.html">Ver la guía completa (Android TV, sincronización, FAQ) →</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>OctoStream — open source</span>
+    <span><a href="https://github.com/octostream-project/OctoStream/releases">Todas las versiones</a> · <a href="https://github.com/octostream-project/OctoStream">Código fuente</a></span>
+  </div>
+</footer>
+
+<script>
+// Rellena los botones de descarga con la última release publicada en GitHub.
+fetch('https://api.github.com/repos/octostream-project/OctoStream/releases/latest')
+  .then(r => r.ok ? r.json() : null)
+  .then(rel => {
+    if (!rel) return
+    const v = rel.tag_name.replace(/^v/, '')
+    document.getElementById('ver-badge').textContent = 'v' + v
+    const byAbi = {}
+    for (const a of rel.assets) {
+      const m = a.name.match(/(arm64-v8a|armeabi-v7a|x86_64)/)
+      if (m) byAbi[m[1]] = a.browser_download_url
+    }
+    if (byAbi['arm64-v8a']) {
+      const main = document.getElementById('dl-main')
+      main.href = byAbi['arm64-v8a']
+      document.getElementById('dl-main-sub').textContent = 'arm64 · v' + v
+    }
+    if (byAbi['armeabi-v7a']) document.getElementById('dl-32').href = byAbi['armeabi-v7a']
+    if (byAbi['x86_64']) document.getElementById('dl-x86').href = byAbi['x86_64']
+  })
+  .catch(() => {})
+</script>
+
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guía — OctoStream</title>
+<meta name="description" content="Guía de instalación y uso de OctoStream: Android, Android TV, sincronización LAN y preguntas frecuentes.">
+<link rel="icon" href="assets/logo-symbol.png">
+<style>
+  :root {
+    --bg: #0a0e17; --bg2: #0f1524; --card: #141b2e; --border: #1f2a44;
+    --text: #e6ecf5; --muted: #8b96ad; --cyan: #22d3ee; --violet: #8b5cf6;
+    --grad: linear-gradient(120deg, #22d3ee, #8b5cf6);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; line-height: 1.65; }
+  a { color: var(--cyan); text-decoration: none; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  nav { position: sticky; top: 0; z-index: 50; background: rgba(10,14,23,.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+  nav .wrap { display: flex; align-items: center; gap: 14px; height: 64px; }
+  nav img { height: 34px; }
+  nav .brand { font-weight: 700; font-size: 1.15rem; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
+  nav .links a { color: var(--muted); font-size: .95rem; }
+  nav .links a:hover { color: var(--text); }
+
+  header.page { padding: 60px 0 30px; }
+  h1 { font-size: 2.4rem; font-weight: 800; }
+  h1 span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header.page p { color: var(--muted); margin-top: 8px; }
+
+  h2 { font-size: 1.5rem; font-weight: 800; margin: 48px 0 16px; padding-top: 20px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; padding-top: 0; margin-top: 20px; }
+  h3 { font-size: 1.08rem; margin: 26px 0 8px; color: var(--cyan); }
+  p { margin-bottom: 12px; color: #c4cddd; }
+  ul, ol { margin: 0 0 14px 22px; color: #c4cddd; }
+  li { margin-bottom: 6px; }
+  code { background: var(--card); border: 1px solid var(--border); padding: 2px 8px; border-radius: 6px; font-size: .86rem; color: var(--cyan); }
+  .tip { background: rgba(34,211,238,.07); border: 1px solid rgba(34,211,238,.25); border-radius: 12px; padding: 16px 20px; margin: 16px 0; font-size: .93rem; color: #c4cddd; }
+  .tip strong { color: var(--cyan); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: .92rem; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: .85rem; text-transform: uppercase; letter-spacing: .4px; }
+
+  footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: .88rem; margin-top: 60px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <img src="assets/logo-symbol.png" alt="OctoStream">
+    <span class="brand">OctoStream</span>
+    <div class="links">
+      <a href="index.html">Inicio</a>
+      <a href="https://github.com/octostream-project/OctoStream" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+<header class="page">
+  <h1>Guía de <span>OctoStream</span></h1>
+  <p>Instalación, Android TV, sincronización entre dispositivos y preguntas frecuentes.</p>
+</header>
+
+<h2>Instalación</h2>
+
+<h3>En el móvil o tablet Android</h3>
+<ol>
+  <li>Descarga el APK desde la <a href="index.html">página principal</a> (botón arm64) o desde <a href="https://github.com/octostream-project/OctoStream/releases/latest">GitHub Releases</a>.</li>
+  <li>Ábrelo — Android pedirá permiso para instalar apps de origen desconocido para el navegador/gestor de archivos.</li>
+  <li>Pulsa <code>Instalar</code> y listo.</li>
+</ol>
+
+<h3>En Android TV / Google TV</h3>
+<p>El APK no se descarga cómodamente con el mando, así que lo más fácil es pasarlo desde el móvil:</p>
+<ol>
+  <li>Descarga el APK <code>arm64-v8a</code> (o <code>armeabi-v7a</code> en boxes antiguas de 32 bits) en el móvil.</li>
+  <li>Envíalo a la TV con <strong>LocalSend</strong>, <strong>Send Files to TV</strong> o un pendrive USB.</li>
+  <li>En la TV, abre el APK con un gestor de archivos (por ejemplo el propio de LocalSend o "Archivos") y acepta la instalación de orígenes desconocidos.</li>
+</ol>
+<div class="tip"><strong>Actualizaciones:</strong> una vez instalada, la app detecta nuevas versiones al abrirse y las instala con un toque — no hace falta repetir este proceso.</div>
+
+<h3>Qué APK elegir</h3>
+<table>
+  <tr><th>Archivo</th><th>Para qué dispositivo</th></tr>
+  <tr><td><code>arm64-v8a</code></td><td>Casi todo: móviles modernos, Chromecast Google TV, Nvidia Shield, Fire TV recientes.</td></tr>
+  <tr><td><code>armeabi-v7a</code></td><td>Dispositivos antiguos de 32 bits (Fire TV Stick viejas, boxes baratas).</td></tr>
+  <tr><td><code>x86_64</code></td><td>Emuladores, Android x86 en PC, algunas boxes Intel.</td></tr>
+</table>
+
+<h2>Uso en Android TV</h2>
+<ul>
+  <li><strong>D-pad:</strong> navega por toda la interfaz; el foco visible marca el elemento activo.</li>
+  <li><strong>OK / Enter:</strong> abre fichas, reproduce, confirma.</li>
+  <li><strong>Atrás:</strong> cierra paneles y vuelve; desde la pantalla principal sale de la app.</li>
+  <li><strong>⏯ Play/Pausa, ⏪ ⏩ del mando:</strong> funcionan durante la reproducción (también ⏮ ⏭ para cambiar de canal en directo).</li>
+  <li><strong>Salvapantallas:</strong> se activa tras un rato sin tocar nada; cualquier tecla o toque lo quita sin abrir nada debajo.</li>
+</ul>
+
+<h2>Sincronización entre dispositivos (Sync)</h2>
+<p>OctoStream descubre otros OctoStream en tu red local automáticamente — igual que LocalSend. Desde la sección <strong>Sync</strong> puedes:</p>
+<ul>
+  <li><strong>Ver tu identidad:</strong> cada dispositivo tiene un alias propio (p. ej. <em>"Foca Audaz"</em>) y un código de verificación tipo <code>48F6-0A9C</code>.</li>
+  <li><strong>Emparejar:</strong> al conectar con otro dispositivo, el receptor muestra un diálogo con el alias y el código — verifica que coincida en ambas pantallas y acepta.</li>
+  <li><strong>Enviar a la TV:</strong> desde cualquier ficha o canal, "Enviar a" reproduce el contenido en otro OctoStream emparejado.</li>
+  <li><strong>Sincronizar datos:</strong> historial, favoritos y progreso de reproducción entre dispositivos emparejados.</li>
+</ul>
+<div class="tip"><strong>Seguridad:</strong> el emparejamiento genera un token por dispositivo — funciona aunque cambie la IP (DHCP). Las peticiones sin emparejamiento se rechazan. El código de verificación evita aceptar a un impostor en tu red.</div>
+
+<h2>Preguntas frecuentes</h2>
+
+<h3>¿Por qué no está en Google Play?</h3>
+<p>El proyecto se distribuye directamente por GitHub Releases. La app incluye actualizador propio, así que no hace falta la tienda.</p>
+
+<h3>"Aplicación no instalada" al actualizar</h3>
+<p>Casi siempre es que el APK instalado no coincide en firma o en ABI. Desinstala y vuelve a instalar la última versión — los favoritos e historial se pueden resincronizar desde otro dispositivo con Sync.</p>
+
+<h3>Un proveedor no carga o da error</h3>
+<p>Los proveedores dependen de webs externas que cambian a menudo. Prueba otro proveedor del catálogo — si persiste, abre un <a href="https://github.com/octostream-project/OctoStream/issues">issue</a>.</p>
+
+<h3>El salvapantallas no se quita al tocar la pantalla</h3>
+<p>Solucionado desde v1.45 — actualiza a la última versión desde la app o desde <a href="https://github.com/octostream-project/OctoStream/releases/latest">Releases</a>.</p>
+
+<h3>¿Puedo usarlo en el PC?</h3>
+<p>Sí — hay build web y Electron, aunque el foco principal del proyecto es Android y Android TV.</p>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>OctoStream — open source</span>
+    <span><a href="index.html">Inicio</a> · <a href="https://github.com/octostream-project/OctoStream">GitHub</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
