@@ -1039,31 +1039,33 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: solo la anterior y la siguiente. La "anterior" es la
-  // jornada en curso (con partidos de hoy) o la última jugada — esta se borra
-  // al terminar el día de su último partido. La "superior" es la próxima:
-  // si la jornada en curso ya está en juego, la superior es cur+1; si aún no
-  // ha empezado, la propia cur es la superior y la anterior es cur-1.
+  // Jornadas visibles: solo la anterior y la siguiente. "Anterior" es la
+  // última jornada que ya jugó algún partido — pero solo se muestra el día
+  // en que jugó: al terminar ese día se borra. "Siguiente" es la jornada
+  // con el próximo partido más cercano — no un partido aplazado a un mes
+  // vista (el Levante-Athletic de J6 no debe esconder la J8 de esta semana).
   const visibleJornadas = activeLeague?.marca ? (() => {
-    const cur = activeLeague.currentRound
     const list = activeLeague.jornadas.filter(j => j.items.length)
-    if (cur == null) return list
+    if (!list.length) return []
+    const now = Date.now()
     const todayStart = new Date().setHours(0, 0, 0, 0)
-    // Fechas de todos los partidos de la jornada, incluidos los movidos a
+    // Fechas de todos los partidos de la jornada, incluidos los que están en
     // la sección EN DIRECTO (salieron de j.items).
     const datesOf = (j) => [
       ...j.items.map(i => i._matchDate || 0),
       ...activeLeague.liveItems.filter(i => i._round === j.round).map(i => i._matchDate || 0),
-    ]
-    const curJ = list.find(j => j.round === cur)
-    const curInPlay = !!curJ && (activeLeague.liveItems.some(i => i._round === cur)
-      || datesOf(curJ).some(d => d && d <= Date.now()))
-    return list.filter(j => {
-      if (j.round === cur) return true
-      if (j.round === cur + 1) return curInPlay
-      if (j.round === cur - 1) return Math.max(0, ...datesOf(j)) >= todayStart
-      return false
-    })
+    ].filter(Boolean)
+    const lastPlayed = (j) => Math.max(0, ...datesOf(j).filter(d => d <= now))
+    const nextKick = (j) => Math.min(Infinity, ...datesOf(j).filter(d => d > now - 3 * 3600e3))
+    // Anterior: la última jornada con partidos jugados hoy (incluye la que
+    // está en juego ahora mismo).
+    const prev = [...list].reverse().find(j => lastPlayed(j) >= todayStart)
+    // Siguiente: si hay anterior, la que va detrás; si no, la del próximo
+    // partido más cercano en el tiempo.
+    const next = prev
+      ? list.find(j => j.round > prev.round)
+      : list.reduce((best, j) => (nextKick(j) < nextKick(best) ? j : best), list[0])
+    return list.filter(j => j === prev || j === next)
   })() : []
   // Partidos visibles en ligas sin calendario: directos, recién finalizados
   // y próximos — los jugados hace >3h ya no se muestran.
@@ -1075,15 +1077,15 @@ export default function Sports() {
     ? activeLeague.liveItems.length + visibleJornadas.reduce((n, j) => n + j.items.length, 0)
     : visibleFlatItems.length
 
-  // Al abrir una liga de calendario: bajar directo a la jornada de esta
-  // semana en vez de empezar por la jornada 1. Sin directos se hace scroll;
-  // con directos la sección EN DIRECTO ya está arriba (es la misma jornada).
+  // Al abrir una liga de calendario: bajar directo a la primera jornada
+  // visible (la anterior en juego o la siguiente). Sin directos se hace
+  // scroll; con directos la sección EN DIRECTO ya está arriba.
   useEffect(() => {
     if (!selectedLeague) return
     const g = allGroups.find(g => g.name === selectedLeague.name)
-    if (!g?.marca || g.liveItems?.length || g.currentRound == null) return
+    if (!g?.marca || g.liveItems?.length) return
     const t = setTimeout(() => {
-      document.getElementById(`sports-jrnd-${g.currentRound}`)
+      document.querySelector('[id^=sports-jrnd-]')
         ?.scrollIntoView({ block: 'start' })
     }, 80)
     return () => clearTimeout(t)
@@ -1202,9 +1204,9 @@ export default function Sports() {
                 </div>
               )}
               {visibleJornadas.map((j, ji) => {
-                // Foco inicial en la primera tarjeta de la jornada en curso
-                // (o la primera visible si no hay currentRound).
-                const isCurrent = j.round === (activeLeague.currentRound ?? visibleJornadas[0]?.round)
+                // Foco inicial en la primera tarjeta de la primera jornada
+                // visible (la anterior si se muestra, si no la siguiente).
+                const isCurrent = j === visibleJornadas[0]
                 return (
                 <div key={j.round} id={`sports-jrnd-${j.round}`} className="space-y-3 scroll-mt-4">
                   <h3 className="text-sm font-medium text-dark-300">{j.name || `Jornada ${j.round}`}</h3>
