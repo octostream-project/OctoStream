@@ -1198,6 +1198,27 @@ export default function Settings() {
               ))}
             </div>
           </div>
+
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <AlertCircle className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Aviso legal</h3>
+                <p className="text-dark-400 text-sm">
+                  Responsabilidad sobre el contenido mostrado
+                </p>
+              </div>
+            </div>
+
+            <p className="text-dark-400 text-sm leading-relaxed">
+              OctoStream es un navegador y agregador: <span className="text-dark-300">no aloja, almacena ni distribuye ningún contenido</span>.
+              Todo el material se enlaza desde fuentes públicas ya disponibles en Internet, que son
+              responsabilidad exclusiva de los sitios de terceros que lo sirven. Si eres titular de
+              derechos y quieres retirar un enlace, contacta con la web que aloja el contenido.
+            </p>
+          </div>
         </div>
       )}
       </div>

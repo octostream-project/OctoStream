@@ -130,6 +130,10 @@ optopus-stream/
 └── version.json         # Manifiesto del auto-updater
 ```
 
+## Aviso legal
+
+OctoStream es un navegador y agregador de enlaces: **no aloja, almacena ni distribuye ningún contenido**. Todo el material proviene de fuentes públicas ya disponibles en Internet y es responsabilidad exclusiva de los sitios de terceros que lo sirven. El uso de la app y el acceso a los contenidos enlazados son responsabilidad del usuario.
+
 ## Licencia
 
 MIT
