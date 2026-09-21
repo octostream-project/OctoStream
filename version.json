@@ -1,16 +1,16 @@
 {
-  "versionCode": 142,
-  "versionName": "1.42",
+  "versionCode": 143,
+  "versionName": "1.43",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-arm64-v8a.apk",
-  "sha256": "8858b09fd04f2aea1e8de1a68a70f763d72d8db04af9495c408817371f24ded1",
-  "notes": "RealDebrid eliminado; AllDebrid mas rapido resolviendo embeds y torrents.",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-arm64-v8a.apk",
+  "sha256": "1a998c06c90e9ed3025697a2d101ea35fd5e001eb7ad9562b42e5331e585055b",
+  "notes": "Gnula restaurada (nuevo mirror), FlizzMovies arreglado, idioma en todos los enlaces",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.43/OctoStream-1.43-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "8858b09fd04f2aea1e8de1a68a70f763d72d8db04af9495c408817371f24ded1",
-    "armeabi-v7a": "ba935448df6673b3ce2bb49affba223cc45d60e7943ca134edfb56db0615a1d7"
+    "arm64-v8a": "1a998c06c90e9ed3025697a2d101ea35fd5e001eb7ad9562b42e5331e585055b",
+    "armeabi-v7a": "1368d75baa3dcaa1b8944132bd86f076046a03185fd90d641e0350a9bec21627"
   }
 }
