@@ -166,10 +166,6 @@
         <span>⬇</span>
         <span>x86_64<small>emuladores y PC</small></span>
       </a>
-      <a class="dl-btn" href="https://github.com/octostream-project/OctoStream/releases/latest" id="dl-win">
-        <span>⬇</span>
-        <span>Windows<small>instalador .exe</small></span>
-      </a>
     </div>
     <p class="dl-note">¿No sabes cuál elegir? El botón principal (arm64) cubre el 95% de móviles y TV boxes modernos.</p>
   </div>
@@ -262,7 +258,6 @@ fetch('https://api.github.com/repos/octostream-project/OctoStream/releases/lates
     for (const a of rel.assets) {
       const m = a.name.match(/(arm64-v8a|armeabi-v7a|x86_64)/)
       if (m) byAbi[m[1]] = a.browser_download_url
-      else if (/\.exe$/i.test(a.name)) document.getElementById('dl-win').href = a.browser_download_url
     }
     if (byAbi['arm64-v8a']) {
       const main = document.getElementById('dl-main')
