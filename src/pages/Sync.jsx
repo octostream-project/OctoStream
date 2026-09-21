@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Wifi, QrCode, ArrowLeft, Check, AlertCircle, Download, Upload } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { isAndroidNative } from '../utils/platform.js'
-import { httpGetJson, httpPostJson } from '../utils/httpClient.js'
+import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 
 // Lazy import del plugin nativo (solo disponible en Android).
 // Usa el mismo loader que remotePlay.js — require() no existe en el
 // bundle ESM y dejaba SyncServer siempre a null.
-import { getSyncServer } from '../utils/remotePlay.js'
+import { getSyncServer, getDeviceInfo, getDiscovered, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
 
 export default function Sync() {
   const navigate = useNavigate()
@@ -22,6 +22,9 @@ export default function Sync() {
 
   const [serverUrl, setServerUrl] = useState('')
   const [remoteIp, setRemoteIp] = useState('')
+  const [deviceInfo, setDeviceInfo] = useState(null) // {deviceId, alias, fingerprint}
+  const [selectedDevice, setSelectedDevice] = useState(null) // descubierto → deviceId para auth
+  const [discovered, setDiscovered] = useState([])
   const [status, setStatus] = useState('idle') // idle | connecting | connected | syncing | done | error
   const [message, setMessage] = useState('')
   const [qrDataUrl, setQrDataUrl] = useState('')
@@ -41,6 +44,7 @@ export default function Sync() {
   // Start sync server on mount (Android only)
   useEffect(() => {
     let active = true
+    let discIv = null
     ;(async () => {
       const SyncServer = await getSyncServer()
       if (!SyncServer || !active) return
@@ -48,6 +52,10 @@ export default function Sync() {
         const info = await SyncServer.start()
         if (!active) return
         setServerUrl(info.url)
+        setDeviceInfo({ deviceId: info.deviceId, alias: info.alias, fingerprint: info.fingerprint })
+        // Dispositivos anunciándose por UDP — lista viva mientras la página está abierta.
+        getDiscovered().then(setDiscovered)
+        discIv = setInterval(() => getDiscovered().then(d => { if (active) setDiscovered(d) }), 4000)
         // Generate QR code
         try {
           const QRCode = (await import('qrcode')).default
@@ -72,6 +80,7 @@ export default function Sync() {
     })()
     return () => {
       active = false
+      if (discIv) clearInterval(discIv)
       if (syncListenerRef.current) syncListenerRef.current.remove()
     }
   }, [])
@@ -113,7 +122,7 @@ export default function Sync() {
     if (!remoteIp) return
     const url = remoteIp.startsWith('http') ? remoteIp : `http://${remoteIp}:8765`
     setStatus('connecting')
-    setMessage('Conectando...')
+    setMessage(selectedDevice ? `Conectando con ${selectedDevice.alias || selectedDevice.name}...` : 'Conectando...')
     const ok = await pingRemote(url)
     if (!ok) {
       setStatus('error')
@@ -123,7 +132,12 @@ export default function Sync() {
     setStatus('syncing')
     setMessage('Descargando datos...')
     try {
-      const remoteData = await httpGetJson(`${url}/sync`, {}, AbortSignal.timeout(10000))
+      const remoteData = await pullSync(url, selectedDevice)
+      if (remoteData === 'denied') {
+        setStatus('error')
+        setMessage('El otro dispositivo rechazó el emparejamiento.')
+        return
+      }
       mergeData(remoteData)
       setStatus('done')
       setMessage('Sincronización completada')
@@ -143,7 +157,7 @@ export default function Sync() {
     if (!remoteIp) return
     const url = remoteIp.startsWith('http') ? remoteIp : `http://${remoteIp}:8765`
     setStatus('connecting')
-    setMessage('Conectando...')
+    setMessage(selectedDevice ? `Conectando con ${selectedDevice.alias || selectedDevice.name}...` : 'Conectando...')
     const ok = await pingRemote(url)
     if (!ok) {
       setStatus('error')
@@ -154,9 +168,12 @@ export default function Sync() {
     setMessage('Enviando datos...')
     try {
       const localData = { favorites, watchHistory, watchedEpisodes }
-      await httpPostJson(`${url}/sync`, JSON.stringify(localData), {
-        'Content-Type': 'application/json',
-      }, false, AbortSignal.timeout(10000))
+      const r = await pushSync(url, selectedDevice, localData)
+      if (r === 'denied') {
+        setStatus('error')
+        setMessage('El otro dispositivo rechazó el emparejamiento.')
+        return
+      }
       setStatus('done')
       setMessage('Datos enviados correctamente')
       const now = new Date().toLocaleString('es-ES')
@@ -264,10 +281,18 @@ export default function Sync() {
         {serverUrl ? (
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="flex-1">
+              {deviceInfo?.alias && (
+                <p className="text-lg font-semibold text-white mb-1">{deviceInfo.alias}</p>
+              )}
               <p className="text-sm text-dark-400 mb-1">IP del dispositivo:</p>
               <p className="text-lg font-mono text-primary-300 bg-dark-800 px-3 py-2 rounded-lg">{serverUrl}</p>
+              {deviceInfo?.fingerprint && (
+                <p className="text-xs text-dark-400 mt-2">
+                  Código de verificación: <span className="font-mono text-primary-300">{deviceInfo.fingerprint}</span>
+                </p>
+              )}
               <p className="text-xs text-dark-500 mt-2">
-                Comparte esta IP con el otro dispositivo o escanea el QR
+                Otros OctoStream de la red te ven como «{deviceInfo?.alias || 'OctoStream'}» — o escanea el QR
               </p>
             </div>
             {qrDataUrl && (
@@ -290,14 +315,39 @@ export default function Sync() {
           <QrCode size={20} className="text-primary-400" />
           Conectar con otro dispositivo
         </h2>
+        {/* Dispositivos encontrados por la red (anuncio UDP automático) */}
+        {discovered.length > 0 && (
+          <div className="mb-4 space-y-1">
+            <p className="text-sm text-dark-400 mb-2">Encontrados en la red:</p>
+            {discovered.map(d => (
+              <button
+                key={d.deviceId || d.ip}
+                data-tv-card
+                tabIndex={0}
+                onClick={() => { setSelectedDevice(d); setRemoteIp(d.ip) }}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${
+                  selectedDevice?.deviceId === d.deviceId
+                    ? 'bg-primary-600/30 border border-primary-500/50'
+                    : 'bg-dark-800 hover:bg-dark-700 border border-dark-700'
+                }`}
+              >
+                <Wifi size={18} className="text-primary-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium truncate">{d.alias || d.name}</p>
+                  <p className="text-xs text-dark-400 font-mono">{d.ip}{d.fingerprint ? ` · ${d.fingerprint}` : ''}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
         <p className="text-sm text-dark-400 mb-3">
-          Introduce la IP del otro dispositivo (ej: 192.168.1.100:8765)
+          {discovered.length ? 'O introduce la IP manualmente (ej: 192.168.1.100:8765)' : 'Introduce la IP del otro dispositivo (ej: 192.168.1.100:8765)'}
         </p>
         <div className="flex gap-2">
           <input
             type="text"
             value={remoteIp}
-            onChange={e => setRemoteIp(e.target.value)}
+            onChange={e => { setRemoteIp(e.target.value); setSelectedDevice(null) }}
             placeholder="192.168.1.100:8765"
             className="flex-1 bg-dark-800 text-white px-4 py-3 rounded-lg border border-dark-700 focus:border-primary-500 focus:outline-none"
           />
@@ -363,10 +413,13 @@ export default function Sync() {
       {pairedDevices.length > 0 && (
         <div className="card p-6 mb-6">
           <h2 className="text-lg font-semibold text-white mb-2">Dispositivos autorizados</h2>
-          <p className="text-xs text-dark-500 mb-3">Estas IPs pueden enviarte contenido y sincronizar sin pedir permiso.</p>
+          <p className="text-xs text-dark-500 mb-3">Pueden enviarte contenido y sincronizar sin pedir permiso.</p>
           <ul className="space-y-1 mb-4">
-            {pairedDevices.map(ip => (
-              <li key={ip} className="font-mono text-sm text-primary-300 bg-dark-800 px-3 py-1.5 rounded-lg">{ip}</li>
+            {pairedDevices.map((d, i) => (
+              <li key={d.deviceId || d.ip || i} className="text-sm bg-dark-800 px-3 py-1.5 rounded-lg flex items-center justify-between gap-2">
+                <span className="text-primary-300">{d.alias || d.ip || d.deviceId}</span>
+                <span className="font-mono text-xs text-dark-500">{d.fingerprint || ''}{d.alias && d.ip ? ` · ${d.ip}` : ''}</span>
+              </li>
             ))}
           </ul>
           <button
@@ -376,6 +429,7 @@ export default function Sync() {
               const SyncServer = await getSyncServer()
               if (!SyncServer) return
               await SyncServer.forgetDevices()
+              forgetTokens()
               setPairedDevices([])
             }}
             className="btn-secondary px-4 py-2 text-sm"

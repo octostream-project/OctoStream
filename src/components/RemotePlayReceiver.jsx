@@ -63,6 +63,12 @@ export default function RemotePlayReceiver() {
     if (!req) return
     const SyncServer = await getSyncServer()
     if (!SyncServer) return
+    // Emparejamiento por identidad (endpoint /pair): el token lo recoge el
+    // emisor en su siguiente poll — no hay acción local posterior.
+    if (req.endpoint === 'pair' && req.deviceId) {
+      try { await SyncServer.answerPair({ deviceId: req.deviceId, allow }) } catch {}
+      return
+    }
     try { await SyncServer.allowDevice({ ip: req.ip, allow }) } catch {}
     if (!allow) return
     if (req.endpoint === 'play' && req.data) {
@@ -99,9 +105,18 @@ export default function RemotePlayReceiver() {
           <div className="bg-dark-800 border border-dark-600 rounded-2xl p-6 max-w-md w-full shadow-2xl">
             <h2 className="text-lg font-semibold text-white mb-2">Solicitud de dispositivo</h2>
             <p className="text-dark-300 text-sm mb-1">
-              <span className="font-mono text-primary-300">{pairReq.ip}</span>{' '}
-              {pairReq.endpoint === 'play' ? 'quiere reproducir contenido aquí' : 'quiere sincronizar datos'}
+              <span className="font-medium text-primary-300">{pairReq.alias || pairReq.ip}</span>{' '}
+              {pairReq.endpoint === 'play' ? 'quiere reproducir contenido aquí'
+                : pairReq.endpoint === 'pair' ? 'quiere emparejarse con este dispositivo'
+                : 'quiere sincronizar datos'}
             </p>
+            {pairReq.fingerprint && (
+              <p className="text-dark-400 text-xs mb-1">
+                Código de verificación: <span className="font-mono text-primary-300">{pairReq.fingerprint}</span>
+                {' '}— comprueba que coincide en la otra pantalla
+              </p>
+            )}
+            {pairReq.alias && <p className="text-dark-500 text-xs mb-1 font-mono">{pairReq.ip}</p>}
             {pairTitle && <p className="text-white text-sm font-medium mb-1">«{pairTitle}»</p>}
             <p className="text-dark-500 text-xs mb-5">Si lo aceptas, el dispositivo quedará autorizado para próximas veces.</p>
             <div className="flex gap-3">

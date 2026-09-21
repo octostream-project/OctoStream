@@ -99,13 +99,22 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - Se usa `electron` desde npm (`^33.0.0`). El fork `castlabs/electron-releases` se
   recomienda únicamente si se necesita reproducción Widevine certificada en desktop.
 
-- Seguridad LAN (SyncServer :8765): `/play`, `/stop` y `/sync` requieren IP
-  emparejada. Una IP desconocida recibe 403 `{needsPair:true}` y dispara el
-  evento `pairRequest` → `RemotePlayReceiver` muestra un diálogo de aceptación
-  (acotado con `data-tv-modal`). Las IPs autorizadas se persisten en
-  SharedPreferences (`octostream_sync/allowed_ips`) y se gestionan desde la
-  página Sync ("Olvidar todos"). Las rechazadas quedan en lista de sesión y no
-  re-notifican. Cooldown anti-spam: máx. 1 `pairRequest` por IP cada 30s.
+- Seguridad LAN (SyncServer :8765, estilo LocalSend):
+  - Cada dispositivo tiene identidad persistente: `deviceId` (UUID), alias
+    generado ("Pulpo Sabio") y fingerprint `XXXX-XXXX` (SHA-256 de un secreto
+    local). Se anuncia en `/ping` y por broadcast UDP :8766 cada ~2.5s —
+    los demás OctoStream se descubren solos sin barrer el /24 (el barrido
+    queda como fallback para versiones viejas).
+  - Emparejamiento: `POST /pair {deviceId, alias, fingerprint}` → si es nuevo
+    dispara `pairRequest` (diálogo con alias+código en `RemotePlayReceiver`)
+    y responde `{pending:true}`; el emisor re-pregunta hasta que el usuario
+    acepta → el receptor emite un `token` (`answerPair`). Los requests llevan
+    `X-Device-Id` + `X-Pair-Token` — auth por identidad, no por IP.
+  - Whitelist de IPs (`allowed_ips`) queda como fallback legacy para
+    emparejamientos hechos con versiones anteriores.
+  - Tokens del emisor: `localStorage octostream_pair_tokens` (deviceId→token).
+  - Las rechazadas quedan en lista de sesión y no re-notifican. Cooldown
+    anti-spam: máx. 1 `pairRequest` por IP cada 30s.
 - El DataSource de ExoPlayer con WARP usa validación TLS normal (sin trust-all).
 - Logs: no volcar headers ni URLs completas firmadas a logcat (host solamente).
 - URLs loopback (`127.0.0.1`/`localhost`) **nunca** van por el proxy WARP — el
