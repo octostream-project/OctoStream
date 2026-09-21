@@ -28,6 +28,20 @@ const fetchT = (url, opts = {}) => fetch(url, {
   signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
 })
 
+// RealDebrid fue eliminado del proyecto: limpia el token persistido de
+// instalaciones viejas para que no quede credencial huérfana en el dispositivo.
+try { removeItemSync('octostream_realdebrid_token') } catch {}
+
+// Dedup inflight + caché corta de desbloqueos. Details y Plurtasko pueden
+// resolver la misma URL a la vez (y el picker se reabre a menudo): compartir
+// la promesa y cachear el resultado 2 min evita quemar llamadas a la API.
+// Los links desbloqueados de AllDebrid son válidos durante horas.
+const unlockInflight = new Map()
+const unlockCache = new Map()
+const UNLOCK_CACHE_TTL = 2 * 60 * 1000
+const magnetInflight = new Map()
+const magnetCache = new Map()
+
 // Get API key from localStorage
 export function getAlldebridApiKey() {
   try {
@@ -134,7 +148,9 @@ async function waitDelayed(delayedId, timeoutMs = 120000) {
     const data = await apiFetch('/link/delayed', { id: delayedId }, true, 'POST')
     if (data?.status === 2 && data.link) return data.link
     if (data?.status === 3) return null
-    await new Promise(r => setTimeout(r, 5000))
+    // 1.5s: el endpoint es barato (POST liviano) y los delayed de 1fichier
+    // suelen resolverse en segundos — con 5s se perdía medio paso de media.
+    await new Promise(r => setTimeout(r, 1500))
   }
   return null
 }
@@ -144,6 +160,21 @@ async function waitDelayed(delayedId, timeoutMs = 120000) {
 // `link` is the direct, already-unlocked URL. data.streams entries are NOT
 // returned: they are still-restricted variants that need /link/streaming.
 export async function unlockLink(linkUrl) {
+  const hit = unlockCache.get(linkUrl)
+  if (hit && Date.now() - hit.t < UNLOCK_CACHE_TTL) return hit.res
+  unlockCache.delete(linkUrl)
+  let p = unlockInflight.get(linkUrl)
+  if (!p) {
+    p = unlockLinkRemote(linkUrl)
+    unlockInflight.set(linkUrl, p)
+    p.finally(() => { if (unlockInflight.get(linkUrl) === p) unlockInflight.delete(linkUrl) })
+  }
+  const res = await p
+  if (res?.link) unlockCache.set(linkUrl, { t: Date.now(), res })
+  return res
+}
+
+async function unlockLinkRemote(linkUrl) {
   try {
     const data = await apiFetch('/link/unlock', { link: linkUrl })
     if (!data) return { link: null, error: 'no_data' }
@@ -213,11 +244,30 @@ export async function deleteMagnet(magnetId) {
   }
 }
 
-// Upload magnet and wait for it to be ready (polls every 3s, up to 60s)
+// Upload magnet and wait for it to be ready (polls every 2s, up to 60s)
 // Returns array of direct streaming links or null.
 // opts.season/episode: en packs de temporada desbloquea solo el archivo del
 // episodio pedido (fileIdx estilo Peerflix) en vez de todos los links.
 export async function resolveMagnet(magnetUrl, timeoutMs = 60000, opts = {}) {
+  // Dedup por magnet+episodio: dos resoluciones concurrentes del mismo torrent
+  // comparten upload + polling en vez de subir el magnet dos veces. La caché
+  // corta evita re-subirlo si el usuario reabre el mismo episodio.
+  const key = `${magnetUrl}|${opts.season ?? ''}|${opts.episode ?? ''}`
+  const hit = magnetCache.get(key)
+  if (hit && Date.now() - hit.t < UNLOCK_CACHE_TTL) return hit.res
+  magnetCache.delete(key)
+  let p = magnetInflight.get(key)
+  if (!p) {
+    p = resolveMagnetRemote(magnetUrl, timeoutMs, opts)
+    magnetInflight.set(key, p)
+    p.finally(() => { if (magnetInflight.get(key) === p) magnetInflight.delete(key) })
+  }
+  const res = await p
+  if (res?.length) magnetCache.set(key, { t: Date.now(), res })
+  return res
+}
+
+async function resolveMagnetRemote(magnetUrl, timeoutMs, opts) {
   const magnetId = await uploadMagnet(magnetUrl)
   if (!magnetId) return null
 
@@ -226,13 +276,11 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000, opts = {}) {
     const status = await getMagnetStatus(magnetId)
     if (status.status === 'ready' && status.links?.length) {
       // Los links de /magnet/status son restringidos: hay que pasarlos por
-      // /link/unlock para obtener la URL final reproducible.
+      // /link/unlock para obtener la URL final reproducible. En paralelo —
+      // en serie cada unlock sumaba un round-trip extra por archivo.
       const picked = pickTorrentEntries(status.links, opts) || status.links
-      const direct = []
-      for (const l of picked) {
-        const unlocked = await unlockLink(l.link)
-        direct.push(unlocked?.link || l.link)
-      }
+      const direct = (await Promise.all(picked.map(l => unlockLink(l.link))))
+        .map((u, i) => u?.link || picked[i].link)
       deleteMagnet(magnetId).catch(() => {})
       return direct.length ? direct : null
     }
@@ -241,10 +289,10 @@ export async function resolveMagnet(magnetUrl, timeoutMs = 60000, opts = {}) {
       return null
     }
     // Still processing, wait and retry
-    await new Promise(r => setTimeout(r, 3000))
+    await new Promise(r => setTimeout(r, 2000))
   }
   // Timeout: NO borrar el magnet — AllDebrid sigue bajándolo en su servidor y
-  // queda cacheado para la próxima petición (igual que el fix de RealDebrid).
+  // queda cacheado para la próxima petición.
   return null
 }
 
@@ -266,7 +314,7 @@ const SUPPORTED_DOMAINS = [
   // File hosts
   'alfafile.net', 'file.al', 'file-upload.com', 'filedot.to', 'filedot.xyz',
   'filerio.in', 'filespace.com', 'filezip.cc', 'katfile.com', 'prefiles.com',
-  'simfileshare.net', 'world-files.com',
+  'simfileshare.net', 'world-files.com', 'filefactory.com',
   // Mixdrop (AllDebrid supports it)
   'mixdrop.co', 'mixdrop.to', 'mixdrop.sx',
   // Streamtape

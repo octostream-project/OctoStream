@@ -4271,9 +4271,9 @@ public class ExoPlayerPlugin extends Plugin {
         } else if (lowerUrl.contains(".mpd")) {
             effectiveType = "dash";
         }
-        // Debrid download links (real-debrid.com/d/, alldebrid.com/d/) are direct file downloads
+        // Debrid download links (alldebrid.com/d/) are direct file downloads
         // Don't override "mp4" streamType with "hls" for these URLs
-        if (lowerUrl.contains("download.real-debrid.com") || lowerUrl.contains("download.alldebrid.com") || lowerUrl.contains("real-debrid.com/d/") || lowerUrl.contains("alldebrid.com/d/")) {
+        if (lowerUrl.contains("download.alldebrid.com") || lowerUrl.contains("alldebrid.com/d/")) {
             if (!effectiveType.equals("dash")) {
                 effectiveType = "mp4";
             }
