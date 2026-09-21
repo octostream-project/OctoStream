@@ -10,6 +10,7 @@ const HOST = 'https://flizzmovies.org/'
 export const flizzmovies = {
   id: 'flizzmovies',
   name: 'FlizzMovies',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE],
   host: HOST,
 
@@ -166,7 +167,9 @@ export const flizzmovies = {
   },
 
   async search({ query, type }) {
-    if (type !== CONTENT_TYPES.MOVIE) return []
+    // Solo películas: rechaza tipos explícitos distintos, pero permite llamadas
+    // sin type (el agregador busca en todos los canales sin filtrar)
+    if (type && type !== CONTENT_TYPES.MOVIE) return []
     // FlizzMovies search: POST AJAX to home page with {s: query}
     const html = await postHtml(`${HOST}`, `s=${encodeURIComponent(query)}`, null, {
       'Referer': HOST,

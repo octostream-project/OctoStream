@@ -2,6 +2,8 @@
 // Skipped by default (hits the network); run explicitly with:
 //   AUDIT_LIVE=1 npx vitest run src/plugins/bundled/plurtasko/channels/audit.test.js
 import { describe, it } from 'vitest'
+import { config } from 'dotenv'
+config() // carga .env (VITE_HDFULL_USERNAME/PASSWORD)
 
 import { animeflvone } from './animeflvone.js'
 import { animeyt } from './animeyt.js'
@@ -44,37 +46,54 @@ const kindOf = (ch) =>
 const withTimeout = (p, ms) =>
   Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error(`timeout ${ms}ms`)), ms))])
 
+// Resumen compacto de un stream: server · lang · quality · streamType
+const streamInfo = (s) =>
+  `${s.server || s.name || '?'} [${s.lang || '-'}|${s.quality || '-'}|${s.streamType || '-'}]`
+
+// Cuántos streams llevan los campos que la UI muestra (server, lang, quality)
+const fieldCoverage = (streams) => {
+  const n = streams.length
+  const cov = (f) => streams.filter(s => s[f] && String(s[f]).trim()).length
+  return `${n} total | server:${cov('server')} lang:${cov('lang')} quality:${cov('quality')}`
+}
+
 describe.skipIf(!process.env.AUDIT_LIVE)('AUDIT real sites', () => {
   for (const ch of CHANNELS) {
     it(`${ch.id}`, async () => {
-      const report = { id: ch.id, catalog: null, search: null, meta: null, streams: null }
       const query = QUERY_BY_KIND[kindOf(ch)]
+      const lines = [`\n### ${ch.id}`]
 
       try {
         const catId = ch.catalogs?.[0]?.id
         if (catId) {
           const items = await withTimeout(ch.getCatalog({ id: catId, skip: 0, top: 10 }), 25000)
-          report.catalog = `${items?.length ?? 0} items` + (items?.[0] ? ` | first: "${items[0].name}"` : '')
+          lines.push(`  catalog: ${items?.length ?? 0} items` + (items?.[0] ? ` | first: "${items[0].name}"` : ''))
         }
-      } catch (e) { report.catalog = `ERR ${e.message}` }
+      } catch (e) { lines.push(`  catalog: ERR ${e.message}`) }
 
       try {
         const items = await withTimeout(ch.search({ query }), 25000)
-        report.search = `${items?.length ?? 0} items` + (items?.[0] ? ` | first: "${items[0].name}" (${items[0].type})` : '')
-        if (items?.length) {
-          const meta = await withTimeout(ch.getMeta({ id: items[0].id }), 25000).catch(e => ({ err: e.message }))
-          report.meta = meta?.err ? `ERR ${meta.err}` : `${meta?.episodes?.length ?? '-'} eps | ${meta?.name ?? 'no-name'}`
-          const streamArg = meta?.episodes?.length ? meta.episodes[0] : { id: items[0].id }
+        lines.push(`  search(${query}): ${items?.length ?? 0} items`)
+        // Probar hasta 2 resultados distintos por canal
+        for (const item of (items || []).slice(0, 2)) {
+          lines.push(`  ▸ "${item.name}" (${item.type})`)
+          const meta = await withTimeout(ch.getMeta({ id: item.id }), 25000).catch(e => ({ err: e.message }))
+          if (meta?.err) { lines.push(`    meta: ERR ${meta.err}`); continue }
+          lines.push(`    meta: ${meta?.episodes?.length ?? '-'} eps`)
+          const ep = meta?.episodes?.length ? meta.episodes[0] : { id: item.id }
           const streams = await withTimeout(
-            ch.getStreams({ id: streamArg.id, type: items[0].type }), 30000
+            ch.getStreams({ id: ep.id, type: item.type, name: meta?.name || item.name, season: ep.season, episode: ep.episode }),
+            35000
           ).catch(e => ({ err: e.message }))
-          report.streams = streams?.err
-            ? `ERR ${streams.err}`
-            : `${streams?.length ?? 0} streams` + (streams?.[0] ? ` | ${streams[0].server || streams[0].name}` : '')
+          if (streams?.err) { lines.push(`    streams: ERR ${streams.err}`); continue }
+          lines.push(`    streams: ${fieldCoverage(streams || [])}`)
+          for (const s of (streams || []).slice(0, 4)) lines.push(`      - ${streamInfo(s)}`)
+          const torrents = (streams || []).filter(s => s.streamType === 'torrent' || /magnet:|\.torrent/i.test(String(s.url)))
+          if (torrents.length) lines.push(`      ⛓ ${torrents.length} torrent/magnet`)
         }
-      } catch (e) { report.search = `ERR ${e.message}` }
+      } catch (e) { lines.push(`  search(${query}): ERR ${e.message}`) }
 
-      console.log(`\n### ${ch.id}\n  catalog: ${report.catalog}\n  search(${query}): ${report.search}\n  meta: ${report.meta}\n  streams: ${report.streams}`)
-    }, 120000)
+      console.log(lines.join('\n'))
+    }, 180000)
   }
 })

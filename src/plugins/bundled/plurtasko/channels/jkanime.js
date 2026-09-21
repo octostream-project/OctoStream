@@ -12,6 +12,7 @@ const HOST = 'https://jkanime.net/'
 export const jkanime = {
   id: 'jkanime',
   name: 'JKAnime',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST,
 

@@ -11,6 +11,7 @@ const HOST = 'https://vww.animeflv.one/'
 export const animeflvone = {
   id: 'animeflvone',
   name: 'AnimeFlvOne',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST,
 

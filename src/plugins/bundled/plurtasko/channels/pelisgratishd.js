@@ -12,6 +12,7 @@ const HOST = 'https://pelisgratishd.zip/'
 export const pelisgratishd = {
   id: 'pelisgratishd',
   name: 'PelisGratishD',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 

@@ -1,11 +1,42 @@
-// GnulaTV channel - ported from Plurtasko's gnulatv.py
-// Movies and series in Spanish (Castilian, Latin, Vose)
+// GnulaHD channel — mirror vivo de Gnula (ww3.gnulahd.nu).
+// Movies and series in Spanish (Castilian, Latin, Vose).
+//
+// El dominio original (gnula.one) quedó detrás de reCAPTCHA — este clon
+// mantiene el catálogo con un player propio:
+//   - Ficha de película: `_gnrdPid` + `_gnrdTok` inline en el HTML.
+//   - Ficha de serie: cada `a.gnrd-epc` lleva data-id/data-t/data-s/data-e.
+//   - Player: GET /wp-json/gnrd/v1/player?id=PID&t=TOK → {p: base64 XOR}
+//     gnrdUnpack: atob → XOR con [103,78,55,100] → JSON
+//     {langs:[{label,servers:[{title,src}]}], dl:[{name,lang,qual,url}]}.
 
 import { CONTENT_TYPES } from '../../../base.js'
 import { fetchHtml, decodeEntities, absoluteUrl } from '../http.js'
-import { findSingleMatch, findMultipleMatches, detectType, normalizeServer } from '../scraper.js'
+import { findSingleMatch, findMultipleMatches, normalizeServer } from '../scraper.js'
+import { isAlldebridSupported } from '../../alldebrid.js'
 
-const HOST = 'https://www2.gnula.one/'
+const HOST = 'https://ww3.gnulahd.nu/'
+const API = `${HOST}wp-json/gnrd/v1/player`
+
+// gnrdUnpack del propio player: atob → XOR 4-byte key → JSON.
+function gnrdUnpack(b64) {
+  try {
+    const bin = atob(b64)
+    const k = [103, 78, 55, 100]
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) ^ k[i & 3]
+    return JSON.parse(new TextDecoder('utf-8').decode(bytes))
+  } catch { return null }
+}
+
+// Tarjetas: "LAT"/"CAST"/"SUB" — player API: "Latino"/"Castellano"/"Subtitulado"
+const LANG_LABEL = {
+  lat: 'Lat', latino: 'Lat',
+  cast: 'Esp', esp: 'Esp', castellano: 'Esp', español: 'Esp', espaniol: 'Esp',
+  sub: 'VOSE', subtitulado: 'VOSE', subtitulada: 'VOSE', vose: 'VOSE',
+}
+const langFromLabel = (l) => LANG_LABEL[String(l || '').toLowerCase().trim()] || ''
+
+const qualFromLabel = (q) => /4k|2160/i.test(q) ? '4K' : /1080|fullhd|hd-r|hdrip|bd/i.test(q) ? '1080P' : /720|hd/i.test(q) ? '720P' : /cam|ts|scr/i.test(q) ? 'CAM' : ''
 
 export const gnulatv = {
   id: 'gnulatv',
@@ -18,39 +49,48 @@ export const gnulatv = {
     { id: 'gnulatv-series', name: 'Gnula: Series', type: CONTENT_TYPES.SERIES },
   ],
 
-  async getCatalog({ id, skip = 0, top = 50 }) {
-    let url = id === 'gnulatv-movies' ? `${HOST}peliculas`
-      : id === 'gnulatv-series' ? `${HOST}series`
-      : null
-    if (!url) return []
-
-    const html = await fetchHtml(url)
-    if (!html) return []
-
+  // Parsea las tarjetas `a.gnrd-card` (catálogo y búsqueda comparten markup).
+  _parseCards(html, forcedType) {
     const items = []
-    const matches = findMultipleMatches(html, '<article(.*?)</article>')
-    for (const m of matches.slice(skip, skip + top)) {
-      let title = findSingleMatch(m, 'alt="(.*?)"')
-      if (!title) title = findSingleMatch(m, '<h2[^>]*>(.*?)</h2>')
-      const itemUrl = findSingleMatch(m, 'href="(.*?)"')
-      const thumb = findSingleMatch(m, '<img[^>]*src="([^"]+)"')
-      if (!title || !itemUrl) continue
-
-      title = decodeEntities(title.trim())
-      const fullUrl = absoluteUrl(itemUrl, HOST)
-      const itemType = detectType(fullUrl)
-
+    const seen = new Set()
+    for (const m of findMultipleMatches(html, '<a class="gnrd-card" href="([^"]+)"[^>]*title="([^"]+)"')) {
+      const itemUrl = m[1]
+      if (!itemUrl || !itemUrl.includes('/ver/') || seen.has(itemUrl)) continue
+      seen.add(itemUrl)
       items.push({
-        id: `gnulatv:${fullUrl}`,
-        type: itemType === 'series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
-        name: title,
-        title,
-        poster: thumb ? absoluteUrl(thumb, HOST) : null,
-        url: fullUrl,
+        id: `gnulatv:${itemUrl}`,
+        // Las tarjetas no distinguen tipo — getMeta lo corrige por los episodios
+        type: forcedType || CONTENT_TYPES.MOVIE,
+        name: decodeEntities(m[2]).trim(),
+        title: decodeEntities(m[2]).trim(),
+        poster: null,
+        url: itemUrl,
         pluginId: 'plurtasko',
       })
     }
+    // Pósters: el title va en el <a>, la <img> dentro — segunda pasada sobre
+    // el bloque de cada tarjeta para no perderlos.
+    for (const m of findMultipleMatches(html, '(<a class="gnrd-card" href="[^"]+"[\\s\\S]*?</a>)')) {
+      const cardUrl = findSingleMatch(m[1], 'href="([^"]+)"')
+      const item = items.find(it => it.url === cardUrl)
+      if (!item || item.poster) continue
+      const img = findSingleMatch(m[1], '<img[^>]*(?:data-src|src)="([^"]+)"')
+      if (img) item.poster = absoluteUrl(img, HOST)
+    }
     return items
+  },
+
+  async getCatalog({ id, skip = 0, top = 50 }) {
+    const base = id === 'gnulatv-movies' ? `${HOST}ver/peliculas/`
+      : id === 'gnulatv-series' ? `${HOST}ver/series/`
+      : null
+    if (!base) return []
+    const type = id === 'gnulatv-series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE
+
+    const page = Math.floor(skip / 50) + 1
+    const html = await fetchHtml(`${base}?page=${page}`)
+    if (!html) return []
+    return this._parseCards(html, type).slice(0, top)
   },
 
   async getMeta({ id }) {
@@ -58,126 +98,95 @@ export const gnulatv = {
     const html = await fetchHtml(url)
     if (!html) return null
 
-    const pageTitle = findSingleMatch(html, '<title>(.*?)</title>') || ''
-    const heading = findSingleMatch(html, '<h1(?![^>]*report-post-ip)[^>]*>(.*?)</h1>') || ''
-    const title = heading || pageTitle.replace(/\s*(?:&#8211;|–|-)\s*G\s*Nula.*$/i, '')
+    const title = decodeEntities(
+      findSingleMatch(html, 'gnrd-sr">([^<]+)')
+      || (findSingleMatch(html, '<title>(.*?)</title>') || '').replace(/\s*\(\d{4}\).*$/, '').trim()
+    ).trim()
     const poster = findSingleMatch(html, '<meta[^>]*property="og:image"[^>]*content="([^"]+)"')
-      || findSingleMatch(html, '<img[^>]*src="([^"]*)"[^>]*alt="[^"]*poster')
-    const description = findSingleMatch(html, '<meta[^>]*property="og:description"[^>]*content="([^"]+)"')
-      || findSingleMatch(html, '<p[^>]*>(.*?)</p>')
-      || ''
+    const description = decodeEntities(findSingleMatch(html, '<meta name="description" content="([^"]+)"'))
     const year = findSingleMatch(html, '(\\d{4})')
 
-    const isSeries = url.includes('/serie/')
+    // Episodios: a.gnrd-epc lleva pid+token propios → getStreams los usa directo
+    const episodes = []
+    for (const m of findMultipleMatches(html, '<a class="gnrd-epc" href="([^"]+)" data-id="(\\d+)" data-t="([^"]+)" data-s="(\\d+)" data-e="(\\d+)"[^>]*>([\\s\\S]*?)</a>')) {
+      const [, epUrl, pid, tok, s, e, body] = m
+      const epTitle = decodeEntities(findSingleMatch(body, 'gnrd-epc-title">([^<]+)') || '').trim()
+      const overview = decodeEntities(findSingleMatch(body, 'gnrd-epc-ov">([^<]+)') || '').trim()
+      const season = parseInt(s, 10)
+      const episode = parseInt(e, 10)
+      episodes.push({
+        id: `gnulatv:ep:${pid}:${tok}`,
+        name: epTitle || `S${season}E${episode}`,
+        title: epTitle || `Episodio ${episode}`,
+        overview,
+        season,
+        episode,
+        url: epUrl,
+      })
+    }
+    episodes.sort((a, b) => a.season - b.season || a.episode - b.episode)
+
+    const isSeries = episodes.length > 0
     const meta = {
       id,
       type: isSeries ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
-      name: decodeEntities(title.replace(/\s*\|.*$/, '').trim()),
-      title: decodeEntities(title.replace(/\s*\|.*$/, '').trim()),
+      name: title || url,
+      title: title || url,
       poster: poster ? absoluteUrl(poster, HOST) : null,
-      description: decodeEntities(description) || '',
+      description: description || '',
       year: year ? parseInt(year, 10) : null,
       url,
       pluginId: 'plurtasko',
     }
-
-    if (isSeries) {
-      meta.episodes = await this._getEpisodes(url, html)
-    }
+    if (isSeries) meta.episodes = episodes
     return meta
   },
 
-  async _getEpisodes(url, html) {
-    const episodes = []
-    const seen = new Set()
-    const addEpisode = (rawUrl, season, episode) => {
-      const epUrl = absoluteUrl(rawUrl, HOST)
-      const key = `${season}x${episode}`
-      if (!epUrl || seen.has(key)) return
-      seen.add(key)
-      episodes.push({ id: `gnulatv:${epUrl}`, name: `S${season}E${episode}`, season, episode, url: epUrl })
-    }
-    for (const m of findMultipleMatches(html, 'href=["\']([^"\']*/temporada/(\\d+)/capitulo/(\\d+)[^"\']*)["\']')) {
-      addEpisode(m[1], parseInt(m[2], 10), parseInt(m[3], 10))
-    }
-    return episodes.sort((a, b) => a.season - b.season || a.episode - b.episode)
-  },
+  // Player API: pid+token → streams de todos los idiomas + descargas debrid.
+  async _playerStreams(pid, tok, referer, debridEnabled) {
+    const res = await fetch(`${API}?id=${pid}&t=${encodeURIComponent(tok)}`, {
+      headers: { 'Referer': referer },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+    }).catch(() => null)
+    if (!res?.ok) return []
+    const raw = await res.json().catch(() => null)
+    const data = raw?.p ? gnrdUnpack(raw.p) : raw
+    if (!data) return []
 
-  async getStreams({ id, debridEnabled }) {
-    const url = id.replace(/^gnulatv:/, '')
-    const html = await fetchHtml(url)
-    if (!html) return []
-
-    const embeds = [
-      ...findMultipleMatches(html, '<iframe[^>]*data-lazy-src="([^"]+)"'),
-      ...findMultipleMatches(html, '<iframe[^>]*src="([^"]+)"'),
-      ...findMultipleMatches(html, '<iframe[^>]*data-src="([^"]+)"'),
-    ]
-    const directStreams = []
-    const seen = new Set()
-    let embedUrl = ''
-    for (const match of embeds) {
-      const candidate = absoluteUrl(match[1], HOST)
-      if (!candidate || seen.has(candidate) || /about:blank|youtube\.com\/embed|trailer|facebook\.com/i.test(candidate)) continue
-      seen.add(candidate)
-      if (/embed69\.|\/vidurl\//.test(candidate)) {
-        embedUrl ||= candidate
-        continue
-      }
-      const server = this._detectServer(candidate)
-      if (!server) continue
-      directStreams.push({
-        name: `${server} (?)`,
-        url: candidate,
-        streamType: normalizeServer(server),
-        quality: '',
-        server,
-        pluginName: 'Gnula',
-        pluginId: 'plurtasko',
-      })
-    }
-    if (directStreams.length) return directStreams
-    if (!embedUrl) return []
-
-    const embedHtml = await fetchHtml(embedUrl)
-    return embedHtml ? this._parseEmbed69(embedHtml, debridEnabled) : []
-  },
-
-  _parseEmbed69(html, debridEnabled = false) {
     const streams = []
-    let dataLink = findSingleMatch(html, 'const dataLink =(.*?);')
-    if (!dataLink) dataLink = findSingleMatch(html, 'dataLink(.*?);')
-    if (!dataLink) return []
-
-    const eLinks = dataLink.replace(']},', '"type":"file"').replace(']}]', '"type":"file"')
-    const langs = findMultipleMatches(eLinks, '"video_language":(.*?)"type":"file"')
-
-    for (let langBlock of langs) {
-      let lang = ''
-      if (/SUB/.test(langBlock)) lang = 'Vose'
-      else if (/LAT/.test(langBlock)) lang = 'Lat'
-      else if (/ESP/.test(langBlock)) lang = 'Esp'
-
-      langBlock = langBlock + '"type":"video"'
-      const links = findMultipleMatches(langBlock, '"servername":"(.*?)","link":"(.*?)".*?"type":"video"')
-
-      for (const m of links) {
-        const srv = m[1]
-        const link = m[2]
-        const serverName = srv.toLowerCase().trim()
-        if (!serverName) continue
-        if (/1fichier|plustream|embedsito|disable|xupalace|uploadfox|streamsito/.test(serverName)) { if (!debridEnabled) continue; if (!/1fichier/i.test(serverName)) continue; }
-
-        const server = this._detectServer(link)
+    for (const lang of data.langs || []) {
+      const l = langFromLabel(lang.label)
+      for (const srv of lang.servers || []) {
+        const src = srv.src
+        if (!src || !/^https?:/i.test(src)) continue
+        const server = this._detectServer(src)
         if (!server) continue
-
         streams.push({
-          name: `${server}${lang ? ` (${lang})` : ''}`,
-          url: link,
+          name: `${server}${l ? ` (${l})` : ''}`,
+          url: src,
           streamType: normalizeServer(server),
           quality: '',
           server,
-          lang,
+          lang: l,
+          pluginName: 'Gnula',
+          pluginId: 'plurtasko',
+        })
+      }
+    }
+    // Descargas (1fichier, megaup…) solo como enlaces debrid cuando hay key
+    if (debridEnabled) {
+      for (const d of data.dl || []) {
+        const src = d.url
+        if (!src || !/^https?:/i.test(src) || !isAlldebridSupported(src)) continue
+        const l = langFromLabel(d.lang)
+        const server = String(d.name || 'descarga').toLowerCase()
+        streams.push({
+          name: `${server}${l ? ` (${l})` : ''}`,
+          url: src,
+          streamType: 'embed',
+          quality: qualFromLabel(d.qual),
+          server,
+          lang: l,
           pluginName: 'Gnula',
           pluginId: 'plurtasko',
         })
@@ -186,9 +195,27 @@ export const gnulatv = {
     return streams
   },
 
+  async getStreams({ id, debridEnabled }) {
+    // Episodio de serie: el id ya lleva pid+token
+    const epMatch = id.match(/^gnulatv:ep:(\d+):(.+)$/)
+    if (epMatch) return this._playerStreams(epMatch[1], epMatch[2], HOST, debridEnabled)
+
+    const url = id.replace(/^gnulatv:/, '')
+    const html = await fetchHtml(url)
+    if (!html) return []
+
+    const pid = findSingleMatch(html, '_gnrdPid=(\\d+)')
+    const tok = findSingleMatch(html, '_gnrdTok="([^"]+)"')
+    if (!pid || !tok) return []
+    return this._playerStreams(pid, tok, url, debridEnabled)
+  },
+
   _detectServer(url) {
     const u = url.toLowerCase()
-    if (/streamwish|streamsss|wish|sbspeed|sbplay|watchsb|lvturbo/.test(u)) return 'streamwish'
+    if (/vidara/.test(u)) return 'vidara'
+    if (/byse|bysevepoin/.test(u)) return 'byse'
+    if (/savefiles/.test(u)) return 'savefiles'
+    if (/streamwish|streamsss|sbspeed|sbplay|watchsb|lvturbo/.test(u)) return 'streamwish'
     if (/filemoon|filelions|fmoon/.test(u)) return 'filemoon'
     if (/vidhide/.test(u)) return 'vidhide'
     if (/voe|voex/.test(u)) return 'voe'
@@ -205,55 +232,27 @@ export const gnulatv = {
     if (/vidmoly/.test(u)) return 'vidmoly'
     if (/vidoza/.test(u)) return 'vidoza'
     if (/supervideo/.test(u)) return 'supervideo'
-    if (/fastplay/.test(u)) return 'fastplay'
     if (/lulustream/.test(u)) return 'lulustream'
-    if (/maxstream/.test(u)) return 'maxstream'
     if (/sendvid/.test(u)) return 'sendvid'
     if (/turbovid/.test(u)) return 'turbovid'
     if (/\.mp4|\.mkv|\.m3u8/.test(u)) return 'directo'
-    return ''
+    // Host desconocido: dominio como nombre para no perder el enlace
+    try { return new URL(url).hostname.replace(/^www\./, '').split('.')[0] } catch { return '' }
   },
 
   async search({ query, type }) {
-    const url = `${HOST}?s=${encodeURIComponent(query).replace(/%20/g, '+')}`
-    const html = await fetchHtml(url)
+    const html = await fetchHtml(`${HOST}?s=${encodeURIComponent(query)}`)
     if (!html) return []
-
-    // Los resultados de búsqueda están en un <table> después del título
-    // "Resultados de la búsqueda". El resto de la página tiene sidebar/related.
-    const searchStart = html.indexOf('Resultados de la búsqueda')
-    let searchHtml = html
-    if (searchStart > 0) {
-      const tableStart = html.indexOf('<table', searchStart)
-      const tableEnd = tableStart > 0 ? html.indexOf('</table>', tableStart) : -1
-      if (tableStart > 0 && tableEnd > 0) {
-        searchHtml = html.substring(tableStart, tableEnd + 10)
-      }
-    }
-
-    const items = []
-    // gnula uses <a href="/movie/SLUG"><img alt="TITLE" data-lazyload="POSTER"/></a>
-    const matches = findMultipleMatches(searchHtml, 'href="([^"]*(?:/movie/|/serie/|/series/)[^"]*)"[^>]*>[\\s\\S]*?<img[^>]*alt="([^"]*)"[^>]*>')
-    for (const m of matches) {
-      const itemUrl = absoluteUrl(m[1], HOST)
-      const title = decodeEntities((m[2] || '').trim())
-      if (!itemUrl || !title) continue
-      const thumb = findSingleMatch(m[0], '(?:data-lazyload|src)="([^"]+)"')
-
-      const itemType = detectType(itemUrl)
-      if (type === CONTENT_TYPES.MOVIE && itemType !== 'movie') continue
-      if (type === CONTENT_TYPES.SERIES && itemType !== 'series') continue
-
-      items.push({
-        id: `gnulatv:${itemUrl}`,
-        type: itemType === 'series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
-        name: title,
-        title,
-        poster: thumb ? absoluteUrl(thumb, HOST) : null,
-        url: itemUrl,
-        pluginId: 'plurtasko',
-      })
-    }
-    return items
+    let items = this._parseCards(html)
+    // Las tarjetas no marcan tipo: para filtrar por series/pelis hay que
+    // abrir cada ficha y mirar si tiene episodios (paralelo, cap 8).
+    if (!type || !items.length) return items
+    const checked = await Promise.all(items.slice(0, 8).map(async it => {
+      const meta = await this.getMeta({ id: it.id }).catch(() => null)
+      return meta?.episodes?.length ? { ...it, type: CONTENT_TYPES.SERIES } : it
+    }))
+    // Verificados del tipo pedido + el resto sin verificar (getMeta corrige el
+    // tipo al abrir la ficha — mejor mostrarlos que perder resultados).
+    return checked.filter(it => it.type === type).concat(items.slice(8))
   },
 }

@@ -11,6 +11,7 @@ const HOST = 'https://pelisplushd.bz/'
 export const pelisplushd = {
   id: 'pelisplushd',
   name: 'PelisPlusHD',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 

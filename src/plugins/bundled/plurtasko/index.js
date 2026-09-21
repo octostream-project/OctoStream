@@ -119,10 +119,11 @@ function pickQuality(...candidates) {
 
 // Ensure every stream has quality, lang, and a descriptive name.
 // Called as a post-processing step on all resolved streams.
-function normalizeStream(s) {
+function normalizeStream(s, defaultLang) {
   const quality = pickQuality(s.quality, extractQualityFromText(s.title), extractQualityFromUrl(s.url)) || 'HD'
   // Lang priority: explicit field → name → title → filename in the URL.
-  // Unknown stays '' instead of pretending to be Lat.
+  // Unknown falls back to the channel's defaultLang (sites that only serve
+  // one language — e.g. anime subtitled or Spanish torrents) or stays ''.
   let lang = normalizeLang(s.lang)
   if (!lang) lang = detectLangFromText(s.name)
   if (!lang) lang = detectLangFromText(s.title)
@@ -132,6 +133,7 @@ function normalizeStream(s) {
       lang = detectLangFromText(path)
     } catch {}
   }
+  if (!lang) lang = normalizeLang(defaultLang)
   const server = s.server || 'Unknown'
   // Build name: "Server (Lang) Quality" - e.g. "Streamwish (Lat) 1080P"
   const name = `${server}${lang ? ` (${lang})` : ''} ${quality}`.trim()
@@ -811,7 +813,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
 
   console.log(`[Plurtasko] resolveStreams: ${streams.length} raw → ${expanded.length} expanded (direct: ${directStreams.length}, embed: ${embedStreams.length})`)
   // Normalize all streams to ensure they have quality, lang, and a descriptive name
-  return expanded.map(normalizeStream)
+  return expanded.map(s => normalizeStream(s, context.defaultLang))
 }
 
 export { CHANNELS }
@@ -872,7 +874,7 @@ export const plurtaskoFactory = (config) => {
             streamId = providerEpisode.id
           }
           const rawStreams = await channel.getStreams({ type, id: streamId, season, episode, debridEnabled })
-          return await resolveStreams(rawStreams, onBatch, { season, episode })
+          return await resolveStreams(rawStreams, onBatch, { season, episode, defaultLang: channel.defaultLang })
         }
 
         // Caso 2: ID externo (ej: TMDB) - buscar por nombre en todos los canales
@@ -1196,7 +1198,7 @@ export const plurtaskoFactory = (config) => {
               allStreams = dedupeTorrentStreams(allStreams)
               onBatch(sortHdfull(allStreams))
             } : null
-            const resolved = await resolveStreams(rawStreams, channelOnBatch, { season, episode })
+            const resolved = await resolveStreams(rawStreams, channelOnBatch, { season, episode, defaultLang: ch.defaultLang })
             if (resolved && resolved.length > 0) {
               allStreams = allStreams.filter(s => s._channelId !== ch.id)
               allStreams = allStreams.concat(resolved.map(tagStream))

@@ -11,6 +11,7 @@ const HOST = 'https://repelishd.courses/'
 export const repelishd = {
   id: 'repelishd',
   name: 'RepelisHD',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 

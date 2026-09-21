@@ -11,6 +11,7 @@ const HOST = 'https://pelispedia.is/'
 export const pelispedia = {
   id: 'pelispedia',
   name: 'PelisPedia',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 

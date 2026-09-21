@@ -11,6 +11,7 @@ const HOST = 'https://entrepeliculasyseries.nz/'
 export const entrepeliculasyseries = {
   id: 'entrepeliculasyseries',
   name: 'EntrePeliculasYSeries',
+  defaultLang: 'Lat',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 

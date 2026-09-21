@@ -12,6 +12,7 @@ function decodePlayer(value) {
 export const monoschinos = {
   id: 'monoschinos',
   name: 'MonosChinos',
+  defaultLang: 'VOSE',
   types: [CONTENT_TYPES.SERIES, CONTENT_TYPES.MOVIE, CONTENT_TYPES.ANIME],
   host: HOST,
   catalogs: [
