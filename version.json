@@ -1,16 +1,16 @@
 {
-  "versionCode": 141,
-  "versionName": "1.41",
+  "versionCode": 142,
+  "versionName": "1.42",
   "minCode": 0,
-  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.41/octostream-1.41-arm64-v8a.apk",
-  "sha256": "a5a1cb175fb8a17ffbcdc35c138d5f3a2ec9136bb3afaeea201d83bb9ec233b6",
-  "notes": "",
+  "apkUrl": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-arm64-v8a.apk",
+  "sha256": "8858b09fd04f2aea1e8de1a68a70f763d72d8db04af9495c408817371f24ded1",
+  "notes": "RealDebrid eliminado; AllDebrid mas rapido resolviendo embeds y torrents.",
   "apkUrls": {
-    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.41/octostream-1.41-arm64-v8a.apk",
-    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.41/octostream-1.41-armeabi-v7a.apk"
+    "arm64-v8a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-arm64-v8a.apk",
+    "armeabi-v7a": "https://git.disroot.org/aka.kuro/OctoStream/releases/download/v1.42/octostream-1.42-armeabi-v7a.apk"
   },
   "sha256s": {
-    "arm64-v8a": "a5a1cb175fb8a17ffbcdc35c138d5f3a2ec9136bb3afaeea201d83bb9ec233b6",
-    "armeabi-v7a": "6a5311f18f178aaf2377e5f38bd001d00b9fe9c0f9a47f218f14f6145e0db272"
+    "arm64-v8a": "8858b09fd04f2aea1e8de1a68a70f763d72d8db04af9495c408817371f24ded1",
+    "armeabi-v7a": "ba935448df6673b3ce2bb49affba223cc45d60e7943ca134edfb56db0615a1d7"
   }
 }
