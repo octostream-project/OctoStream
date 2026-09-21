@@ -406,6 +406,15 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     // embed → resolver JS sobre originalUrl; deportes → getStreams del item
     // origen (_fctvItem lleva _noCache, así que devuelve tokens nuevos).
     const resolveFreshStreamUrl = async () => {
+      // YouTube: URL firmada de googlevideo caducada (o servida desde la
+      // caché de resoluciones) → forzar re-resolución con NewPipe.
+      if (stream._refreshUrl) {
+        try {
+          const u = await stream._refreshUrl()
+          if (u && u !== stream.url && /^https?:/i.test(u)) return sanitizeUrl(u)
+        } catch {}
+        return null
+      }
       if (stream.originalUrl) {
         const u = await Promise.race([
           resolveEmbedJs(stream.originalUrl),
@@ -552,6 +561,9 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         // y toleran stalls largos mientras llegan las piezas.
         direct: stream.direct === true || isTorrent,
         longBuffering: isTorrent,
+        // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
+        // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.
+        fastStart: stream.fastStart === true,
         loadingText: isTorrent ? 'Descargando torrent…' : undefined,
         licenseUrl,
         headers: stream.headers || {},
@@ -622,7 +634,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             // manifest tras minutos de reproducción): re-resolver (embed o
             // item de deportes) y reintentar en ExoPlayer una sola vez antes
             // de caer a HLS.js, que moriría con el mismo código HTTP.
-            if ((stream.originalUrl || stream._fctvItem) && !reResolveRef.current) {
+            if ((stream.originalUrl || stream._fctvItem || stream._refreshUrl) && !reResolveRef.current) {
               reResolveRef.current = true
               console.log('[Player] HTTP error — re-resolving fresh URL:', urlHost(stream.originalUrl || stream.url), 'code:', state.errorCode)
               setError(null)

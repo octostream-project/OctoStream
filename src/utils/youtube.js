@@ -51,14 +51,56 @@ export async function resolveYouTube(url) {
   }
 }
 
+// Caché de streams resueltos: las URLs firmadas de googlevideo duran ~6h.
+// TTL 15 min da margen de sobra y hace casi instantánea la reanudación desde
+// "Continuar viendo" o volver a pulsar el mismo vídeo. Si una URL caducara el
+// player la re-resuelve sola vía stream._refreshUrl.
+const streamCache = new Map() // videoId → { ts, stream }
+const inflight = new Map()    // videoId → Promise (dedup prefetch vs click)
+const STREAM_CACHE_TTL_MS = 15 * 60 * 1000
+
+function ytVideoId(url) {
+  const m = String(url || '').match(/(?:watch\?v=|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/)
+  return m ? m[1] : null
+}
+
+export function invalidateYouTubeStream(url) {
+  const id = ytVideoId(url)
+  if (id) streamCache.delete(id)
+}
+
+/**
+ * Resuelve en background para llenar la caché (prefetch al enfocar una
+ * tarjeta). Nunca lanza — los fallos se ignoran: el click resolverá de nuevo.
+ */
+export function prefetchYouTubeStream(url) {
+  const id = ytVideoId(url)
+  if (!id) return
+  const hit = streamCache.get(id)
+  if (hit && Date.now() - hit.ts < STREAM_CACHE_TTL_MS) return
+  resolveYouTubeStream(url).catch(() => {})
+}
+
 /**
  * Get the best playable stream from YouTube resolution.
  * Prefers progressive (muxed audio+video) MP4 streams.
  * @returns {Promise<{url: string, streamType: string, quality: string, title: string} | null>}
  */
-export async function resolveYouTubeStream(url) {
-  const result = await resolveYouTube(url)
-  if (!result) return null
+export async function resolveYouTubeStream(url, { force = false } = {}) {
+  const id = ytVideoId(url)
+  if (!force && id) {
+    const hit = streamCache.get(id)
+    if (hit && Date.now() - hit.ts < STREAM_CACHE_TTL_MS) {
+      console.log('[YouTube] Stream cache hit:', id)
+      return { ...hit.stream }
+    }
+    const pending = inflight.get(id)
+    if (pending) return pending
+  }
+
+  const work = (async () => {
+    const result = await resolveYouTube(url)
+    if (!result) return null
 
   const subtitles = (result.subtitles || [])
     .filter(s => s && s.url)
@@ -70,32 +112,43 @@ export async function resolveYouTubeStream(url) {
       mimeType: s.mimeType || 'application/ttml+xml',
     }))
 
-  // Directos → HLS. VOD → manifest DASH (adaptativo: todas las calidades y
-  // pistas de audio → selector de calidad real en ExoPlayer). Fallback al
-  // mejor MP4 progresivo si el vídeo no expone manifest.
-  // direct: true → YouTube NUNCA va por el proxy WARP: googlevideo y el
-  // endpoint timedtext de subtítulos devuelven 429 desde IPs de datacenter
-  // (Cloudflare WARP). YouTube no está bloqueado por ISP, no lo necesita.
-  const direct = true
-  if (result.hlsUrl) {
-    return { url: result.hlsUrl, streamType: 'hls', quality: 'Live', title: result.title, subtitles, direct }
-  }
-  if (result.dashUrl) {
-    return { url: result.dashUrl, streamType: 'dash', quality: '', title: result.title, subtitles, direct }
-  }
-  if (!result.streams || result.streams.length === 0) return null
+    // Directos → HLS. VOD → manifest DASH (adaptativo: todas las calidades y
+    // pistas de audio → selector de calidad real en ExoPlayer). Fallback al
+    // mejor MP4 progresivo si el vídeo no expone manifest.
+    // direct: true → YouTube NUNCA va por el proxy WARP: googlevideo y el
+    // endpoint timedtext de subtítulos devuelven 429 desde IPs de datacenter
+    // (Cloudflare WARP). YouTube no está bloqueado por ISP, no lo necesita.
+    const direct = true
+    if (result.hlsUrl) {
+      return { url: result.hlsUrl, streamType: 'hls', quality: 'Live', title: result.title, subtitles, direct }
+    }
+    if (result.dashUrl) {
+      return { url: result.dashUrl, streamType: 'dash', quality: '', title: result.title, subtitles, direct }
+    }
+    if (!result.streams || result.streams.length === 0) return null
 
-  // Prefer mp4 progressive streams (muxed audio+video)
-  const mp4Streams = result.streams.filter(s => s.mimeType?.includes('mp4'))
-  const bestStream = (mp4Streams.length > 0 ? mp4Streams : result.streams)[0]
+    // Prefer mp4 progressive streams (muxed audio+video)
+    const mp4Streams = result.streams.filter(s => s.mimeType?.includes('mp4'))
+    const bestStream = (mp4Streams.length > 0 ? mp4Streams : result.streams)[0]
 
-  return {
-    url: bestStream.url,
-    streamType: 'mp4',
-    quality: bestStream.quality || '',
-    title: result.title,
-    subtitles,
-    direct,
+    return {
+      url: bestStream.url,
+      streamType: 'mp4',
+      quality: bestStream.quality || '',
+      title: result.title,
+      subtitles,
+      direct,
+    }
+  })()
+
+  if (!id) return work
+  inflight.set(id, work)
+  try {
+    const stream = await work
+    if (stream) streamCache.set(id, { ts: Date.now(), stream })
+    return stream
+  } finally {
+    if (inflight.get(id) === work) inflight.delete(id)
   }
 }
 

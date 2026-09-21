@@ -1,14 +1,23 @@
+import { useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { Play, Clock, CheckCircle2 } from 'lucide-react'
 import { useTranslation } from '../i18n/index.js'
 import { formatDuration } from '../utils/format.js'
+import { prefetchYouTubeStream } from '../utils/youtube.js'
 
 export default function ContinueWatching() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const watchHistory = useStore(s => s.watchHistory)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
+  // Prefetch YouTube con debounce: moverse rápido por la fila no debe lanzar
+  // un resolve de NewPipe por cada tarjeta tocada.
+  const prefetchTimer = useRef(null)
+  const prefetchYt = (id) => {
+    if (prefetchTimer.current) clearTimeout(prefetchTimer.current)
+    prefetchTimer.current = setTimeout(() => prefetchYouTubeStream(id), 400)
+  }
 
   // Check if a series is fully watched (all seasons/episodes)
   const isSeriesComplete = (item) => {
@@ -64,6 +73,10 @@ export default function ContinueWatching() {
               tabIndex={0}
               data-tv-card
               role="button"
+              // YouTube: pre-resolver el stream al enfocar la tarjeta para que
+              // reanudar desde aquí no espere el resolve de NewPipe.
+              onFocus={() => { if (item.type === 'youtube') prefetchYt(item.id.slice(3)) }}
+              onMouseEnter={() => { if (item.type === 'youtube') prefetchYt(item.id.slice(3)) }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
