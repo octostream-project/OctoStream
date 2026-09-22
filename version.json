@@ -1,18 +1,18 @@
 {
-  "versionCode": 150,
-  "versionName": "1.50",
+  "versionCode": 151,
+  "versionName": "1.51",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.50/octostream-1.50-arm64-v8a.apk",
-  "sha256": "c40889094b647ab12326302f35cdb7213302633c3a8d1008606cc9f34947cd0a",
-  "notes": "Aviso legal en Ajustes. Migración a GitHub Releases",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.51/octostream-1.51-arm64-v8a.apk",
+  "sha256": "bc60d9f1b30daa9624b887b09c90add843442a822225f0b8a4d00c301e6f621e",
+  "notes": "Fix debrid: cambio de episodio y autoplay",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.50/octostream-1.50-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.50/octostream-1.50-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.50/octostream-1.50-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.51/octostream-1.51-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.51/octostream-1.51-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.51/octostream-1.51-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "c40889094b647ab12326302f35cdb7213302633c3a8d1008606cc9f34947cd0a",
-    "armeabi-v7a": "5be8a19c04228773fa928d3131fb4463f0dd52b6c7fad3bfa1e1c949ba578740",
-    "x86_64": "247343399ec77f1ea60df143d2d110fc15b6cec5857cc021597caf827f011336"
+    "arm64-v8a": "bc60d9f1b30daa9624b887b09c90add843442a822225f0b8a4d00c301e6f621e",
+    "armeabi-v7a": "823ef19ad865b4dd6103a99e25c6185d8a23926e1dfe82d4f8df47efa9fe8a8d",
+    "x86_64": "61db55136289946acb579ad4319d50d829118d7b5ad4a82031c4ad4aca5c6351"
   }
 }
