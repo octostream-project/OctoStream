@@ -527,7 +527,12 @@ export default function Details() {
     }
   }
 
-  const handlePlay = async (stream, skipResume = false) => {
+  // candidatesPool: lista de streams del episodio/contenido actual pasada por
+  // el caller. Importante en autoplay/cambio de episodio: el estado
+  // `episodeStreams` aún lleva los enlaces del episodio ANTERIOR cuando
+  // handlePlay corre dentro de handlePlayEpisode — usarlo haría que el
+  // fallback debrid reprodujera el capítulo viejo.
+  const handlePlay = async (stream, skipResume = false, candidatesPool = null) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
@@ -540,8 +545,10 @@ export default function Details() {
       setResolvingStream(true)
       // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: si uno
       // falla, prueba automáticamente el resto de enlaces debrid del episodio.
+      const pool = (candidatesPool && candidatesPool.length ? candidatesPool
+        : (episodeStreams && episodeStreams.length ? episodeStreams : streams)) || []
       const seen = new Set([stream.url])
-      const others = [...(episodeStreams || []), ...(streams || [])]
+      const others = pool
         .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
       const candidates = [stream, ...others].slice(0, 5)
       let lastError = null
@@ -808,13 +815,18 @@ export default function Details() {
             // reproducir inmediatamente, sin volver a esperar 20 segundos.
             if (stale()) return
             setResumeTime(resumeAt != null ? resumeAt : 0)
-            handlePlay(bestStream, true)
+            // El guard anti-doble-disparo se libera cuando la transición
+            // termina (handlePlay resuelve). Si quedara en true, ningún
+            // ended/popup posterior volvería a avanzar de episodio.
+            Promise.resolve(handlePlay(bestStream, true, epStreams))
+              .then(() => { if (!stale()) nextEpisodeTriggeredRef.current = false })
           } else {
             // Autoplay inicial diferido: permite elegir otro stream durante 20s.
             scheduleAutoplay(() => {
               if (stale()) return
               setResumeTime(resumeAt != null ? resumeAt : 0)
-              handlePlay(bestStream, true)
+              Promise.resolve(handlePlay(bestStream, true, epStreams))
+                .then(() => { if (!stale()) nextEpisodeTriggeredRef.current = false })
             })
           }
         } else {
@@ -826,11 +838,13 @@ export default function Details() {
         console.warn(`[Details] No streams found for ${meta.name} S${ep.season}E${ep.episode}`)
         setEpisodeLoading(false)
         setEpisodeError(`No se encontraron enlaces para "${meta.name} S${ep.season}E${ep.episode}". Prueba con otra fuente.`)
+        nextEpisodeTriggeredRef.current = false
       }
     } catch (e) {
       console.warn('[Details] Failed to load episode streams:', e?.message)
       setEpisodeLoading(false)
       setEpisodeError(`Error al buscar enlaces: ${e?.message || 'desconocido'}`)
+      nextEpisodeTriggeredRef.current = false
     }
   }
 
@@ -1085,6 +1099,7 @@ export default function Details() {
           }}
           onClose={() => {
             cancelAutoplay()
+            nextEpisodeTriggeredRef.current = false
             setSelectedStream(null)
             // Guardar el último canal visto al cerrar el player (igual que LiveTV).
             // Solo se guarda uno: el último canal al que se zappeó o el inicial.
