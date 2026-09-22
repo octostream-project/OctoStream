@@ -91,13 +91,13 @@ describe('alldebrid resolveMagnet', () => {
 
   it('uploads, polls and unlocks picked links in parallel', async () => {
     // Sin archivos de vídeo claros, pickTorrentEntries devuelve null y se
-    // desbloquean todos los links — en paralelo.
+    // desbloquean todos los links — en paralelo. Formato v4.1: árbol `files`.
     global.fetch = mockApi(magnetHandlers({
       magnets: [{
-        status: 'Ready',
-        links: [
-          { link: 'https://alldebrid.com/f/one', filename: 'a.bin', size: 1 },
-          { link: 'https://alldebrid.com/f/two', filename: 'b.bin', size: 1 },
+        statusCode: 4,
+        files: [
+          { n: 'a.bin', s: 1, l: 'https://alldebrid.com/f/one' },
+          { n: 'sub', e: [{ n: 'b.bin', s: 1, l: 'https://alldebrid.com/f/two' }] },
         ],
         filename: 'pack',
       }],
@@ -116,10 +116,10 @@ describe('alldebrid resolveMagnet', () => {
   it('picks only the matching episode file in season packs', async () => {
     global.fetch = mockApi(magnetHandlers({
       magnets: [{
-        status: 'Ready',
-        links: [
-          { link: 'https://alldebrid.com/f/e1', filename: 'Show.S01E01.mkv', size: 100 },
-          { link: 'https://alldebrid.com/f/e3', filename: 'Show.S01E03.mkv', size: 100 },
+        statusCode: 4,
+        files: [
+          { n: 'Show.S01E01.mkv', s: 100, l: 'https://alldebrid.com/f/e1' },
+          { n: 'Show.S01E03.mkv', s: 100, l: 'https://alldebrid.com/f/e3' },
         ],
       }],
     }))
@@ -129,9 +129,23 @@ describe('alldebrid resolveMagnet', () => {
     expect(global.fetch.mock.calls.filter(c => String(c[0]).includes('/link/unlock'))).toHaveLength(1)
   })
 
+  it('handles single-magnet object response (v4.1 with id)', async () => {
+    // Con `id` la API real devuelve magnets como objeto, no array.
+    global.fetch = mockApi({
+      '/magnet/upload': { magnets: [{ id: 43 }] },
+      '/magnet/status': {
+        magnets: { statusCode: 4, files: [{ n: 'z.mkv', s: 1, l: 'https://alldebrid.com/f/z' }] },
+      },
+      '/link/unlock': () => ({ link: 'https://cdn.example.com/z.mp4' }),
+      '/magnet/delete': {},
+    })
+    const links = await resolveMagnet('magnet:?xt=urn:btih:dddd', 10000)
+    expect(links).toEqual(['https://cdn.example.com/z.mp4'])
+  })
+
   it('dedups concurrent resolutions of the same magnet', async () => {
     global.fetch = mockApi(magnetHandlers({
-      magnets: [{ status: 'Ready', links: [{ link: 'https://alldebrid.com/f/x', filename: 'x.mkv', size: 1 }] }],
+      magnets: [{ statusCode: 4, files: [{ n: 'x.mkv', s: 1, l: 'https://alldebrid.com/f/x' }] }],
     }))
     const [a, b] = await Promise.all([
       resolveMagnet('magnet:?xt=urn:btih:bbbb', 10000),
@@ -144,7 +158,7 @@ describe('alldebrid resolveMagnet', () => {
 
   it('caches resolved links for picker re-opens', async () => {
     global.fetch = mockApi(magnetHandlers({
-      magnets: [{ status: 'Ready', links: [{ link: 'https://alldebrid.com/f/y', filename: 'y.mkv', size: 1 }] }],
+      magnets: [{ statusCode: 4, files: [{ n: 'y.mkv', s: 1, l: 'https://alldebrid.com/f/y' }] }],
     }))
     await resolveMagnet('magnet:?xt=urn:btih:cccc', 10000)
     const again = await resolveMagnet('magnet:?xt=urn:btih:cccc', 10000)

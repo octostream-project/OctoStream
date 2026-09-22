@@ -30,3 +30,7 @@ releases/*.apk
 
 # APKs de release — se suben como assets de release (repo con cuota de 1GB)
 releases/*.apk
+
+# Firma de release (nunca commitear)
+*.jks
+keystore.properties

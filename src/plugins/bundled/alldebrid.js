@@ -16,6 +16,8 @@ import { getItemSync, removeItemSync } from '../../utils/storage.js'
 import { pickTorrentEntries } from '../../utils/torrentPick.js'
 
 const API_BASE = 'https://api.alldebrid.com/v4'
+// /v4/magnet/status está discontinuado: el estado de magnets vive en v4.1.
+const API_BASE_41 = 'https://api.alldebrid.com/v4.1'
 const AGENT = 'octostream_stream'
 
 // Solo host para logs: las URLs de unlock llevan token en el query.
@@ -100,8 +102,8 @@ export async function checkPin(pin, check) {
 }
 
 // Build API URL with agent and apikey
-function apiUrl(endpoint, params = {}) {
-  const url = new URL(`${API_BASE}${endpoint}`)
+function apiUrl(endpoint, params = {}, base = API_BASE) {
+  const url = new URL(`${base}${endpoint}`)
   url.searchParams.set('agent', AGENT)
   const key = getAlldebridApiKey()
   if (key) url.searchParams.set('apikey', key)
@@ -114,11 +116,11 @@ function apiUrl(endpoint, params = {}) {
 // Fetch JSON from AllDebrid API (with automatic re-authentication on bad API key)
 // method 'POST' envía params como form-urlencoded en el body (algunos
 // endpoints como /link/delayed solo aceptan POST).
-async function apiFetch(endpoint, params = {}, retry = true, method = 'GET') {
+async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', base = API_BASE) {
   const key = getAlldebridApiKey()
   if (!key) throw new Error('AllDebrid API key not configured')
 
-  const url = apiUrl(endpoint, method === 'GET' ? params : {})
+  const url = apiUrl(endpoint, method === 'GET' ? params : {}, base)
   const res = await fetchT(url, method === 'POST'
     ? { method: 'POST', body: new URLSearchParams(params) }
     : {})
@@ -208,19 +210,33 @@ export async function uploadMagnet(magnetUrl) {
   }
 }
 
+// Árbol `files` de v4.1 ({n,s,l} con subcarpetas {n,e:[…]}) → lista plana
+// con la misma forma que devolvía el viejo /v4/magnet/status (link/name/size).
+function flattenMagnetFiles(files, out = []) {
+  for (const f of files || []) {
+    if (f.l) out.push({ link: f.l, name: f.n || '', size: f.s || 0 })
+    if (Array.isArray(f.e)) flattenMagnetFiles(f.e, out)
+  }
+  return out
+}
+
 // Check magnet status. Returns { status, links, filename } when ready.
 // status: 'processing' | 'ready' | 'error'
+// v4.1: statusCode 0-3 procesando, 4 listo, >=5 error. Los links restringidos
+// vienen en el árbol `files` (o en /magnet/files si falta).
 export async function getMagnetStatus(magnetId) {
   try {
-    const data = await apiFetch('/magnet/status', { id: magnetId })
-    if (!data || !data.magnets || !data.magnets.length) return { status: 'error' }
-    const mag = data.magnets[0]
-    if (mag.status === 'Ready') {
-      const links = (mag.links || []).map(l => ({
-        link: l.link,
-        name: l.filename || '',
-        size: l.size || 0,
-      }))
+    const data = await apiFetch('/magnet/status', { id: magnetId }, true, 'GET', API_BASE_41)
+    const mags = data?.magnets
+    // Con `id` concreto `magnets` es un objeto; sin filtro, un array.
+    const mag = Array.isArray(mags) ? mags[0] : mags
+    if (!mag || mag.error) return { status: 'error' }
+    if (mag.statusCode === 4) {
+      let links = flattenMagnetFiles(mag.files)
+      if (!links.length) {
+        const files = await apiFetch('/magnet/files', { 'id[]': magnetId }, true, 'GET', API_BASE_41)
+        links = flattenMagnetFiles(files?.magnets?.[0]?.files)
+      }
       return {
         status: 'ready',
         links,
@@ -228,7 +244,12 @@ export async function getMagnetStatus(magnetId) {
         size: mag.size || 0,
       }
     }
-    return { status: 'processing', progress: mag.downloadPercent || 0 }
+    if (mag.statusCode >= 5) return { status: 'error' }
+    return {
+      status: 'processing',
+      progress: mag.processingPerc ??
+        (mag.size ? Math.min(99, Math.round((mag.downloaded || 0) * 100 / mag.size)) : 0),
+    }
   } catch (e) {
     console.warn('[AllDebrid] getMagnetStatus failed:', e?.message)
     return { status: 'error' }
