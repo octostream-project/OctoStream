@@ -4328,14 +4328,18 @@ public class ExoPlayerPlugin extends Plugin {
         String effectiveType = streamType != null ? streamType.toLowerCase() : "hls";
         if (lowerUrl.contains(".m3u8") || lowerUrl.contains("m3u8")) {
             effectiveType = "hls";
-        } else if (lowerUrl.contains(".mp4") || lowerUrl.contains("videoplayback")) {
+        } else if (lowerUrl.contains(".mp4") || lowerUrl.contains("videoplayback")
+                || lowerUrl.matches(".*\\.(mkv|avi|webm|mov|m4v|mpg|mpeg|wmv|flv|ts)([?#].*)?$")) {
+            // Ficheros progresivos — un .mkv etiquetado "hls" hacía que el
+            // parser HLS lanzara 3002 "Input does not start with #EXTM3U".
             effectiveType = "mp4";
         } else if (lowerUrl.contains(".mpd")) {
             effectiveType = "dash";
         }
-        // Debrid download links (alldebrid.com/d/) are direct file downloads
-        // Don't override "mp4" streamType with "hls" for these URLs
-        if (lowerUrl.contains("download.alldebrid.com") || lowerUrl.contains("alldebrid.com/d/")) {
+        // Debrid download links (alldebrid.com/d/, CDN *.debrid.it) are
+        // direct file downloads — no playlist aunque streamType diga "hls".
+        if (lowerUrl.contains("download.alldebrid.com") || lowerUrl.contains("alldebrid.com/d/")
+                || lowerUrl.matches(".*\\.debrid\\.(it|al|com|cx)/.*")) {
             if (!effectiveType.equals("dash")) {
                 effectiveType = "mp4";
             }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { openSubtitlesPlugin } from '../plugins/builtIn/index.js'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
+import { inferStreamType } from '../utils/streamType.js'
 import { isAndroidNative } from '../utils/platform.js'
 import { createAndroidHlsLoader, setManifestBaseUrl } from '../utils/hlsAndroidLoader.js'
 import { setPlayerOpen, markPlayerClosed } from '../utils/tvNavigation.js'
@@ -572,7 +573,10 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       if (cancelled) return
       const playArgs = {
         url: streamUrl,
-        streamType: isTorrent ? 'mp4' : stream.streamType || 'hls',
+        // El tipo se deduce de la URL FINAL (post-debrid/post-resolver):
+        // el streamType del proveedor puede quedar obsoleto — un .mkv
+        // desbloqueado llegaba como 'hls' y ExoPlayer daba 3002.
+        streamType: isTorrent ? 'mp4' : inferStreamType(streamUrl, stream.streamType || 'hls'),
         // Los torrents van por el servidor local (127.0.0.1) — nunca por WARP —
         // y toleran stalls largos mientras llegan las piezas.
         direct: stream.direct === true || isTorrent,
@@ -661,8 +665,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                 if (fresh) {
                   console.log('[Player] Re-resolved URL, retrying ExoPlayer:', urlHost(fresh))
                   playArgs.url = fresh
-                  playArgs.streamType = /\.m3u8(\?|$)/i.test(fresh) ? 'hls'
-                    : /\.mp4(\?|$)/i.test(fresh) ? 'mp4' : playArgs.streamType
+                  playArgs.streamType = inferStreamType(fresh, playArgs.streamType)
                   playStream(playArgs, onPlaybackState).catch(e => {
                     console.warn('[Player] ExoPlayer retry after re-resolve failed:', e?.message)
                     if (!cancelled && !closedRef.current) {

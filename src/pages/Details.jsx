@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore.js'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
+import { inferStreamType } from '../utils/streamType.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
@@ -581,7 +582,7 @@ export default function Details() {
         // El enlace 1fichier original — si la URL firmada caduca en mitad de
         // la reproducción, VideoPlayer re-desbloquea desde aquí.
         originalDebridUrl: resolved.cand.url,
-        streamType: /\.m3u8(\?|$)/i.test(resolved.direct) ? 'hls' : 'mp4',
+        streamType: inferStreamType(resolved.direct, 'mp4'),
       }
     }
     // If the stream has an originalUrl (embed page), always resolve fresh
@@ -608,9 +609,7 @@ export default function Details() {
           new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
         ])
         if (freshUrl && freshUrl !== stream.originalUrl) {
-          const freshType = /\.m3u8/i.test(freshUrl) || /m3u8/i.test(freshUrl) ? 'hls'
-            : /\.mp4/i.test(freshUrl) ? 'mp4'
-            : stream.streamType
+          const freshType = inferStreamType(freshUrl, stream.streamType)
           // Fastream (and similar token-locked CDNs) need the exact headers that
           // Alfa/Balandro/ResolveURL append: Referer = origin/ and Origin = origin.
           // Voe CDN links work with UA only; adding a cross-domain Referer can 403.

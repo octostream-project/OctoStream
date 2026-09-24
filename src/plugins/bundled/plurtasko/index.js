@@ -17,6 +17,7 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isAlldebridEnabled, isAlldebridSupported, unlockLink, resolveMagnet } from '../alldebrid.js'
+import { inferStreamType } from '../../../utils/streamType.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
 import { monoschinos } from './channels/monoschinos.js'
@@ -620,12 +621,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
                 srvMeta = res.meta || {}
                 if (directUrl === DEAD_LINK) return null
                 if (directUrl && directUrl !== srv.url) {
-                  const isHls = /\.m3u8/i.test(directUrl) || /m3u8/i.test(directUrl)
-                  const streamType = isHls ? 'hls'
-                    : /\.mp4/i.test(directUrl) ? 'mp4'
-                    : /magnet:/.test(directUrl) ? 'torrent'
-                    : 'hls'
-                  return { ...srv, directUrl, streamType, meta: srvMeta }
+                  return { ...srv, directUrl, streamType: inferStreamType(directUrl, 'hls'), meta: srvMeta }
                 }
               } catch (e) {
                 logWarn(`[Plurtasko] JS resolver failed for ${srv.server}: ${hostOf(srv.url)}`, String(e?.message || e))
@@ -633,8 +629,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
               // Try AllDebrid
               const debrid = await debridUnlock(srv.url)
               if (debrid?.link) {
-                const isHls = /\.m3u8/i.test(debrid.link) || /m3u8/i.test(debrid.link)
-                const streamType = isHls ? 'hls' : /\.mp4/i.test(debrid.link) ? 'mp4' : 'mp4'
+                const streamType = inferStreamType(debrid.link, 'mp4')
                 return { ...srv, directUrl: debrid.link, streamType, viaDebrid: debrid.via }
               }
               // Resolution failed - keep as embed for native WebView
@@ -732,16 +727,11 @@ async function resolveStreams(streams, onBatch, context = {}) {
 
       if (directUrl) {
         // Detect stream type from URL - check for HLS patterns including query params
-        const isHls = /\.m3u8/i.test(directUrl) || /m3u8/i.test(directUrl)
-        const isMp4 = /\.mp4/i.test(directUrl)
-        const isMagnet = /magnet:/.test(directUrl)
-        // Debrid download links (alldebrid.com/d/...) are direct file downloads, not HLS
-        const isDebridDownload = /download\.alldebrid\.com|alldebrid\.com\/d\//i.test(directUrl)
-        const newType = isHls ? 'hls'
-          : isMp4 ? 'mp4'
-          : isMagnet ? 'torrent'
-          : isDebridDownload ? 'mp4'
-          : 'hls' // Default to HLS for streaming servers (fastream, streamwish, etc.)
+        // El tipo se deduce de la URL final — un .mkv desbloqueado por
+        // debrid clasificado como 'hls' hacía que ExoPlayer lo parseara
+        // como playlist → error 3002 "Input does not start with #EXTM3U"
+        // → caía al player web.
+        const newType = inferStreamType(directUrl, 'hls')
         console.log(`[Plurtasko] Resolved ${s.server}: ${directUrl.substring(0, 80)} → ${newType}`)
         // Set Referer/Origin based on provider.
         // Fastream requires the exact Kodi headers used by Alfa/Balandro:
