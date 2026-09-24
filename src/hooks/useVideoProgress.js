@@ -17,6 +17,23 @@ export function useVideoProgress({
   const lastSaveRef = useRef(0)
   const lastUiTickRef = useRef(0)
 
+  // meta y episodeInfo llegan como objetos nuevos en cada render del padre
+  // (Details construye meta inline). Usarlos como deps re-ejecuta el efecto
+  // en CADA render → el cleanup llama updateProgress → set(watchHistory) →
+  // el padre (suscrito a watchHistory) re-renderiza → efecto otra vez →
+  // bucle infinito (React #185) cuando el <video> web existe y tiene
+  // duración cargada. Refs + deps primitivas: el efecto solo se re-ejecuta
+  // cuando cambia el contenido de verdad.
+  const metaRef = useRef(meta)
+  const epInfoRef = useRef(episodeInfo)
+  useEffect(() => {
+    metaRef.current = meta
+    epInfoRef.current = episodeInfo
+  })
+
+  const metaId = meta?.id
+  const metaType = meta?.type
+
   useEffect(() => {
     const videoEl = videoRef.current
     if (!videoEl) return undefined
@@ -33,16 +50,17 @@ export function useVideoProgress({
       // timeupdate dispara ~4-15 Hz. Actualizar el estado a ~1 Hz: el seekbar
       // muestra segundos enteros, así que no se percibe diferencia y se evita
       // re-renderizar el player cada 250 ms en WebViews lentas.
+      const m = metaRef.current
       if (!isSeeking && now - lastUiTickRef.current > 1000) {
         lastUiTickRef.current = now
         setCurrentTime(videoEl.currentTime)
       }
       // Don't save progress for live TV channels (only for U7D programs, movies, series, etc.)
-      if (meta && meta.type !== 'live' && meta.type !== 'channel' && now - lastSaveRef.current > 10000) {
+      if (m && m.type !== 'live' && m.type !== 'channel' && now - lastSaveRef.current > 10000) {
         lastSaveRef.current = now
         const duration = videoEl.duration
         if (Number.isFinite(duration) && duration > 0) {
-          updateProgress(meta.id, meta.type, videoEl.currentTime, duration, episodeInfo)
+          updateProgress(m.id, m.type, videoEl.currentTime, duration, epInfoRef.current)
         }
       }
     }
@@ -65,9 +83,10 @@ export function useVideoProgress({
       videoEl.removeEventListener('timeupdate', onTimeUpdate)
       videoEl.removeEventListener('durationchange', updateDuration)
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata)
-      if (meta && meta.type !== 'live' && meta.type !== 'channel' && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-        updateProgress(meta.id, meta.type, videoEl.currentTime, videoEl.duration, episodeInfo)
+      const m = metaRef.current
+      if (m && m.type !== 'live' && m.type !== 'channel' && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+        updateProgress(m.id, m.type, videoEl.currentTime, videoEl.duration, epInfoRef.current)
       }
     }
-  }, [videoRef, meta, startTime, isSeeking, updateProgress, setPlaying, setCurrentTime, setDuration, setSeekable, episodeInfo])
+  }, [videoRef, metaId, metaType, startTime, isSeeking, updateProgress, setPlaying, setCurrentTime, setDuration, setSeekable])
 }
