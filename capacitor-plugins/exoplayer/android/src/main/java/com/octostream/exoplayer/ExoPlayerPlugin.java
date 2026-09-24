@@ -5457,8 +5457,12 @@ public class ExoPlayerPlugin extends Plugin {
             if (liveChannels != null && channelIndex >= 0 && channelIndex < liveChannels.length()) {
                 String now = channelFieldAt(channelIndex, "now");
                 String next = channelFieldAt(channelIndex, "next");
+                long start = channelLongFieldAt(channelIndex, "start");
+                long end = channelLongFieldAt(channelIndex, "end");
                 if (!now.isEmpty()) epgNow = now;
                 if (!next.isEmpty()) epgNext = next;
+                if (start > 0) epgNowStart = start;
+                if (end > 0) epgNowEnd = end;
             }
             // Si el panel de canales no existía (llegó channels: null al abrir)
             // y ahora hay lista, crearlo y añadirlo al root. Si ya existía,

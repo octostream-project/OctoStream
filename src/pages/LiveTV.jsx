@@ -250,6 +250,38 @@ export default function LiveTV() {
   }, [viewMode, u7dSelectedChannel, u7dSelectedDay, u7dCatalogs])
 
   const [playing, setPlaying] = useState(null) // { stream, channel }
+
+  // Mientras se ve un canal en directo, refrescar la lista cada minuto:
+  // getCatalogContent re-normaliza now/next contra el EPG cacheado (TTL 1h,
+  // sin red salvo que venza el caché) y el cambio de `channels` dispara
+  // setChannels en el player nativo → el OSD actualiza el programa, sus
+  // horarios y la barra de progreso al cruzar un cambio de programa,
+  // sin reiniciar el stream.
+  useEffect(() => {
+    if (!playing || playing.isU7d || !activeCat) return
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const items = await pluginManager.getCatalogContent(activeCat.pluginId, activeCat.id, activeCat.type, 0, 500)
+        if (cancelled) return
+        const fresh = items.map(item => ({ ...item, pluginId: activeCat.pluginId }))
+        setChannels(fresh)
+        // El canal que suena también lleva su EPG en meta (OSD del fallback
+        // web y arranques posteriores) — actualizarlo con la lista fresca.
+        setPlaying(p => {
+          if (!p) return p
+          const cur = fresh.find(c => c.id === p.channel.id)
+          return cur ? { ...p, channel: cur } : p
+        })
+      } catch (e) {
+        if (!cancelled) console.warn('[LiveTV] EPG refresh failed:', e?.message || e)
+      }
+    }
+    const timer = setInterval(refresh, 60_000)
+    return () => { cancelled = true; clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing?.stream, playing?.isU7d, activeCat])
+
   const currentChannelRef = useRef(null) // track current channel for history on close
   const playRequestRef = useRef(0)
   const playAbortRef = useRef(null)

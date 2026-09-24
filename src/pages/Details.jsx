@@ -543,35 +543,44 @@ export default function Details() {
         return
       }
       setResolvingStream(true)
-      // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: si uno
-      // falla, prueba automáticamente el resto de enlaces debrid del episodio.
+      // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: se prueban
+      // varios candidatos EN PARALELO y gana el primero que desbloquee. En
+      // serie, un enlace que entraba en "delayed" (AllDebrid lo baja a su
+      // caché) podía bloquear hasta 2 min aunque otro resolviera al instante.
       const pool = (candidatesPool && candidatesPool.length ? candidatesPool
         : (episodeStreams && episodeStreams.length ? episodeStreams : streams)) || []
       const seen = new Set([stream.url])
       const others = pool
         .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
-      const candidates = [stream, ...others].slice(0, 5)
-      let lastError = null
-      let resolved = null
-      for (const cand of candidates) {
-        try {
-          const r = await unlockDebrid(cand.url)
-          if (r?.link) { resolved = { cand, direct: r.link }; break }
-          lastError = r?.error || lastError
-        } catch (e) {
-          lastError = e?.message
+      const candidates = [stream, ...others].slice(0, 8)
+      const errors = []
+      const attempts = candidates.map(cand =>
+        unlockDebrid(cand.url).then(r => {
+          if (r?.link) return { cand, direct: r.link }
+          errors.push(r?.error || 'unlock failed')
+          throw new Error(r?.error || 'unlock failed')
+        }).catch(e => {
+          errors.push(e?.message)
           console.warn('[Details] Debrid unlock error:', e?.message)
-        }
-      }
+          throw e
+        })
+      )
+      let resolved = null
+      try { resolved = await Promise.any(attempts) } catch { /* todos fallaron */ }
+      const lastError = errors[errors.length - 1]
       setResolvingStream(false)
       if (!resolved) {
         console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
-        setEpisodeError(debridErrorMessage(lastError))
+        setEpisodeError(debridErrorMessage(lastError)
+          + (candidates.length > 1 ? ` (${candidates.length} enlaces probados)` : ''))
         return
       }
       stream = {
         ...resolved.cand,
         url: resolved.direct,
+        // El enlace 1fichier original — si la URL firmada caduca en mitad de
+        // la reproducción, VideoPlayer re-desbloquea desde aquí.
+        originalDebridUrl: resolved.cand.url,
         streamType: /\.m3u8(\?|$)/i.test(resolved.direct) ? 'hls' : 'mp4',
       }
     }

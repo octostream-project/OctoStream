@@ -6,6 +6,7 @@ import { createAndroidHlsLoader, setManifestBaseUrl } from '../utils/hlsAndroidL
 import { setPlayerOpen, markPlayerClosed } from '../utils/tvNavigation.js'
 import { playStream, stopPlayback, isExoPlayerAvailable, playEmbed, playRelay, resolveEmbed, setChannels, setEpisodes, setNextEpisode, setCastRequestListener, setLoadingText, setPlaybackStateListener } from '../utils/exoPlayer.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
+import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { pluginManager } from '../plugins/manager.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { loadHls, loadShaka } from '../utils/loadPlayerLibs.js'
@@ -415,6 +416,16 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         } catch {}
         return null
       }
+      // Debrid: la URL firmada de AllDebrid caduca/4xx — re-desbloquear el
+      // enlace de host original (1fichier…) para obtener una URL fresca.
+      if (stream.originalDebridUrl) {
+        try {
+          const r = await adUnlockLink(stream.originalDebridUrl)
+          const u = r?.link
+          if (u && u !== stream.url) return sanitizeUrl(u)
+        } catch {}
+        return null
+      }
       if (stream.originalUrl) {
         const u = await Promise.race([
           resolveEmbedJs(stream.originalUrl),
@@ -634,7 +645,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             // manifest tras minutos de reproducción): re-resolver (embed o
             // item de deportes) y reintentar en ExoPlayer una sola vez antes
             // de caer a HLS.js, que moriría con el mismo código HTTP.
-            if ((stream.originalUrl || stream._fctvItem || stream._refreshUrl) && !reResolveRef.current) {
+            if ((stream.originalUrl || stream._fctvItem || stream._refreshUrl || stream.originalDebridUrl) && !reResolveRef.current) {
               reResolveRef.current = true
               console.log('[Player] HTTP error — re-resolving fresh URL:', urlHost(stream.originalUrl || stream.url), 'code:', state.errorCode)
               setError(null)
