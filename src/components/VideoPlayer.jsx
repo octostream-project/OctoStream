@@ -670,13 +670,14 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                     console.warn('[Player] ExoPlayer retry after re-resolve failed:', e?.message)
                     if (!cancelled && !closedRef.current) {
                       setExoFailed(true)
-                      setLoading(true)
+                      setError(`No se pudo reproducir el stream: ${e?.message || 'error desconocido'}`)
+                      stopPlayback().catch(() => {})
                     }
                   })
                 } else {
-                  console.log('[Player] Re-resolve gave no new URL, falling back to HLS.js')
+                  console.log('[Player] Re-resolve gave no new URL')
                   setExoFailed(true)
-                  setLoading(true)
+                  setError('No se pudo renovar el enlace — prueba con otro')
                   stopPlayback().catch(() => {})
                 }
               }).catch(e => {
@@ -684,16 +685,18 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                 if (cancelled || closedRef.current) return
                 setResolvingEmbed(false)
                 setExoFailed(true)
-                setLoading(true)
+                setError(`No se pudo renovar el enlace: ${e?.message || 'error'}`)
                 stopPlayback().catch(() => {})
               })
               return
             }
-            console.log('[Player] ExoPlayer HTTP error, falling back to HLS.js:', msg, 'code:', state.errorCode)
+            // Sin fallback a reproductor web en Android: ExoPlayer cubre
+            // todos los tipos y un segundo player con otra UI confunde.
+            // exoFailed queda para que el evento 'closed' de stopPlayback()
+            // no desmonte el componente y el error se vea.
+            console.log('[Player] ExoPlayer HTTP error:', msg, 'code:', state.errorCode)
             setExoFailed(true)
-            setError(null)
-            setLoading(true)
-            // Stop ExoPlayer to prevent subsequent 'closed' state from closing the app
+            setError(`No se pudo reproducir el stream (HTTP ${state.errorCode || msg})`)
             stopPlayback().catch(() => {})
           } else {
             setError(`Error ExoPlayer: ${msg}`)
