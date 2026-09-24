@@ -128,7 +128,12 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // computes progress=0, so the green tick never appears.
   const durationRef = useRef(0)
   const currentTimeRef = useRef(0)
-  const setDurationTracked = (d) => { durationRef.current = d; setDuration(d) }
+  // useCallback: esta función se pasa a useVideoProgress y está en las deps
+  // de su efecto. Sin memo, sería una función nueva por render → el efecto se
+  // re-ejecutaría siempre → su cleanup llama updateProgress → set(store) →
+  // el padre re-renderiza → efecto otra vez → bucle infinito (React #185)
+  // cuando el <video> web tiene duración cargada (fallback tras exoFailed).
+  const setDurationTracked = useCallback((d) => { durationRef.current = d; setDuration(d) }, [])
   const [seekable, setSeekable] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const hideControlsTimer = useRef(null)

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useParams, useNavigate } from 'react-router-dom'
 import { pluginManager } from '../plugins/manager.js'
@@ -1023,6 +1023,58 @@ export default function Details() {
     setPersonLoading(false)
   }
 
+  // Lista de episodios de la temporada actual (para autoplay y para el panel
+  // de episodios del player nativo). Va antes de los early-returns: los hooks
+  // de abajo deben ejecutarse en todos los renders.
+  const episodeList = (() => {
+    if (!selectedEpisode) return null
+    const epList = seasonEpisodes.length > 0 ? seasonEpisodes : (Array.isArray(meta?.episodes) ? meta.episodes : [])
+    if (!epList || epList.length === 0) return null
+    return epList
+  })()
+
+  // Compute next episode for the autoplay popup (Netflix-style)
+  const nextEpisode = (() => {
+    if (!episodeList || !selectedEpisode) return null
+    const currentIdx = episodeList.findIndex(ep =>
+      ep.season === selectedEpisode.season && ep.episode === selectedEpisode.episode
+    )
+    if (currentIdx === -1 || currentIdx >= episodeList.length - 1) return null
+    return episodeList[currentIdx + 1]
+  })()
+
+  // Props memoizadas para VideoPlayer: antes se creaban inline en el JSX
+  // (meta/episodes/onPlayNext nuevos en CADA render de Details). Como Details
+  // se re-renderiza con cada updateProgress del store, esas identidades
+  // inestables re-ejecutaban efectos del player en bucle — uno de ellos
+  // (useVideoProgress → updateProgress) cerraba un ciclo render→set→render
+  // infinito (React #185) cuando el <video> web tenía duración cargada.
+  const playerMeta = useMemo(() => selectedEpisode && meta
+    ? { ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode, episodeName: selectedEpisode.name }
+    : meta, [meta, selectedEpisode])
+
+  const playerEpisodes = useMemo(() => episodeList?.map(ep => ({
+    ...ep,
+    watched: !!(meta && watchedEpisodes[`${meta.id}:S${ep.season ?? selectedEpisode?.season ?? 1}:E${ep.episode}`]?.progress >= 0.97),
+  })), [episodeList, watchedEpisodes, meta, selectedEpisode])
+
+  const handlePlayEpisodeRef = useRef(null)
+  handlePlayEpisodeRef.current = handlePlayEpisode
+  const nextEpisodeRef = useRef(null)
+  nextEpisodeRef.current = nextEpisode
+  const onPlayNext = useCallback(() => {
+    const ep = nextEpisodeRef.current
+    if (!ep) return
+    // Guard: el popup (web o nativo) y handleEnded pueden dispararse ambos.
+    // Solo el primero cuenta.
+    if (nextEpisodeTriggeredRef.current) {
+      console.log('[Details] onPlayNext: already triggered, skipping')
+      return
+    }
+    nextEpisodeTriggeredRef.current = true
+    handlePlayEpisodeRef.current(ep, { fromAutoplay: true })
+  }, [])
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -1058,25 +1110,6 @@ export default function Details() {
     return true
   }
 
-  // Lista de episodios de la temporada actual (para autoplay y para el panel
-  // de episodios del player nativo)
-  const episodeList = (() => {
-    if (!selectedEpisode) return null
-    const epList = seasonEpisodes.length > 0 ? seasonEpisodes : (Array.isArray(meta.episodes) ? meta.episodes : [])
-    if (!epList || epList.length === 0) return null
-    return epList
-  })()
-
-  // Compute next episode for the autoplay popup (Netflix-style)
-  const nextEpisode = (() => {
-    if (!episodeList) return null
-    const currentIdx = episodeList.findIndex(ep =>
-      ep.season === selectedEpisode.season && ep.episode === selectedEpisode.episode
-    )
-    if (currentIdx === -1 || currentIdx >= episodeList.length - 1) return null
-    return episodeList[currentIdx + 1]
-  })()
-
   return (
     <div className="min-h-screen pb-8">
       {selectedStream && (
@@ -1084,28 +1117,15 @@ export default function Details() {
           mode="vod"
           stream={selectedStream}
           title={selectedEpisode ? `${meta.name} - ${selectedEpisode.name}` : meta.name}
-          meta={selectedEpisode ? { ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode, episodeName: selectedEpisode.name } : meta}
+          meta={playerMeta}
           startTime={resumeTime}
           channels={liveChannels}
           channelIndex={liveChannels.findIndex(c => c.id === id)}
           onZapChannel={handleZapChannel}
           nextEpisode={nextEpisode}
-          episodes={episodeList?.map(ep => ({
-            ...ep,
-            watched: isEpWatched(ep.season ?? selectedEpisode?.season ?? 1, ep.episode),
-          }))}
+          episodes={playerEpisodes}
           onPlayEpisode={(ep) => handlePlayEpisode(ep, { forcePlay: true })}
-          onPlayNext={() => {
-            if (!nextEpisode) return
-            // Guard: el popup (web o nativo) y handleEnded pueden dispararse ambos.
-            // Solo el primero cuenta.
-            if (nextEpisodeTriggeredRef.current) {
-              console.log('[Details] onPlayNext: already triggered, skipping')
-              return
-            }
-            nextEpisodeTriggeredRef.current = true
-            handlePlayEpisode(nextEpisode, { fromAutoplay: true })
-          }}
+          onPlayNext={onPlayNext}
           onClose={() => {
             cancelAutoplay()
             nextEpisodeTriggeredRef.current = false
