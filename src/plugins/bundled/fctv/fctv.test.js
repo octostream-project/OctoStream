@@ -192,30 +192,29 @@ vi.mock('../../../utils/httpClient.js', async (importOriginal) => {
   const orig = await importOriginal()
   return {
     ...orig,
+    // httpGetText devuelve el cuerpo como string (no {data}) — replicar la
+    // firma real para que el test no oculte desestructuraciones incorrectas.
     httpGetText: async (url) => {
       if (url.includes('/api/common/params')) {
         // ROT47 de un JSON mínimo — parseConfig cae a los dominios fallback.
-        return { data: rot47('{}'), headers: {} }
+        return rot47('{}')
       }
       if (url.includes('/sitemap/')) {
         const d = new Date()
         const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
         if (url.includes('/index.xml')) {
           const f = (s) => `<loc>https://www.fctv33hd.digital/sitemap/es/${s}-${ym}-001.xml</loc>`
-          return { data: `<?xml version="1.0"?><locs>${f('football')}${f('basketball')}${f('tennis')}${f('motorsport')}</locs>`, headers: {} }
+          return `<?xml version="1.0"?><locs>${f('football')}${f('basketball')}${f('tennis')}${f('motorsport')}</locs>`
         }
-        if (!url.includes('-001.xml')) return { data: '<html>spa fallback</html>', headers: {} }
+        if (!url.includes('-001.xml')) return '<html>spa fallback</html>'
         const now = Date.now()
-        return {
-          data: SM_XML([
-            ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432824/real-sociedad-vs-rc-celta-09-2026.html', new Date(now).toISOString()],
-            ['https://www.fctv33hd.digital/es/football/argentine-division-1-match-4398422/instituto-de-crdoba-vs-ca-san-lorenzo-09-2026.html', new Date(now + 3600e3).toISOString()],
-            ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432592/real-madrid-vs-barcelona-09-2026.html', new Date(now + 7200e3).toISOString()],
-            ['https://www.fctv33hd.digital/es/football/spanish-primera-divisin-de-la-liga-de-ftbol-femenino-match-4468313/real-madrid-women-vs-barcelona-women-09-2026.html', new Date(now + 7200e3).toISOString()],
-            ['https://www.fctv33hd.digital/es/basketball/acb-match-1/fcb-vs-rmb-09-2026.html', new Date(now).toISOString()],
-          ]),
-          headers: {},
-        }
+        return SM_XML([
+          ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432824/real-sociedad-vs-rc-celta-09-2026.html', new Date(now).toISOString()],
+          ['https://www.fctv33hd.digital/es/football/argentine-division-1-match-4398422/instituto-de-crdoba-vs-ca-san-lorenzo-09-2026.html', new Date(now + 3600e3).toISOString()],
+          ['https://www.fctv33hd.digital/es/football/spanish-la-liga-match-4432592/real-madrid-vs-barcelona-09-2026.html', new Date(now + 7200e3).toISOString()],
+          ['https://www.fctv33hd.digital/es/football/spanish-primera-divisin-de-la-liga-de-ftbol-femenino-match-4468313/real-madrid-women-vs-barcelona-women-09-2026.html', new Date(now + 7200e3).toISOString()],
+          ['https://www.fctv33hd.digital/es/basketball/acb-match-1/fcb-vs-rmb-09-2026.html', new Date(now).toISOString()],
+        ])
       }
       throw new Error('HTTP 404')
     },

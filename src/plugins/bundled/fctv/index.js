@@ -80,7 +80,7 @@ const fixLogoCdn = (u) =>
     : u
 
 async function fetchParams(apiHost, signal) {
-  const { data: raw } = await httpGetText(`${apiHost}/api/common/params`, {}, signal)
+  const raw = await httpGetText(`${apiHost}/api/common/params`, {}, signal)
   if (!raw || raw.length > 2_000_000) throw new Error('params: bad response')
   return JSON.parse(rot47(raw))
 }
@@ -133,7 +133,7 @@ async function resolveConfig(signal) {
   // 2. hubu.ru/fctvlink biolink page → href to the current domain
   let webDomain = null
   try {
-    const { data: html } = await httpGetText('https://hubu.ru/fctvlink', {}, signal)
+    const html = await httpGetText('https://hubu.ru/fctvlink', {}, signal)
     const m = html.match(/href="(https:\/\/(?:www\.)?(?:fctv|rbtv|sokapicks)[^"]*)"/i)
       || html.match(/href="(https:\/\/[^"]+)"[^>]*data-track-biolink-block-id/i)
     if (m) webDomain = new URL(m[1]).origin
@@ -326,7 +326,7 @@ async function loadSitemapIndex(signal) {
     // El sitemap index lista los ficheros por deporte-mes-página; las
     // páginas van en orden cronológico, así que las últimas cubren las
     // fechas recientes — las únicas que pueden tener directos.
-    const { data: idxXml } = await httpGetText(`${cfg.webDomain}/sitemap/es/index.xml`, {}, shortSignal(signal, 10000))
+    const idxXml = await httpGetText(`${cfg.webDomain}/sitemap/es/index.xml`, {}, shortSignal(signal, 10000))
     if (!idxXml || !idxXml.includes('<loc>')) throw new Error('sitemap index empty')
     const wanted = new Set(['football', 'basketball', 'tennis', 'motorsport'])
     const files = []
@@ -360,7 +360,7 @@ async function loadSitemapIndex(signal) {
       while (next < picked.length) {
         const f = picked[next++]
         let xml = null
-        try { xml = (await httpGetText(f.file, {}, shortSignal(signal, 10000))).data } catch { continue }
+        try { xml = await httpGetText(f.file, {}, shortSignal(signal, 10000)) } catch { continue }
         if (!xml || !xml.includes('<urlset')) continue
         for (const m of xml.matchAll(SITEMAP_PAGE_RE)) {
           const mm = m[1].match(SITEMAP_MATCH_RE)
