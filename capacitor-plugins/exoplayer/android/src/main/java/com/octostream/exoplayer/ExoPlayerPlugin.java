@@ -4135,9 +4135,15 @@ public class ExoPlayerPlugin extends Plugin {
                     Log.w(TAG, "Behind live window — salto al borde en vivo ("
                             + behindLiveRetries + "/4)");
                     cancelBufferingCheck();
-                    player.seekToDefaultPosition();
-                    player.prepare();
-                    return;
+                    try {
+                        player.seekToDefaultPosition();
+                        player.prepare();
+                        return;
+                    } catch (Exception e) {
+                        // Si el salto no arranca, caer al manejo de error
+                        // normal — no dejar el player muerto sin notificar.
+                        Log.e(TAG, "behind-live retry failed", e);
+                    }
                 }
                 // Errores de red en directos (ERROR_CODE_IO_* = 2000-2999:
                 // token de segmento caducado → 403, timeout, conexión caída).
@@ -4175,7 +4181,14 @@ public class ExoPlayerPlugin extends Plugin {
                         try {
                             player.setMediaSource(lastMediaSource);
                             player.prepare();
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) {
+                            // Si el reintento ni siquiera arranca, el player
+                            // queda muerto y sin más eventos — el overlay de
+                            // "Cargando enlace…" se quedaría fijo. Forzar el
+                            // mismo cierre que un timeout agotado.
+                            Log.e(TAG, "live retry failed to restart", e);
+                            emitBufferingTimeout();
+                        }
                     }, 1500L * sourceErrorRetries);
                     return;
                 }
@@ -4252,7 +4265,17 @@ public class ExoPlayerPlugin extends Plugin {
     private void scheduleBufferingCheck() {
         cancelBufferingCheck();
         bufferingCheckRunnable = () -> {
-            if (player == null || player.getPlaybackState() != Player.STATE_BUFFERING) return;
+            if (player == null) return;
+            int state = player.getPlaybackState();
+            // READY/ENDED se gestionan fuera; IDLE con una fuente cargada es un
+            // player muerto (p.ej. prepare() que no arrancó la carga) — tratar
+            // como timeout en vez de dejar el overlay fijo para siempre.
+            if (state == Player.STATE_READY || state == Player.STATE_ENDED) return;
+            if (state == Player.STATE_IDLE) {
+                Log.w(TAG, "Player en IDLE con fuente cargada — tratando como timeout");
+                emitBufferingTimeout();
+                return;
+            }
             int maxRetries = longBuffering ? 4 : "live".equals(playerMode) ? 2 : 1;
             if (bufferingRetries < maxRetries && lastMediaSource != null) {
                 bufferingRetries++;
@@ -4268,20 +4291,31 @@ public class ExoPlayerPlugin extends Plugin {
                     if (savedVolume > 0f) player.setVolume(savedVolume);
                 } catch (Exception e) {
                     Log.e(TAG, "buffering retry failed: " + e.getMessage());
+                    emitBufferingTimeout();
+                    return;
                 }
-                // El BUFFERING subsiguiente (o READY si recupera) reprograma
-                // este check desde onPlaybackStateChanged.
+                // Reprogramar siempre: si el player sigue en BUFFERING, prepare()
+                // no emite una transición nueva y el check no se rearmaría solo —
+                // era la vía por la que un directo colgado dejaba
+                // "Cargando enlace…" fijo en pantalla. scheduleBufferingCheck()
+                // cancela primero el check que hubiera armado un evento BUFFERING
+                // intermedio, así siempre queda un único check pendiente.
+                scheduleBufferingCheck();
                 return;
             }
-            Log.w(TAG, "Buffering timeout agotado, mostrando error");
-            JSObject timeoutEvent = new JSObject();
-            timeoutEvent.put("state", "error");
-            timeoutEvent.put("message", "Timeout: el canal no responde");
-            timeoutEvent.put("errorCode", -1);
-            notifyListeners("playbackState", timeoutEvent);
-            closePlayer();
+            emitBufferingTimeout();
         };
         mainHandler.postDelayed(bufferingCheckRunnable, longBuffering ? 90000 : 20000);
+    }
+
+    private void emitBufferingTimeout() {
+        Log.w(TAG, "Buffering timeout agotado, mostrando error");
+        JSObject timeoutEvent = new JSObject();
+        timeoutEvent.put("state", "error");
+        timeoutEvent.put("message", "Timeout: el canal no responde");
+        timeoutEvent.put("errorCode", -1);
+        notifyListeners("playbackState", timeoutEvent);
+        closePlayer();
     }
 
     private boolean isTdtSpainDomain(String url) {
@@ -5575,6 +5609,13 @@ public class ExoPlayerPlugin extends Plugin {
                 lastDrmSessionManager = null;
                 lastLicenseUrl = null;
                 MediaSource source = buildMediaSource(url, streamType, dsFactory, null, null);
+                // Canal nuevo → presupuesto de reintentos nuevo: si el zap llega
+                // tras errores del canal anterior, sin el reset el nuevo enlace
+                // hereda contadores agotados y muere al primer tropiezo.
+                cancelBufferingCheck();
+                bufferingRetries = 0;
+                behindLiveRetries = 0;
+                sourceErrorRetries = 0;
                 // No llamar a player.stop() antes de setMediaSource: el propio
                 // setMediaSource + prepare resetean el player y la sesión de audio
                 // correctamente. El stop() explícito puede dejar la sesión de audio

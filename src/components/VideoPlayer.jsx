@@ -76,6 +76,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   const [torrentProgress, setTorrentProgress] = useState(null)
   const [error, setError] = useState(null)
   const [exoFailed, setExoFailed] = useState(false)
+  // El listener playbackState es una closure creada al abrir el player y no se
+  // recrea tras setExoFailed — leer el estado via ref o el 'closed' posterior
+  // a un error navegaría atrás ocultando el mensaje de error.
+  const exoFailedRef = useRef(false)
+  useEffect(() => { exoFailedRef.current = exoFailed }, [exoFailed])
   const lastStreamRef = useRef(null)
   // Guard to prevent onClose from firing more than once. The native player
   // sends 'closed' when the user presses Back, and the cleanup also calls
@@ -710,7 +715,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             setError(`No se pudo reproducir el stream (HTTP ${state.errorCode || msg})`)
             stopPlayback().catch(() => {})
           } else {
+            // Error no-HTTP (decode, parsing…): el diálogo nativo sigue abierto
+            // con el player muerto encima del error — cerrar para que se vea.
+            setExoFailed(true)
             setError(`Error ExoPlayer: ${msg}`)
+            stopPlayback().catch(() => {})
           }
         } else if (state.state === 'ended') {
           // Episode finished - save final progress as 100% so the tick appears
@@ -734,8 +743,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
           // Also ignore 'closed' if we already received 'ended' — that means
           // the episode finished and the next is being loaded (openPlayer
           // calls closePlayer internally, which may emit 'closed').
-          console.log('[Player] closed event received, exoFailed=', exoFailed, 'closedRef=', closedRef.current, 'endedReceived=', endedRef.current)
-          if (!exoFailed && !closedRef.current && !endedRef.current) {
+          console.log('[Player] closed event received, exoFailed=', exoFailedRef.current, 'closedRef=', closedRef.current, 'endedReceived=', endedRef.current)
+          if (!exoFailedRef.current && !closedRef.current && !endedRef.current) {
             // Ignorar "closed" espurios que llegan en el primer segundo tras
             // abrir el player. El nativo a veces emite un closed ~150ms después
             // de openPlayer por la race del Dialog anterior cerrándose.
