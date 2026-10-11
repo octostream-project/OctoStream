@@ -1089,9 +1089,28 @@ export default function Details() {
   // inestables re-ejecutaban efectos del player en bucle — uno de ellos
   // (useVideoProgress → updateProgress) cerraba un ciclo render→set→render
   // infinito (React #185) cuando el <video> web tenía duración cargada.
-  const playerMeta = useMemo(() => selectedEpisode && meta
-    ? { ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode, episodeName: selectedEpisode.name }
-    : meta, [meta, selectedEpisode])
+  const playerMeta = useMemo(() => {
+    const base = selectedEpisode && meta
+      ? { ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode, episodeName: selectedEpisode.name }
+      : meta
+    // Canales en directo: la entrada del historial no guarda EPG/logo — se
+    // completa desde la lista de zapping cuando termina de cargar.
+    if (base && (base.type === 'live' || base.type === 'channel') && liveChannels?.length) {
+      const ch = liveChannels.find(c => c.id === base.id)
+        || liveChannels.find(c => (c.name || '').toLowerCase() === (base.name || '').toLowerCase())
+      if (ch) {
+        return {
+          ...base,
+          poster: base.poster || ch.logo || ch.poster || '',
+          epgNow: ch.nowPlaying || '',
+          epgNext: ch.nextPlaying || '',
+          epgStart: ch.nowPlayingStart || 0,
+          epgEnd: ch.nowPlayingEnd || 0,
+        }
+      }
+    }
+    return base
+  }, [meta, selectedEpisode, liveChannels])
 
   const playerEpisodes = useMemo(() => episodeList?.map(ep => ({
     ...ep,
@@ -1154,7 +1173,10 @@ export default function Details() {
     <div className="min-h-screen pb-8">
       {selectedStream && (
         <VideoPlayer
-          mode="vod"
+          // Canales: modo live (sin progreso/duración, con zapping y overlay
+          // EPG) — antes iba siempre 'vod' y "Seguir viendo" abría la TV
+          // como si fuera una película.
+          mode={playerMeta?.type === 'live' || playerMeta?.type === 'channel' ? 'live' : 'vod'}
           stream={selectedStream}
           title={selectedEpisode ? `${meta.name} - ${selectedEpisode.name}` : meta.name}
           meta={playerMeta}

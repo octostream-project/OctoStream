@@ -3,7 +3,7 @@
   "versionName": "1.53",
   "minCode": 0,
   "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-arm64-v8a.apk",
-  "sha256": "eae206ae5d682f4ae72c05a77aaf5e1ed81d061af85789896bcafec3f12d0151",
+  "sha256": "c5f55b81bd738b7263430fdfd993c6b38bf9eb03a5268343f8c0e3c73fe25c50",
   "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4",
   "notes": "IMPORTANTE: si tienes la versión 1.51 o anterior, la actualización fallará por cambio de firma — desinstala la app antes de instalar esta APK (se perderán ajustes e historial).\n\nIcono de launcher de OctoStream, updater con reinstalación asistida ante cambio de firma, fixes de seguridad en SyncServer (anti-CSRF) y TorrentEngine (path traversal), fixes FCTV/debrid/autoplay/seguir viendo.",
   "apkUrls": {
@@ -12,8 +12,8 @@
     "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "eae206ae5d682f4ae72c05a77aaf5e1ed81d061af85789896bcafec3f12d0151",
-    "armeabi-v7a": "f48519c2d32b81befe0894769c894e708ca41c7647d61aace15f8117d6a0e69e",
-    "x86_64": "5d221e5702aa211538413ab2dc2f48cf78d48d89f60094da7cf71bccfbba83eb"
+    "arm64-v8a": "c5f55b81bd738b7263430fdfd993c6b38bf9eb03a5268343f8c0e3c73fe25c50",
+    "armeabi-v7a": "5f931f4333ca1a8788f40ecd50e812dc7871716932641ebb177da1614851dc6f",
+    "x86_64": "32c91f05e08bf729c15d48207313a7733320afe0891c3d9081c14aefe278d3cd"
   }
 }
