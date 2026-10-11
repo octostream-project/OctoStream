@@ -3,17 +3,17 @@
   "versionName": "1.54",
   "minCode": 0,
   "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-arm64-v8a.apk",
-  "sha256": "ef3cde3494cc722726a209cb9ff5c12bacb839ea2833c0d50fa6ec6dc8a8dfaa",
+  "sha256": "147f309bffc986f6e4dcd1a77ffcb991e1c91fe73b35264110173df4eb7a60c6",
   "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4",
-  "notes": "IMPORTANTE: si tienes la versión 1.51 o anterior, la actualización fallará por cambio de firma — desinstala la app antes de instalar esta APK (se perderán ajustes e historial).\n\nFix: la TV en directo ya no se queda colgada en \"Cargando enlace\" cuando un canal se corta (watchdog de buffering + reintentos). Anime: la temporada nueva de \"Esta Temporada\" ya no reproduce la temporada vieja ni resultados equivocados. Canales en Seguir viendo se abren en modo TV con EPG y zapping.",
+  "notes": "IMPORTANTE: si tienes la versión 1.51 o anterior, la actualización fallará por cambio de firma — desinstala la app antes de instalar esta APK (se perderán ajustes e historial).\n\nFix: la TV en directo ya no se queda colgada en \"Cargando enlace\" cuando un canal se corta. Zapping arreglado al abrir canales desde Seguir viendo (swipe en móvil + cola de zaps). Anime: la temporada nueva de \"Esta Temporada\" ya no reproduce la vieja. Canales en Seguir viendo se abren en modo TV con EPG.",
   "apkUrls": {
     "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-arm64-v8a.apk",
     "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-armeabi-v7a.apk",
     "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ef3cde3494cc722726a209cb9ff5c12bacb839ea2833c0d50fa6ec6dc8a8dfaa",
-    "armeabi-v7a": "a2954cdb66fb7a142713d347a2453c853dfafbbeb8afb15f18691fc810dee86d",
-    "x86_64": "d46f97aa657969640aeef4df47fc9a4340121c1794bbd7dad3c92067b3ef6b96"
+    "arm64-v8a": "147f309bffc986f6e4dcd1a77ffcb991e1c91fe73b35264110173df4eb7a60c6",
+    "armeabi-v7a": "3995912f07e27632a6e5bacb1d7ba7e9a3632fcf73363ef0f181601d7df2c219",
+    "x86_64": "31de485ed2ea5d393ce2d87da7d52eb3e88c40b6a9afc186cc43d9157d77a4e8"
   }
 }
