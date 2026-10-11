@@ -29,7 +29,8 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - ABIs del APK (`abiFilters` en `android/app/build.gradle`): `arm64-v8a`,
   `armeabi-v7a`, `x86_64`. `x86` 32-bit queda fuera porque libaether
   (cloud-proxy) no lo incluye; jlibtorrent sí cubre las 4. Si se regenera
-  `android/` con `cap add android` hay que volver a poner los abiFilters.
+  `android/` con `cap add android` hay que volver a poner los abiFilters
+  y regenerar los iconos con `python3 scripts/gen-android-icons.py`.
 
 ## Mejoras aplicadas recientemente
 
