@@ -57,6 +57,7 @@ import androidx.media3.datasource.cronet.CronetDataSource;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.dash.DashMediaSource;
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager;
@@ -4024,7 +4025,7 @@ public class ExoPlayerPlugin extends Plugin {
 
         AudioAttributes audioAttributes = mainAudioAttrs();
 
-        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(context) {
+        DefaultRenderersFactory renderersFactory = new NextRenderersFactory(context) {
             @Override
             protected void buildTextRenderers(Context ctx, androidx.media3.exoplayer.text.TextOutput output,
                                               Looper looper, int extensionRendererMode,
@@ -5859,7 +5860,7 @@ public class ExoPlayerPlugin extends Plugin {
                 .build();
         // El RenderersFactory por defecto no usa extensiones: sin PREFER el
         // mini también quedaría mudo con audio AC3/DTS (debrid .mkv).
-        DefaultRenderersFactory pipRenderersFactory = new DefaultRenderersFactory(context)
+        DefaultRenderersFactory pipRenderersFactory = new NextRenderersFactory(context)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
                 .setEnableDecoderFallback(true);
         pipPlayer = new ExoPlayer.Builder(context)
@@ -6524,7 +6525,8 @@ public class ExoPlayerPlugin extends Plugin {
             this.timeUs = delegate.timeUs + subtitleOffsetUs;
             this.skippedOutputBufferCount = delegate.skippedOutputBufferCount;
             this.shouldBeSkipped = delegate.shouldBeSkipped;
-            if (delegate.isDecodeOnly()) addFlag(C.BUFFER_FLAG_DECODE_ONLY);
+            // isDecodeOnly()/BUFFER_FLAG_DECODE_ONLY fueron eliminados en
+            // media3 1.6+ (los buffers decode-only ya no existen).
             if (delegate.isEndOfStream()) addFlag(C.BUFFER_FLAG_END_OF_STREAM);
             if (delegate.isKeyFrame()) addFlag(C.BUFFER_FLAG_KEY_FRAME);
             if (delegate.isFirstSample()) addFlag(C.BUFFER_FLAG_FIRST_SAMPLE);

@@ -36,7 +36,7 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation project(':capacitor-android')
 
-    def media3Version = "1.3.1"
+    def media3Version = "1.10.1"
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
     implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
@@ -46,9 +46,12 @@ dependencies {
     implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
     // Decodificadores ffmpeg: AC3/E-AC-3/DTS/TrueHD. Sin ellos los .mkv
     // desbloqueados por debrid (releases con audio AC3/DTS) se oían en
-    // silencio — Media3 solo incluye AAC/MP3/Opus/FLAC de serie. El
-    // RenderersFactory ya usa EXTENSION_RENDERER_MODE_PREFER.
-    implementation "androidx.media3:media3-decoder-ffmpeg:$media3Version"
+    // silencio — Media3 solo incluye AAC/MP3/Opus/FLAC de serie. Google no
+    // publica la extensión ffmpeg en Maven: se usa nextlib (media3ext), un
+    // AAR prebuilt con los renderers ffmpeg + libs nativas por ABI.
+    // La versión va ligada a media3: {media3}-{nextlib}. El player usa
+    // NextRenderersFactory (EXT_RENDERER_MODE_PREFER) para activarlos.
+    implementation 'io.github.anilbeesetti:nextlib-media3ext:1.10.1-0.13.0'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation project(':octostream-cloud-proxy')
