@@ -53,25 +53,52 @@ export default function UpdateChecker() {
     }
   }
 
-  // Cambio de firma: la nueva APK no puede instalarse encima. Se copia a
-  // Descargas (sobrevive a la desinstalación) y se lanza el desinstalador
-  // del sistema — el usuario solo confirma y luego instala el APK.
+  // Cambio de firma: la nueva APK no puede instalarse encima y la app muere
+  // al desinstalarse, así que la reinstalación automática es imposible. Lo
+  // más cercano: el NAVEGADOR descarga la APK en background — su notificación
+  // "descarga completada" sobrevive a la desinstalación y al tocarla abre el
+  // instalador del sistema.
   const startReinstall = async () => {
-    const name = `octostream-${update.versionName}.apk`
-    const res = await AppUpdater.copyToDownloads({ path: apkPath.current, name })
-      .catch(() => ({ saved: false }))
-    setReinstallApk(res)
+    if (apkPath.current) {
+      const name = `octostream-${update.versionName}.apk`
+      const res = await AppUpdater.copyToDownloads({ path: apkPath.current, name })
+        .catch(() => ({ saved: false }))
+      setReinstallApk(res)
+    }
     setPhase('reinstall')
   }
 
-  const download = async () => {
+  // Botón principal de la fase reinstall: navegador descargando + diálogo de
+  // desinstalación encima. El usuario confirma, la app muere, la descarga
+  // termina en el navegador → notificación → instalar.
+  const uninstallAndUpdate = async () => {
+    try { await AppUpdater.openUrl({ url: update.apkUrl }) } catch { /* sin navegador */ }
+    await AppUpdater.uninstallSelf().catch(() => {})
+  }
+
+  // Fallback sin navegador (Android TV): descarga propia → copia a Descargas
+  // públicas → desinstalar. El usuario instala luego desde un gestor de archivos.
+  const downloadToDownloads = async () => {
     setPhase('downloading')
     setPercent(0)
     try {
       const r = await AppUpdater.downloadApk({ url: update.apkUrl, sha256: update.sha256 || undefined })
       apkPath.current = r.path
-      if (update.signatureMismatch) await startReinstall()
-      else await startInstall()
+      await startReinstall()
+    } catch (e) {
+      setError(String(e?.message || e))
+      setPhase('error')
+    }
+  }
+
+  const download = async () => {
+    if (update.signatureMismatch) { setPhase('reinstall'); return }
+    setPhase('downloading')
+    setPercent(0)
+    try {
+      const r = await AppUpdater.downloadApk({ url: update.apkUrl, sha256: update.sha256 || undefined })
+      apkPath.current = r.path
+      await startInstall()
     } catch (e) {
       setError(String(e?.message || e))
       setPhase('error')
@@ -140,14 +167,14 @@ export default function UpdateChecker() {
             <p className="mt-3 text-sm text-amber-400">
               Se perderán ajustes, favoritos e historial.
             </p>
-            {reinstallApk?.saved ? (
+            <p className="mt-3 text-sm text-slate-300">
+              Al pulsar &quot;Desinstalar y actualizar&quot; se abre el navegador
+              descargando la nueva versión y aparece la desinstalación: confírmala y,
+              cuando acabe la descarga, toca la notificación para instalar.
+            </p>
+            {reinstallApk?.saved && (
               <p className="mt-3 text-sm text-emerald-400">
-                La nueva versión ya está en Descargas ({reinstallApk.name}) —
-                instálala desde ahí después de desinstalar.
-              </p>
-            ) : (
-              <p className="mt-3 text-sm text-slate-300">
-                Tras desinstalar, descarga la APK de nuevo desde el navegador.
+                También hay una copia en Descargas ({reinstallApk.name}).
               </p>
             )}
             <div className="mt-6 flex justify-end gap-3">
@@ -155,12 +182,12 @@ export default function UpdateChecker() {
                 Cancelar
               </button>
               {!reinstallApk?.saved && (
-                <button className={btn} onClick={() => AppUpdater.openUrl({ url: update.apkUrl })}>
-                  Abrir descarga
+                <button className={btn} onClick={downloadToDownloads}>
+                  Descargar a Descargas
                 </button>
               )}
-              <button className={btn} onClick={() => AppUpdater.uninstallSelf()} autoFocus>
-                Desinstalar ahora
+              <button className={btn} onClick={uninstallAndUpdate} autoFocus>
+                Desinstalar y actualizar
               </button>
             </div>
           </>
