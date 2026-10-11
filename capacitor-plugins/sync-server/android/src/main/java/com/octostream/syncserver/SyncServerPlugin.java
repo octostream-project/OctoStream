@@ -212,12 +212,36 @@ public class SyncServerPlugin extends Plugin {
         if (host == null) return false;
         host = host.toLowerCase(java.util.Locale.ROOT);
         if (host.equals("localhost") || host.endsWith(".localhost")) return true;
-        if (host.startsWith("127.") || host.equals("::1") || host.equals("[::1]")) return true;
-        if (host.startsWith("10.") || host.startsWith("192.168.")) return true;
-        if (host.matches("^172\\.(1[6-9]|2[0-9]|3[01])\\..*")) return true;
-        if (host.startsWith("169.254.") || host.startsWith("fe80:") || host.startsWith("[fe80:")) return true;
-        if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("[fc") || host.startsWith("[fd")) return true;
-        return false;
+        // Solo literales IP en rangos privados — un prefijo sobre un hostname
+        // DNS casaría con dominios públicos ("10.evil.com", "fcdn.x.com").
+        return isPrivateIpLiteral(host);
+    }
+
+    private static boolean isPrivateIpLiteral(String host) {
+        // IPv6 literal (con corchetes): loopback, link-local y ULA fc00::/7
+        if (host.startsWith("[")) {
+            String h = host.substring(1);
+            return h.equals("::1") || h.startsWith("fe80:")
+                    || h.startsWith("fc") || h.startsWith("fd");
+        }
+        if (host.equals("::1") || host.startsWith("fe80:")) return true;
+        // IPv4 literal: solo si son 4 octetos numéricos — un hostname DNS
+        // como "10.evil.com" no casa porque 'e' no es dígito.
+        String[] parts = host.split("\\.", -1);
+        if (parts.length != 4) return false;
+        int[] o = new int[4];
+        for (int i = 0; i < 4; i++) {
+            if (parts[i].isEmpty() || parts[i].length() > 3) return false;
+            for (int k = 0; k < parts[i].length(); k++) {
+                if (!Character.isDigit(parts[i].charAt(k))) return false;
+            }
+            o[i] = Integer.parseInt(parts[i]);
+            if (o[i] > 255) return false;
+        }
+        return o[0] == 127 || o[0] == 10
+                || (o[0] == 172 && o[1] >= 16 && o[1] <= 31)
+                || (o[0] == 192 && o[1] == 168)
+                || (o[0] == 169 && o[1] == 254);
     }
 
     // Avisa a JS de que un dispositivo no emparejado quiere interactuar.
@@ -299,18 +323,28 @@ public class SyncServerPlugin extends Plugin {
                                 "application/json", "{\"ok\":false,\"denied\":true}");
                         } else {
                             if (!pendingPairs.containsKey(devId)) {
-                                JSONObject pp = new JSONObject();
-                                pp.put("ip", session.getRemoteIpAddress());
-                                pp.put("alias", j.optString("alias", ""));
-                                pp.put("fingerprint", j.optString("fingerprint", ""));
-                                pendingPairs.put(devId, pp);
-                                JSObject ev = new JSObject();
-                                ev.put("ip", session.getRemoteIpAddress());
-                                ev.put("endpoint", "pair");
-                                ev.put("deviceId", devId);
-                                ev.put("alias", j.optString("alias", ""));
-                                ev.put("fingerprint", j.optString("fingerprint", ""));
-                                notifyListeners("pairRequest", ev);
+                                // Flood control: poda entradas >2min y cap
+                                // total — un peer hostil no debe inflar el mapa.
+                                long now = System.currentTimeMillis();
+                                synchronized (pendingPairs) {
+                                    pendingPairs.entrySet().removeIf(e ->
+                                        now - e.getValue().optLong("ts") > 120000);
+                                    if (pendingPairs.size() < 64) {
+                                        JSONObject pp = new JSONObject();
+                                        pp.put("ip", session.getRemoteIpAddress());
+                                        pp.put("alias", j.optString("alias", ""));
+                                        pp.put("fingerprint", j.optString("fingerprint", ""));
+                                        pp.put("ts", now);
+                                        pendingPairs.put(devId, pp);
+                                        JSObject ev = new JSObject();
+                                        ev.put("ip", session.getRemoteIpAddress());
+                                        ev.put("endpoint", "pair");
+                                        ev.put("deviceId", devId);
+                                        ev.put("alias", j.optString("alias", ""));
+                                        ev.put("fingerprint", j.optString("fingerprint", ""));
+                                        notifyListeners("pairRequest", ev);
+                                    }
+                                }
                             }
                             res = newFixedLengthResponse(Response.Status.ACCEPTED,
                                 "application/json", "{\"ok\":false,\"pending\":true}");
@@ -724,6 +758,11 @@ public class SyncServerPlugin extends Plugin {
                 // de paquetes.
                 Long lastReply = repliedAt.get(devId);
                 long now = System.currentTimeMillis();
+                if (repliedAt.size() > 256) {
+                    synchronized (repliedAt) {
+                        repliedAt.entrySet().removeIf(e -> now - e.getValue() > 120000);
+                    }
+                }
                 if (lastReply == null || now - lastReply > 45000) {
                     repliedAt.put(devId, now);
                     byte[] payload = announcement();

@@ -170,6 +170,13 @@ public class TorrentEnginePlugin extends Plugin {
                 th.resume();
 
                 mediaFile = new File(saveDir, fs.filePath(idx));
+                // Path traversal: filePath viene de metadatos del torrent.
+                // libtorrent sanea "..", pero verificamos contención real —
+                // el servidor local serviría cualquier archivo del dispositivo.
+                String canonSave = saveDir.getCanonicalPath();
+                if (!mediaFile.getCanonicalPath().startsWith(canonSave + File.separator)) {
+                    throw new Exception("ruta de archivo fuera del directorio de descarga");
+                }
                 Log.i(TAG, "streaming file " + fs.filePath(idx) + " (" + fileSize + " bytes, pieceLen " + pieceLength + ")");
 
                 // 4. Local HTTP server
@@ -366,6 +373,10 @@ public class TorrentEnginePlugin extends Plugin {
         HttpURLConnection conn = null;
         try {
             URL u = new URL(url);
+            String proto = u.getProtocol();
+            if (!proto.equals("http") && !proto.equals("https")) {
+                throw new Exception("esquema no permitido: " + proto);
+            }
             conn = (HttpURLConnection) u.openConnection();
             conn.setInstanceFollowRedirects(true);
             conn.setConnectTimeout(15000);
