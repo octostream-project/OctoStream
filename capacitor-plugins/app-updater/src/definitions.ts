@@ -15,8 +15,23 @@ export interface AppUpdaterPlugin extends Plugin {
    * before resolving {path}.
    */
   downloadApk(options: { url: string; sha256?: string }): Promise<{ path: string }>
-  /** Launches the system package installer for a previously downloaded APK */
-  installApk(options: { path: string }): Promise<void>
+  /** Launches the system package installer for a previously downloaded APK.
+   *  Resolves {installed:true} | {aborted:true} | {needsPermission:true}, or
+   *  rejects with 'incompatible: …' when the APK signature conflicts with
+   *  the installed one (uninstall+reinstall needed). */
+  installApk(options: { path: string }): Promise<{ installed?: boolean; aborted?: boolean; needsPermission?: boolean }>
+  /** SHA-256 hex of the certificate signing the installed APK */
+  getAppSignature(): Promise<{ sha256: string }>
+  /**
+   * Copies a downloaded APK to public Downloads so it survives uninstall
+   * (signature-change reinstall flow). Resolves {saved, name}; saved is
+   * false on Android <10 (no unprivileged public-storage access).
+   */
+  copyToDownloads(options: { path: string; name?: string }): Promise<{ saved: boolean; name?: string }>
+  /** Launches the system dialog to uninstall this package */
+  uninstallSelf(): Promise<void>
+  /** Opens an https URL in the system browser (manual fallback) */
+  openUrl(options: { url: string }): Promise<void>
   addListener(
     eventName: 'downloadProgress',
     listener: (data: { received: number; total: number; percent: number }) => void

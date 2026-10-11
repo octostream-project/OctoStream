@@ -49,12 +49,22 @@ export async function checkForUpdate({ manifestUrl = UPDATE_MANIFEST_URL } = {})
       sha256 = manifest.sha256 || ''
     }
     if (!apkUrl || !apkUrl.startsWith('https://')) return null
+    // certSha256: huella del certificado que firma la nueva APK. Si difiere de
+    // la firma instalada el update normal falla — hace falta reinstalar.
+    let certSha256 = manifest.certSha256 || null
+    let signatureMismatch = false
+    if (certSha256) {
+      const sig = await AppUpdater.getAppSignature().catch(() => null)
+      signatureMismatch = Boolean(sig?.sha256) && sig.sha256 !== certSha256.toLowerCase()
+    }
     return {
       versionCode: manifest.versionCode,
       versionName: manifest.versionName || String(manifest.versionCode),
       notes: manifest.notes || '',
       apkUrl,
       sha256,
+      certSha256,
+      signatureMismatch,
       force: (manifest.minCode || 0) > app.versionCode,
     }
   } catch {

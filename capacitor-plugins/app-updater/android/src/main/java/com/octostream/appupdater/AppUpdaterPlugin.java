@@ -2,14 +2,18 @@ package com.octostream.appupdater;
 
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
@@ -123,7 +127,15 @@ public class AppUpdaterPlugin extends Plugin {
                 ret.put("aborted", true);
                 call.resolve(ret);
             } else {
-                call.reject("install failed: " + message);
+                // Conflicto de firma (p.ej. APK firmado con otra keystore):
+                // el mensaje suele contener INSTALL_FAILED_UPDATE_INCOMPATIBLE
+                // o INSTALL_FAILED_VERSION_DOWNGRADE. Prefijo reconocible
+                // para que el JS pueda ofrecer el flujo de reinstalación.
+                String msg = message != null ? message : "";
+                boolean incompatible = status == PackageInstaller.STATUS_FAILURE_CONFLICT
+                        || status == PackageInstaller.STATUS_FAILURE_INCOMPATIBLE
+                        || msg.contains("INCOMPATIBLE") || msg.contains("CONFLICT");
+                call.reject((incompatible ? "incompatible: " : "install failed: ") + msg);
             }
         }
     }
@@ -143,6 +155,130 @@ public class AppUpdaterPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("getAppVersion failed", e);
+        }
+    }
+
+    @PluginMethod
+    public void getAppSignature(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            Signature sig;
+            if (Build.VERSION.SDK_INT >= 28) {
+                PackageInfo pi = ctx.getPackageManager().getPackageInfo(
+                        ctx.getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+                Signature[] signers = pi.signingInfo.hasMultipleSigners()
+                        ? pi.signingInfo.getApkContentsSigners()
+                        : pi.signingInfo.getSigningCertificateHistory();
+                if (signers == null || signers.length == 0) {
+                    call.reject("no signing info");
+                    return;
+                }
+                sig = signers[0];
+            } else {
+                @SuppressWarnings("deprecation")
+                PackageInfo pi = ctx.getPackageManager().getPackageInfo(
+                        ctx.getPackageName(), PackageManager.GET_SIGNATURES);
+                if (pi.signatures == null || pi.signatures.length == 0) {
+                    call.reject("no signing info");
+                    return;
+                }
+                sig = pi.signatures[0];
+            }
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            StringBuilder hex = new StringBuilder();
+            for (byte b : md.digest(sig.toByteArray())) hex.append(String.format("%02x", b));
+            JSObject ret = new JSObject();
+            ret.put("sha256", hex.toString());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("getAppSignature failed", e);
+        }
+    }
+
+    /**
+     * Copia el APK descargado a Descargas públicas (MediaStore) para que
+     * sobreviva a la desinstalación en el flujo de cambio de firma.
+     * Solo API 29+: en versiones anteriores no hay acceso sin permiso de
+     * almacenamiento y se resuelve {saved:false} — el JS ofrece fallback.
+     */
+    @PluginMethod
+    public void copyToDownloads(PluginCall call) {
+        String path = call.getString("path");
+        String name = call.getString("name");
+        JSObject ret = new JSObject();
+        if (path == null) {
+            call.reject("path required");
+            return;
+        }
+        try {
+            File apk = new File(path);
+            if (!apk.exists()) {
+                call.reject("apk not found");
+                return;
+            }
+            if (name == null || name.isEmpty()) name = apk.getName();
+            if (Build.VERSION.SDK_INT < 29) {
+                ret.put("saved", false);
+                call.resolve(ret);
+                return;
+            }
+            Context ctx = getContext();
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            values.put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive");
+            values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+            Uri uri = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                ret.put("saved", false);
+                call.resolve(ret);
+                return;
+            }
+            try (OutputStream out = ctx.getContentResolver().openOutputStream(uri);
+                 InputStream in = new FileInputStream(apk)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            }
+            ret.put("saved", true);
+            ret.put("name", name);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "copyToDownloads failed", e);
+            ret.put("saved", false);
+            call.resolve(ret);
+        }
+    }
+
+    /** Lanza el diálogo del sistema para desinstalar este paquete. */
+    @PluginMethod
+    public void uninstallSelf(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            Intent intent = new Intent(Intent.ACTION_DELETE,
+                    Uri.parse("package:" + ctx.getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("uninstallSelf failed", e);
+        }
+    }
+
+    /** Abre una URL http(s) en el navegador del sistema (fallback manual). */
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || !url.startsWith("https://")) {
+            call.reject("openUrl requires an https:// url");
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("openUrl failed", e);
         }
     }
 

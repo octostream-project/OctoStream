@@ -7,9 +7,10 @@ import { isAndroidNative } from '../utils/platform.js'
 // minCode > versionCode instalada → actualización forzosa (sin cancelar).
 export default function UpdateChecker() {
   const [update, setUpdate] = useState(null)
-  const [phase, setPhase] = useState('prompt') // prompt | downloading | needPerm | error
+  const [phase, setPhase] = useState('prompt') // prompt | downloading | needPerm | error | reinstall
   const [percent, setPercent] = useState(0)
   const [error, setError] = useState('')
+  const [reinstallApk, setReinstallApk] = useState(null) // {saved, name}
   const apkPath = useRef(null)
 
   useEffect(() => {
@@ -43,9 +44,24 @@ export default function UpdateChecker() {
       else if (r?.aborted) setPhase('prompt')
       else if (r?.installed) setUpdate(null)
     } catch (e) {
+      if (String(e?.message || e).startsWith('incompatible')) {
+        await startReinstall()
+        return
+      }
       setError(String(e?.message || e))
       setPhase('error')
     }
+  }
+
+  // Cambio de firma: la nueva APK no puede instalarse encima. Se copia a
+  // Descargas (sobrevive a la desinstalación) y se lanza el desinstalador
+  // del sistema — el usuario solo confirma y luego instala el APK.
+  const startReinstall = async () => {
+    const name = `octostream-${update.versionName}.apk`
+    const res = await AppUpdater.copyToDownloads({ path: apkPath.current, name })
+      .catch(() => ({ saved: false }))
+    setReinstallApk(res)
+    setPhase('reinstall')
   }
 
   const download = async () => {
@@ -54,7 +70,8 @@ export default function UpdateChecker() {
     try {
       const r = await AppUpdater.downloadApk({ url: update.apkUrl, sha256: update.sha256 || undefined })
       apkPath.current = r.path
-      await startInstall()
+      if (update.signatureMismatch) await startReinstall()
+      else await startInstall()
     } catch (e) {
       setError(String(e?.message || e))
       setPhase('error')
@@ -109,6 +126,41 @@ export default function UpdateChecker() {
               </button>
               <button className={btn} onClick={startInstall}>
                 Instalar
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === 'reinstall' && (
+          <>
+            <p className="mt-3 text-sm text-slate-300">
+              Esta versión está firmada con una clave distinta y Android no permite
+              instalarla encima. Hay que desinstalar la app primero.
+            </p>
+            <p className="mt-3 text-sm text-amber-400">
+              Se perderán ajustes, favoritos e historial.
+            </p>
+            {reinstallApk?.saved ? (
+              <p className="mt-3 text-sm text-emerald-400">
+                La nueva versión ya está en Descargas ({reinstallApk.name}) —
+                instálala desde ahí después de desinstalar.
+              </p>
+            ) : (
+              <p className="mt-3 text-sm text-slate-300">
+                Tras desinstalar, descarga la APK de nuevo desde el navegador.
+              </p>
+            )}
+            <div className="mt-6 flex justify-end gap-3">
+              <button className={btn} onClick={() => setUpdate(null)}>
+                Cancelar
+              </button>
+              {!reinstallApk?.saved && (
+                <button className={btn} onClick={() => AppUpdater.openUrl({ url: update.apkUrl })}>
+                  Abrir descarga
+                </button>
+              )}
+              <button className={btn} onClick={() => AppUpdater.uninstallSelf()} autoFocus>
+                Desinstalar ahora
               </button>
             </div>
           </>
