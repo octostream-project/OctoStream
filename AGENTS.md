@@ -155,6 +155,10 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   GitHub → `node scripts/bump-version.mjs <version> <apk> <url-asset>` →
   commit + push del `version.json` resultante. El APK debe firmarse siempre
   con la misma keystore o la instalación fallará por conflicto de firma.
+- Keystore canónico de release: `~/optostream-keystore-backup/octostream-release.jks`
+  (alias `octostream`, cert SHA-256 `80649ff3b7d7375b...`). Las releases ≤1.51
+  quedaron firmadas por error con una debug key (`e006f031...`) — desde 1.52
+  los usuarios que actualicen desde ≤1.51 deben reinstalar (conflicto de firma).
 
 ## Posibles próximos pasos
 
