@@ -308,6 +308,36 @@ export function rankSearchResults(query, items) {
   return out
 }
 
+// Marcador de temporada/part dentro del propio título: "3rd Season",
+// "Season 2", "Temporada 3", "Part 2", romanos finales ("Edgerunners II").
+// Los sitios de anime indexan cada temporada como entrada aparte — el
+// marcador permite distinguir "Kusuriya 3rd Season" de la página vieja.
+// Devuelve el número, 'final', o null si el título no lleva marcador.
+export function titleSeasonMarker(s) {
+  const t = normalizeTitle(s)
+  if (!t) return null
+  let m = t.match(/\b(\d+)(?:st|nd|rd|th)?\s+season\b/)
+       || t.match(/\bseason\s*(\d+)\b/)
+       || t.match(/\b(\d+)\s*temporada\b/)
+       || t.match(/\btemporada\s*(\d+)\b/)
+  if (m) return Number(m[1])
+  m = t.match(/\bpart\s*(\d+)\b/) || t.match(/\bparte\s*(\d+)\b/)
+  if (m) return Number(m[1])
+  if (/\b(final|last)\s+season\b/.test(t) || /\btemporada\s+final\b/.test(t)) return 'final'
+  m = t.match(/\b(ii|iii|iv|v|vi|vii|viii|ix)\s*$/)
+  if (m) return { ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9 }[m[1]]
+  return null
+}
+
+// Palabras genéricas que no identifican contenido: se excluyen del chequeo
+// de "palabra común" del fallback. Sin esto "Ao no Hako 2nd Season" aceptaba
+// "Edens Zero 2nd Season" (comparten "2nd"/"season") y reproducía otro anime.
+const GENERIC_TITLE_WORD = /^(?:\d.*|season|part|parte|temporada|serie|series|episodes?|capitulos?|ova|ona|specials?|special|final|last|cour|movie|pelicula|version|sub|dub|latino|castellano|espanol|english)$/i
+
+function significantWords(s) {
+  return (s || '').toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !GENERIC_TITLE_WORD.test(w))
+}
+
 // Find the channel that owns a given catalog id.
 function channelForCatalog(catalogId) {
   for (const ch of activeChannels()) {
@@ -1072,12 +1102,31 @@ export const plurtaskoFactory = (config) => {
               }
             }
 
+            // Marcador de temporada: cuando el título buscado la lleva
+            // ("Kusuriya 3rd Season" — Kitsu crea una entrada por temporada),
+            // solo sirven resultados con el mismo marcador. Una entrada sin
+            // marcador es la página vieja/de franquicia y sus episodios son
+            // de la temporada anterior. Cuando el título no lleva marcador
+            // pero la petición pide temporada (series TMDB con varias), solo
+            // se rechazan los marcadores que difieran: una página sin
+            // marcador puede listar todas las temporadas (episodio absoluto).
+            const nameMarker = titleSeasonMarker(name) ?? titleSeasonMarker(originalName) ?? titleSeasonMarker(englishName)
+            const wantedMarker = nameMarker
+              ?? ((seasonsList?.length ?? 0) > 1 && Number(season) > 0 ? Number(season) : null)
+            const markerOk = (it) => {
+              if (wantedMarker == null) return true
+              const m = titleSeasonMarker(it.name) ?? titleSeasonMarker(it.title)
+              if (m == null) return nameMarker == null
+              return m === wantedMarker
+            }
+
             // Fallback a title matching si no hay validación por ID
             if (!match) {
               const titleMatches = items.filter(it =>
-                isTitleMatch(it.name, name) || isTitleMatch(it.title, name) ||
+                (isTitleMatch(it.name, name) || isTitleMatch(it.title, name) ||
                 (originalName && (isTitleMatch(it.name, originalName) || isTitleMatch(it.title, originalName))) ||
-                (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))
+                (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))) &&
+                markerOk(it)
               )
               // Entre varios matches elegir el más cercano al título buscado
               // ("Naruto" sobre "Naruto Shippuden" cuando se pide "Naruto").
@@ -1092,13 +1141,15 @@ export const plurtaskoFactory = (config) => {
                 }))
                 .sort((a, b) => b.score - a.score)[0]?.it || null
               // Series por temporada (DonTorrent: una página por temporada):
-              // si se pidió una temporada concreta, preferir el resultado que
-              // la lleva en el título ("Reacher - 2ª Temporada").
-              if (season != null && titleMatches.length > 1) {
-                const withSeason = titleMatches.filter(it => it.season != null)
-                if (withSeason.length > 0) {
-                  match = withSeason.find(it => it.season === season) || match
-                }
+              // preferir el resultado que lleva la temporada buscada. Los
+              // canales de anime etiquetan todos sus items con season:1 — el
+              // marcador del propio título ("3rd Season") es más fiable y
+              // tiene prioridad; it.season solo sirve de fallback.
+              const wantedSeason = wantedMarker ?? (Number(season) > 0 ? Number(season) : null)
+              if (wantedSeason != null && titleMatches.length > 1) {
+                const markerOf = it =>
+                  titleSeasonMarker(it.name) ?? titleSeasonMarker(it.title) ?? it.season
+                match = titleMatches.find(it => markerOf(it) === wantedSeason) || match
               }
               if (match) {
                 console.log(`[Plurtasko] Channel ${ch.id}: title match found "${match.name}" for "${name}"${originalName ? ` (orig: "${originalName}")` : ''}${englishName ? ` (en: "${englishName}")` : ''}`)
@@ -1121,28 +1172,20 @@ export const plurtaskoFactory = (config) => {
             }
 
             // If no exact match, only accept first result if title is similar
-            // (at least 3 chars of the query appear in the result name, or vice versa)
-            if (!match && items.length > 0) {
-              const first = items[0]
-              const firstName = (first.name || first.title || '').toLowerCase()
-              const queryLower = name.toLowerCase()
-              const origLower = (originalName || '').toLowerCase()
-              const enLower = (englishName || '').toLowerCase()
-              // Check if titles share a significant word (3+ chars).
-              // Exact word equality only — substring inclusion caused false
-              // positives ("reacher" is a substring of "preacher").
-              const queryWords = queryLower.split(/\s+/).filter(w => w.length >= 3)
-              const nameWords = firstName.split(/\s+/).filter(w => w.length >= 3)
-              const hasCommonWord = queryWords.some(w => nameWords.some(nw => nw === w))
-              // Also check against original name
-              const origWords = origLower.split(/\s+/).filter(w => w.length >= 3)
-              const hasCommonWordOrig = origWords.some(w => nameWords.some(nw => nw === w))
-              // Also check against english name
-              const enWords = enLower.split(/\s+/).filter(w => w.length >= 3)
-              const hasCommonWordEn = enWords.some(w => nameWords.some(nw => nw === w))
+            // (shares a significant word with the query — generic words like
+            // "season"/"2nd" don't count, so "Ao no Hako 2nd Season" can't
+            // accept "Edens Zero 2nd Season" — and it must carry the same
+            // season marker so a franchise/old-season page can't win).
+            const markerItems = items.filter(markerOk)
+            if (!match && markerItems.length > 0) {
+              const first = markerItems[0]
+              const nameWords = significantWords(first.name || first.title)
+              const hasCommonWord = significantWords(name).some(w => nameWords.includes(w))
+              const hasCommonWordOrig = significantWords(originalName).some(w => nameWords.includes(w))
+              const hasCommonWordEn = significantWords(englishName).some(w => nameWords.includes(w))
               if (hasCommonWord || hasCommonWordOrig || hasCommonWordEn) {
                 match = first
-              } else if (items.length === 1) {
+              } else if (markerItems.length === 1 && wantedMarker == null) {
                 // Single result from a specific search - likely the right movie
                 // with a different regional title (e.g. "Cadena perpetua" vs "Sueño de fuga")
                 console.log(`[Plurtasko] Channel ${ch.id}: accepting single result "${first.name}" for "${name}" (regional title mismatch)`)

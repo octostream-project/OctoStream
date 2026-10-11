@@ -1,14 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CONTENT_TYPES } from '../../base.js'
-import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults } from './index.js'
+import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults, titleSeasonMarker } from './index.js'
 
 const channel = CHANNELS.find(item => item.id === 'animeflvone')
 const originalGetMeta = channel.getMeta
 const originalGetStreams = channel.getStreams
+const originalSearch = channel.search
+
+// getStreams con un id de catálogo (p.ej. anilist-anime-…) recorre todos los
+// canales: stub de `search` en todos para que el test no toque la red. El
+// mapa recibe los items que debe devolver cada canal; el resto devuelve [].
+function stubAllSearches(resultsByChannel = {}) {
+  const originals = new Map(CHANNELS.map(ch => [ch, ch.search]))
+  for (const ch of CHANNELS) {
+    ch.search = vi.fn().mockResolvedValue(resultsByChannel[ch.id] || [])
+  }
+  return {
+    restore() {
+      for (const ch of CHANNELS) ch.search = originals.get(ch)
+    },
+  }
+}
 
 afterEach(() => {
   channel.getMeta = originalGetMeta
   channel.getStreams = originalGetStreams
+  channel.search = originalSearch
   vi.restoreAllMocks()
 })
 
@@ -171,5 +188,90 @@ describe('titleRelevance / rankSearchResults (búsqueda exacta)', () => {
     ]
     const out = rankSearchResults('Naruto', items)
     expect(out).toHaveLength(2)
+  })
+})
+
+describe('titleSeasonMarker (marcador de temporada en el título)', () => {
+  it('extrae el número de los formatos habituales', () => {
+    expect(titleSeasonMarker('Kusuriya no Hitorigoto 3rd Season')).toBe(3)
+    expect(titleSeasonMarker('Black Clover 2nd Season')).toBe(2)
+    expect(titleSeasonMarker('The Apothecary Diaries Season 3')).toBe(3)
+    expect(titleSeasonMarker('Tantei wa mou, Shindeiru. Season 2')).toBe(2)
+    expect(titleSeasonMarker('Reacher - 2ª Temporada')).toBe(2)
+    expect(titleSeasonMarker('Reacher Temporada 4')).toBe(4)
+    expect(titleSeasonMarker('Attack on Titan Final Season Part 2')).toBe(2)
+    expect(titleSeasonMarker('Attack on Titan Final Season')).toBe('final')
+    expect(titleSeasonMarker('Cyberpunk: Edgerunners II')).toBe(2)
+    expect(titleSeasonMarker('Rocky III')).toBe(3)
+  })
+
+  it('devuelve null cuando el título no lleva marcador', () => {
+    expect(titleSeasonMarker('Black Clover')).toBeNull()
+    expect(titleSeasonMarker('Kusuriya no Hitorigoto')).toBeNull()
+    expect(titleSeasonMarker('District 9')).toBeNull()
+    expect(titleSeasonMarker('')).toBeNull()
+    expect(titleSeasonMarker(null)).toBeNull()
+  })
+
+  it('distingue temporada pedida de la vieja al resolver streams', async () => {
+    // Regresión: los canales de anime etiquetan todos sus items con
+    // season:1 — el picker no puede fiarse de it.season y debe usar el
+    // marcador del título. Aquí el canal devuelve la franquicia y la S3;
+    // el match correcto es la S3 aunque llegue después en la lista.
+    const searchStub = stubAllSearches({
+      animeflvone: [
+        { id: 'ch:s1', url: 'https://x/kusuriya', name: 'Kusuriya no Hitorigoto', season: 1 },
+        { id: 'ch:s2', url: 'https://x/kusuriya-2', name: 'Kusuriya no Hitorigoto 2nd Season', season: 1 },
+        { id: 'ch:s3', url: 'https://x/kusuriya-3', name: 'Kusuriya no Hitorigoto 3rd Season', season: 1 },
+      ],
+    })
+    channel.getMeta = vi.fn().mockResolvedValue({
+      id: 'ch:s3', name: 'Kusuriya no Hitorigoto 3rd Season', type: CONTENT_TYPES.SERIES,
+      episodes: [{ id: 'ch:s3e1', season: 1, episode: 1 }],
+    })
+    channel.getStreams = vi.fn().mockResolvedValue([{ url: 'https://cdn.x/s3e1.mp4', streamType: 'mp4', server: 'Directo' }])
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.ANIME,
+        id: 'anilist-anime-k50021',
+        name: 'Kusuriya no Hitorigoto 3rd Season',
+        season: 1,
+        episode: 1,
+      })
+      expect(channel.getStreams).toHaveBeenCalledWith(expect.objectContaining({ id: 'ch:s3' }))
+      expect(streams).toEqual([expect.objectContaining({ url: 'https://cdn.x/s3e1.mp4' })])
+    } finally {
+      searchStub.restore()
+    }
+  })
+
+  it('no reproduce la temporada vieja cuando el sitio solo tiene la franquicia', async () => {
+    // Regresión del bug reportado: la query pide "2nd Season" y el sitio
+    // solo tiene la página de la franquicia (S1) o una temporada distinta →
+    // antes se aceptaba y se reproducía la temporada vieja. Ahora el canal
+    // no aporta streams.
+    const searchStub = stubAllSearches({
+      animeflvone: [
+        { id: 'ch:s1', url: 'https://x/blue-box', name: 'Ao no Hako', season: 1 },
+        { id: 'ch:other', url: 'https://x/edens-zero-2', name: 'Edens Zero 2nd Season', season: 1 },
+      ],
+    })
+    channel.getMeta = vi.fn()
+    channel.getStreams = vi.fn()
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.ANIME,
+        id: 'anilist-anime-k49752',
+        name: 'Ao no Hako 2nd Season',
+        season: 1,
+        episode: 1,
+      })
+      expect(streams).toEqual([])
+      expect(channel.getStreams).not.toHaveBeenCalled()
+    } finally {
+      searchStub.restore()
+    }
   })
 })
