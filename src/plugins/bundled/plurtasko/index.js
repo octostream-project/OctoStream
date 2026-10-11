@@ -568,6 +568,14 @@ async function resolveStreams(streams, onBatch, context = {}) {
               server: s.server + ' (Debrid)',
               originalUrl: s.url,
               viaDebrid: resolved.via,
+              // La URL firmada de AllDebrid caduca en reproducciones largas:
+              // re-resolver el magnet para obtener un link fresco (el
+              // resolveEmbedJs del fallback originalUrl no sabe qué hacer
+              // con una página de torrent).
+              _refreshUrl: async () => {
+                const fresh = await resolveMagnet(magnetUrl, 30000, ep)
+                return fresh?.find(l => l !== link) || fresh?.[0] || null
+              },
             }))
           }
         } catch (e) {
@@ -678,6 +686,9 @@ async function resolveStreams(streams, onBatch, context = {}) {
               originalUrl: s.url,
               headers,
               viaDebrid: srv.viaDebrid,
+              // Si el link vino de debrid, guardar el enlace restringido para
+              // re-desbloquearlo cuando la URL firmada caduque.
+              ...(srv.viaDebrid ? { originalDebridUrl: srv.url } : {}),
             })
           }
           return results
@@ -714,11 +725,13 @@ async function resolveStreams(streams, onBatch, context = {}) {
       }
 
       // Try debrid services if JS resolver failed (or if it's a premium host)
+      let viaDebrid = null
       if (!directUrl) {
         console.log(`[Plurtasko] Trying debrid for: ${s.url}`)
         const debrid = await debridUnlock(s.url)
         if (debrid?.link) {
           directUrl = debrid.link
+          viaDebrid = debrid.via
           console.log(`[Plurtasko] Debrid unlocked: ${s.url} → ${directUrl.substring(0, 80)}`)
         } else {
           console.log(`[Plurtasko] Debrid failed for: ${s.url}`)
@@ -771,7 +784,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
           const hostMatch = s.url.match(/https?:\/\/([^\/]+)/)
           serverName = hostMatch ? hostMatch[1].replace(/^www\./, '') + ' (Debrid)' : 'Premium (Debrid)'
         }
-        return [{ ...s, server: serverName, name: serverName + (lang ? ` (${lang})` : ''), url: directUrl, streamType: newType, quality, lang, title: embedMeta.title || s.title, originalUrl: s.url, headers }]
+        return [{ ...s, server: serverName, name: serverName + (lang ? ` (${lang})` : ''), url: directUrl, streamType: newType, quality, lang, title: embedMeta.title || s.title, originalUrl: s.url, headers, ...(viaDebrid ? { originalDebridUrl: s.url, viaDebrid } : {}) }]
       }
       // Keep as embed - the WebView/native player can try to play it.
       // But skip hosts that can never be played without debrid:

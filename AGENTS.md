@@ -23,7 +23,9 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   cargadores HLS (`hlsAndroidLoader.js`) y el cliente HTTP (`httpClient.js`) puedan
   saltarse CORS en Android.
 - SDK objetivo: `compileSdk/targetSdk 34`, `minSdk 23`. AGP 8.2.1.
-- Media3 ExoPlayer 1.10.1 se declara en `capacitor-plugins/exoplayer/android/build.gradle`.
+- Media3 ExoPlayer 1.3.1 se declara en `capacitor-plugins/exoplayer/android/build.gradle`,
+  incluido `media3-decoder-ffmpeg` (AC3/E-AC-3/DTS/TrueHD — imprescindible para
+  .mkv debrid con audio AC3/DTS; sin él esos archivos suenan en silencio).
 - ABIs del APK (`abiFilters` en `android/app/build.gradle`): `arm64-v8a`,
   `armeabi-v7a`, `x86_64`. `x86` 32-bit queda fuera porque libaether
   (cloud-proxy) no lo incluye; jlibtorrent sí cubre las 4. Si se regenera

@@ -300,8 +300,11 @@ async function resolveMagnetRemote(magnetUrl, timeoutMs, opts) {
       // /link/unlock para obtener la URL final reproducible. En paralelo —
       // en serie cada unlock sumaba un round-trip extra por archivo.
       const picked = pickTorrentEntries(status.links, opts) || status.links
+      // Sin fallback a picked[i].link: ese es el enlace RESTRINGIDO del host
+      // (1fichier.com/?…), no es reproducible — devolverlo creaba streams que
+      // "no cargan". Solo URLs ya desbloqueadas; si ninguna abre, null.
       const direct = (await Promise.all(picked.map(l => unlockLink(l.link))))
-        .map((u, i) => u?.link || picked[i].link)
+        .map(u => u?.link).filter(Boolean)
       deleteMagnet(magnetId).catch(() => {})
       return direct.length ? direct : null
     }

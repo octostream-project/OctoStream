@@ -5857,10 +5857,16 @@ public class ExoPlayerPlugin extends Plugin {
                 .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
                 .setTargetBufferBytes(15 * 1024 * 1024)
                 .build();
+        // El RenderersFactory por defecto no usa extensiones: sin PREFER el
+        // mini también quedaría mudo con audio AC3/DTS (debrid .mkv).
+        DefaultRenderersFactory pipRenderersFactory = new DefaultRenderersFactory(context)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                .setEnableDecoderFallback(true);
         pipPlayer = new ExoPlayer.Builder(context)
                 .setAudioAttributes(aa, true)
                 .setTrackSelector(pipTrackSelector)
                 .setLoadControl(pipLoadControl)
+                .setRenderersFactory(pipRenderersFactory)
                 .setWakeMode(C.WAKE_MODE_LOCAL)
                 .build();
         pipView.setPlayer(pipPlayer);

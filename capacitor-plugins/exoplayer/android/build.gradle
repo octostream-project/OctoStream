@@ -44,6 +44,11 @@ dependencies {
     implementation "androidx.media3:media3-common:$media3Version"
     implementation "androidx.media3:media3-datasource-cronet:$media3Version"
     implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
+    // Decodificadores ffmpeg: AC3/E-AC-3/DTS/TrueHD. Sin ellos los .mkv
+    // desbloqueados por debrid (releases con audio AC3/DTS) se oían en
+    // silencio — Media3 solo incluye AAC/MP3/Opus/FLAC de serie. El
+    // RenderersFactory ya usa EXTENSION_RENDERER_MODE_PREFER.
+    implementation "androidx.media3:media3-decoder-ffmpeg:$media3Version"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation project(':octostream-cloud-proxy')

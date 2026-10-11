@@ -146,7 +146,7 @@ function sanitizeProxyHeaders(obj) {
   return out
 }
 
-function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders) {
+function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders, clientHeaders) {
   const prefix = proxyPrefix || PROXY_PREFIX_LOCAL
   console.log('[Proxy] fetching:', hostOf(targetUrl))
   const target = validProxyTarget(targetUrl)
@@ -157,6 +157,11 @@ function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders) {
 
   // Headers del resolver (Referer/cookies/UA) ganan a los defaults por host.
   const headers = { ...headersForHost(target.hostname), ...sanitizeProxyHeaders(extraHeaders) }
+  // Range del player (seek en mp4 debrid): antes se descartaba → el CDN
+  // devolvía 200 con el archivo entero y el seek no funcionaba.
+  if (clientHeaders?.range && !headers['Range']) {
+    headers['Range'] = clientHeaders.range
+  }
   // Sufijo que propaga esos headers a segmentos/subplaylists reescritos —
   // sin él el manifest pasaba pero los .ts seguían dando 403.
   const hdrSuffix = extraHeaders && Object.keys(extraHeaders).length
@@ -225,6 +230,10 @@ function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders) {
     respHeaders['Content-Type'] = contentType || 'application/octet-stream'
     if (proxyRes.headers['content-length']) {
       respHeaders['Content-Length'] = proxyRes.headers['content-length']
+    }
+    // Respuestas parciales (206) para que el seek funcione de verdad.
+    for (const h of ['content-range', 'accept-ranges', 'etag', 'last-modified']) {
+      if (proxyRes.headers[h]) respHeaders[h] = proxyRes.headers[h]
     }
 
     if (isM3u8) {
@@ -528,7 +537,7 @@ function startProxyServer() {
       const clientIp = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
       const isLocal = clientIp === '127.0.0.1' || clientIp === '::1'
       const prefix = isLocal ? PROXY_PREFIX_LOCAL : PROXY_PREFIX_LAN
-      proxyFetch(targetUrl, res, prefix)
+      proxyFetch(targetUrl, res, prefix, null, req.headers)
       return
     }
 
@@ -572,7 +581,7 @@ function startProxyServer() {
       return
     }
 
-    proxyFetch(targetUrl, res, prefix, extraHeaders)
+    proxyFetch(targetUrl, res, prefix, extraHeaders, req.headers)
   })
 
   // Listen on all interfaces so Chromecast can reach the proxy
