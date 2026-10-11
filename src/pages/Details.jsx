@@ -184,8 +184,11 @@ export default function Details() {
   const [cast, setCast] = useState([])
   const [castLoading, setCastLoading] = useState(false)
   const [selectedStream, setSelectedStream] = useState(null)
-  // Timer para el autoplay diferido (20s): permite al usuario elegir stream manualmente
+  // Timer para el autoplay diferido (60s): permite al usuario elegir stream manualmente
   const autoplayTimerRef = useRef(null)
+  // Marca el autoplay de navegación ("Seguir viendo") como consumido para no
+  // re-dispararlo en re-renders posteriores.
+  const autoplayConsumedRef = useRef(false)
   // Guard: evita que onPlayNext (popup) y handleEnded disparen el siguiente
   // episodio dos veces. Se resetea al seleccionar un episodio manualmente.
   const nextEpisodeTriggeredRef = useRef(false)
@@ -302,6 +305,7 @@ export default function Details() {
 
   useEffect(() => {
     let cancelled = false
+    autoplayConsumedRef.current = false
     const load = async () => {
       setLoading(true)
       setMeta(null)
@@ -512,9 +516,10 @@ export default function Details() {
 
   const [resolvingStream, setResolvingStream] = useState(false)
 
-  // Programa el autoplay con 20s de retraso. Si el usuario elige un stream
+  // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
-  const scheduleAutoplay = (fn, delayMs = 20000) => {
+  const AUTOPLAY_DELAY_MS = 60000
+  const scheduleAutoplay = (fn, delayMs = AUTOPLAY_DELAY_MS) => {
     if (autoplayTimerRef.current) clearTimeout(autoplayTimerRef.current)
     autoplayTimerRef.current = setTimeout(() => {
       autoplayTimerRef.current = null
@@ -677,6 +682,42 @@ export default function Details() {
     }
   }
 
+  // Reanuda el episodio guardado del historial ("Seguir viendo" de Home y
+  // banner "Continuar viendo" de la ficha). forcePlay porque reanudar es una
+  // acción explícita del usuario — no depende del ajuste de autoplay ni
+  // espera los 60s del autoplay diferido.
+  const resumeSavedEpisode = async () => {
+    const season = meta?.seasonsList?.find(s => s.seasonNumber === historyItem.season)
+    if (!season) return
+    const cacheKey = `${meta.id}-s${historyItem.season}`
+    let eps = episodesCacheRef.current[cacheKey]
+    if (!eps) {
+      try {
+        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: historyItem.season })
+      } catch { eps = null }
+      if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
+    }
+    const ep = eps?.find(e => e.season === historyItem.season && e.episode === historyItem.episode)
+    if (!ep) return
+    setSelectedSeason(season)
+    setSeasonEpisodes(eps || [])
+    handlePlayEpisode(ep, { resumeAt: savedTime, forcePlay: true })
+  }
+
+  // "Seguir viendo" navega a la ficha con autoplay:true. En series el load()
+  // sale temprano al detectar seasonsList, así que el resume va en un efecto
+  // aparte que espera a que meta esté cargada (usarla en load() leería el
+  // meta del closure — null en el primer render → crash en meta.name).
+  useEffect(() => {
+    if (autoplayConsumedRef.current) return
+    if (!location.state?.autoplay || !meta?.seasonsList?.length) return
+    if (historyItem?.season == null || historyItem?.episode == null) return
+    if (!(savedProgress > 0.05 && savedProgress < 0.95) || !(savedTime > 0)) return
+    autoplayConsumedRef.current = true
+    resumeSavedEpisode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, location.state?.autoplay, historyItem, savedProgress, savedTime])
+
   // Load episodes for a season from TMDB (con caché y cancelación)
   const handleSelectSeason = async (season) => {
     setSelectedSeason(season)
@@ -807,7 +848,7 @@ export default function Details() {
       if (epStreams && epStreams.length > 0) {
         setEpisodeStreams(epStreams)
         setEpisodeLoading(false)
-        // Autoplay: if enabled, auto-select best stream by language and play after 20s delay.
+        // Autoplay: if enabled, auto-select best stream by language and play after 60s delay.
         // forcePlay = selección explícita desde el panel de episodios del
         // player nativo: el usuario ya eligió — reproducir al instante aunque
         // el autoplay esté desactivado.
@@ -817,10 +858,10 @@ export default function Details() {
           const savedServer = historyItem?.server || ''
           const savedStream = savedServer ? epStreams.find(s => (s.server || s.pluginName) === savedServer) : null
           const bestStream = savedStream || sortByLangPriority(epStreams)[0]
-          console.log(`[Details] Autoplay (20s): will play "${bestStream?.server || bestStream?.pluginName}" (${parseStreamLang(bestStream) || 'no lang'}) for "${meta.name} S${ep.season}E${ep.episode}"`)
+          console.log(`[Details] Autoplay (60s): will play "${bestStream?.server || bestStream?.pluginName}" (${parseStreamLang(bestStream) || 'no lang'}) for "${meta.name} S${ep.season}E${ep.episode}"`)
           if (fromAutoplay || forcePlay) {
             // El usuario ya ha pulsado "Continuar" en el popup nativo/web:
-            // reproducir inmediatamente, sin volver a esperar 20 segundos.
+            // reproducir inmediatamente, sin volver a esperar 60 segundos.
             if (stale()) return
             setResumeTime(resumeAt != null ? resumeAt : 0)
             // El guard anti-doble-disparo se libera cuando la transición
@@ -829,7 +870,7 @@ export default function Details() {
             Promise.resolve(handlePlay(bestStream, true, epStreams))
               .then(() => { if (!stale()) nextEpisodeTriggeredRef.current = false })
           } else {
-            // Autoplay inicial diferido: permite elegir otro stream durante 20s.
+            // Autoplay inicial diferido: permite elegir otro stream durante 60s.
             scheduleAutoplay(() => {
               if (stale()) return
               setResumeTime(resumeAt != null ? resumeAt : 0)
@@ -1349,25 +1390,7 @@ export default function Details() {
             data-tv-card
             tabIndex={0}
             role="button"
-            onClick={async () => {
-              // Encontrar la temporada y episodio guardados y reproducir
-              const season = meta.seasonsList.find(s => s.seasonNumber === historyItem.season)
-              if (!season) return
-              // Cargar episodios de la temporada si no están en caché
-              const cacheKey = `${meta.id}-s${historyItem.season}`
-              let eps = episodesCacheRef.current[cacheKey]
-              if (!eps) {
-                eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: historyItem.season })
-                if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
-              }
-              const ep = eps?.find(e => e.season === historyItem.season && e.episode === historyItem.episode)
-              if (ep) {
-                setSelectedSeason(season)
-                setSeasonEpisodes(eps || [])
-                setResumeTime(savedTime)
-                handlePlayEpisode(ep, { fromAutoplay: true, resumeAt: savedTime })
-              }
-            }}
+            onClick={resumeSavedEpisode}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
