@@ -1,19 +1,19 @@
 {
-  "versionCode": 153,
-  "versionName": "1.53",
+  "versionCode": 154,
+  "versionName": "1.54",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-arm64-v8a.apk",
-  "sha256": "c5f55b81bd738b7263430fdfd993c6b38bf9eb03a5268343f8c0e3c73fe25c50",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-arm64-v8a.apk",
+  "sha256": "ef3cde3494cc722726a209cb9ff5c12bacb839ea2833c0d50fa6ec6dc8a8dfaa",
   "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4",
-  "notes": "IMPORTANTE: si tienes la versión 1.51 o anterior, la actualización fallará por cambio de firma — desinstala la app antes de instalar esta APK (se perderán ajustes e historial).\n\nIcono de launcher de OctoStream, updater con reinstalación asistida ante cambio de firma, fixes de seguridad en SyncServer (anti-CSRF) y TorrentEngine (path traversal), fixes FCTV/debrid/autoplay/seguir viendo.",
+  "notes": "IMPORTANTE: si tienes la versión 1.51 o anterior, la actualización fallará por cambio de firma — desinstala la app antes de instalar esta APK (se perderán ajustes e historial).\n\nFix: la TV en directo ya no se queda colgada en \"Cargando enlace\" cuando un canal se corta (watchdog de buffering + reintentos). Anime: la temporada nueva de \"Esta Temporada\" ya no reproduce la temporada vieja ni resultados equivocados. Canales en Seguir viendo se abren en modo TV con EPG y zapping.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.53/octostream-1.53-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.54/octostream-1.54-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "c5f55b81bd738b7263430fdfd993c6b38bf9eb03a5268343f8c0e3c73fe25c50",
-    "armeabi-v7a": "5f931f4333ca1a8788f40ecd50e812dc7871716932641ebb177da1614851dc6f",
-    "x86_64": "32c91f05e08bf729c15d48207313a7733320afe0891c3d9081c14aefe278d3cd"
+    "arm64-v8a": "ef3cde3494cc722726a209cb9ff5c12bacb839ea2833c0d50fa6ec6dc8a8dfaa",
+    "armeabi-v7a": "a2954cdb66fb7a142713d347a2453c853dfafbbeb8afb15f18691fc810dee86d",
+    "x86_64": "d46f97aa657969640aeef4df47fc9a4340121c1794bbd7dad3c92067b3ef6b96"
   }
 }
