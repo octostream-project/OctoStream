@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CONTENT_TYPES } from '../../base.js'
-import { CHANNELS, plurtaskoFactory } from './index.js'
+import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults } from './index.js'
 
 const channel = CHANNELS.find(item => item.id === 'animeflvone')
 const originalGetMeta = channel.getMeta
@@ -131,5 +131,45 @@ describe('isTitleMatch strictness', () => {
     // Multi-word titles still match when all significant words overlap
     expect(isTitleMatch('The Matrix Reloaded', 'Matrix Reloaded')).toBe(true)
     expect(isTitleMatch('Matrix Revolutions', 'Matrix')).toBe(false)
+  })
+})
+
+describe('titleRelevance / rankSearchResults (búsqueda exacta)', () => {
+  it('puntúa exact > contiene-palabra > overlap > nada', () => {
+    expect(titleRelevance('Naruto', 'Naruto')).toBe(100)
+    expect(titleRelevance('Naruto', 'Naruto Shippuden')).toBeGreaterThan(70)
+    expect(titleRelevance('Naruto', 'Boruto: Naruto Next Generations')).toBeGreaterThan(60)
+    // "Reacher" no puede puntuar contra "Preacher" (substring, no palabra)
+    expect(titleRelevance('Reacher', 'Preacher - 1ª Temporada')).toBe(0)
+    // "Dune" tampoco contra "The Dunes" (palabra distinta)
+    expect(titleRelevance('Dune', 'The Dunes')).toBe(0)
+    expect(titleRelevance('Dune', 'Dune: Parte dos')).toBeGreaterThan(70)
+  })
+
+  it('ordena por relevancia y descarta los resultados sin relación si hay match bueno', () => {
+    const items = [
+      { id: 'a:1', name: 'Preacher - 1ª Temporada', type: 'series' },
+      { id: 'a:2', name: 'Reacher - 1ª Temporada', type: 'series' },
+      { id: 'a:3', name: 'Reacher', type: 'series' },
+    ]
+    const out = rankSearchResults('Reacher', items)
+    expect(out[0].name).toBe('Reacher')
+    expect(out.map(i => i.name)).not.toContain('Preacher - 1ª Temporada')
+    expect(out).toHaveLength(2)
+  })
+
+  it('conserva resultados flojos cuando ninguno es bueno (mejor algo que vacío)', () => {
+    const items = [{ id: 'a:1', name: 'Cualquier cosa', type: 'movie' }]
+    expect(rankSearchResults('Sin nada que ver', items)).toHaveLength(1)
+  })
+
+  it('deduplica por id/url conservando fuentes distintas del mismo título', () => {
+    const items = [
+      { id: 'jk:https://x/naruto', name: 'Naruto', type: 'series' },
+      { id: 'jk:https://x/naruto', name: 'Naruto', type: 'series' },
+      { id: 'flv:https://y/naruto', name: 'Naruto', type: 'series' },
+    ]
+    const out = rankSearchResults('Naruto', items)
+    expect(out).toHaveLength(2)
   })
 })

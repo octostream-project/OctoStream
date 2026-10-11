@@ -255,6 +255,59 @@ function isTitleMatch(itemName, targetName) {
   return false
 }
 
+// Puntuación de relevancia título↔query (0-100) para ordenar y filtrar los
+// resultados de los canales. Las búsquedas de los sitios devuelven matches
+// difusos verbatim ("Reacher" → "Preacher", "Dune" → "The Dunes"): sin
+// scoring el picker/UI muestra títulos que no tienen relación.
+// Se compara por palabras completas, no substring (" preacher " NO contiene
+// " reacher ").
+export function titleRelevance(query, title) {
+  const q = normalizeTitle(query)
+  const t = normalizeTitle(title)
+  if (!q || !t) return 0
+  if (q === t) return 100
+  const qPad = ` ${q} `
+  const tPad = ` ${t} `
+  // Contiene la query como palabra(s) completa(s): "naruto" en "naruto shippuden".
+  if (tPad.includes(qPad)) return 80 + Math.round(10 * q.length / t.length)
+  // La query contiene el título completo ("naruto shippuden castellano" buscado
+  // como "naruto shippuden castellano latino" — más corto = peor).
+  if (qPad.includes(tPad)) return 70 + Math.round(10 * t.length / q.length)
+  const qTok = new Set(q.split(' '))
+  const tTok = new Set(t.split(' '))
+  let shared = 0
+  for (const w of qTok) if (tTok.has(w)) shared++
+  return Math.round(50 * shared / qTok.size)
+}
+
+// Ordena los resultados por relevancia y descarta los que no comparten
+// ninguna palabra con la query — pero solo cuando existe al menos un match
+// bueno (>=60). Si ningún canal encontró nada cercano, se devuelve lo que
+// haya: preferible mostrar resultados flojos a una lista vacía.
+export function rankSearchResults(query, items) {
+  if (!items?.length) return items || []
+  if (items.length === 1) return items
+  const scored = items.map(it => ({
+    it,
+    score: Math.max(
+      titleRelevance(query, it.name),
+      titleRelevance(query, it.title),
+    ),
+  }))
+  scored.sort((a, b) => b.score - a.score)
+  const hasGood = scored.some(s => s.score >= 60)
+  const seen = new Set()
+  const out = []
+  for (const s of scored) {
+    if (hasGood && s.score === 0) continue
+    const key = s.it.id || s.it.url || `${s.it.name}:${s.it.type}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(s.it)
+  }
+  return out
+}
+
 // Find the channel that owns a given catalog id.
 function channelForCatalog(catalogId) {
   for (const ch of activeChannels()) {
@@ -1026,7 +1079,18 @@ export const plurtaskoFactory = (config) => {
                 (originalName && (isTitleMatch(it.name, originalName) || isTitleMatch(it.title, originalName))) ||
                 (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))
               )
-              match = titleMatches[0]
+              // Entre varios matches elegir el más cercano al título buscado
+              // ("Naruto" sobre "Naruto Shippuden" cuando se pide "Naruto").
+              match = titleMatches
+                .map(it => ({
+                  it,
+                  score: Math.max(
+                    titleRelevance(name, it.name), titleRelevance(name, it.title),
+                    originalName && Math.max(titleRelevance(originalName, it.name), titleRelevance(originalName, it.title)),
+                    englishName && Math.max(titleRelevance(englishName, it.name), titleRelevance(englishName, it.title)),
+                  ),
+                }))
+                .sort((a, b) => b.score - a.score)[0]?.it || null
               // Series por temporada (DonTorrent: una página por temporada):
               // si se pidió una temporada concreta, preferir el resultado que
               // la lleva en el título ("Reacher - 2ª Temporada").
@@ -1275,7 +1339,7 @@ export const plurtaskoFactory = (config) => {
               `channel search timeout`
             ).catch(() => []))
         )
-        return results.flat()
+        return rankSearchResults(query, results.flat())
       } catch (e) {
         logWarn(`[Plurtasko] search failed for "${query}"`, String(e?.message || e))
         return []
