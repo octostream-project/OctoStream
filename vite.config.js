@@ -43,7 +43,9 @@ export default defineConfig({
       },
     },
     outDir: 'dist',
-    sourcemap: false,
+    // 'hidden' genera .map sin referenciarlos en el bundle: depuración en
+    // producción sin exponer el código fuente a usuarios del APK/web.
+    sourcemap: 'hidden',
     chunkSizeWarningLimit: 700,
     commonjsOptions: {
       transformMixedEsModules: true,

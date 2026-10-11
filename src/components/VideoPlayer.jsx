@@ -28,6 +28,14 @@ import LogoLoader from './LogoLoader.jsx'
 // Log solo host — las URLs de stream llevan tokens firmados.
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
+// Adjunta los headers del stream a una URL ya envuelta por el proxy de
+// Electron (?token=…&url=…). Sin esto, Referer/cookies de los resolvers se
+// perdían en Electron y el CDN devolvía 403 (en Android sí llegan a ExoPlayer).
+const withProxyHeaders = (proxiedUrl, headers) =>
+  headers && Object.keys(headers).length
+    ? proxiedUrl + '&headers=' + encodeURIComponent(JSON.stringify(headers))
+    : proxiedUrl
+
 
 function srtToVtt(srt) {
   return 'WEBVTT\n\n' + srt
@@ -530,7 +538,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       }
       const skipProxy = stream.streamType === 'dash' || /directos\.mediasetinfinity\.es|dai\.google\.com|doubleclick\.net/i.test(streamUrl)
       if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
-        streamUrl = proxyUrl + encodeURIComponent(streamUrl)
+        streamUrl = withProxyHeaders(proxyUrl + encodeURIComponent(streamUrl), stream.headers)
       }
 
       // Solo host — la URL completa puede llevar tokens firmados (debrid, CDNs).
@@ -558,12 +566,15 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       // por nombre normalizado (case-insensitive, sin espacios extra).
       const resolvedChannelIndex = isLive && channels?.length
         ? (channelIndex >= 0 ? channelIndex
-            : channels.findIndex(c => (c.name || c.title) === (meta?.name || title))
-              || channels.findIndex(c => {
-                const cn = (c.name || c.title || '').toLowerCase().trim()
+            : (() => {
+                // findIndex devuelve -1 (truthy) o 0 (falsy): no se puede
+                // encadenar con || — exacto primero, normalizado después.
+                const exact = channels.findIndex(c => (c.name || c.title) === (meta?.name || title))
+                if (exact >= 0) return exact
                 const mn = (meta?.name || title || '').toLowerCase().trim()
-                return cn && mn && cn === mn
-              }))
+                if (!mn) return -1
+                return channels.findIndex(c => (c.name || c.title || '').toLowerCase().trim() === mn)
+              })())
         : -1
       const currentChannel = isLive && resolvedChannelIndex >= 0 ? channels[resolvedChannelIndex] : null
       const currentNow = meta?.epgNow || currentChannel?.nowPlaying || currentChannel?.now || ''
@@ -822,7 +833,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     let streamUrl = stream.url
     const skipProxy = stream.streamType === 'dash' || /directos\.mediasetinfinity\.es|dai\.google\.com|doubleclick\.net/i.test(streamUrl)
     if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
-      streamUrl = proxyUrl + encodeURIComponent(streamUrl)
+      streamUrl = withProxyHeaders(proxyUrl + encodeURIComponent(streamUrl), stream.headers)
     }
 
     // Cuando el token firmado caduca a mitad de reproducción (fragLoadError /
@@ -1151,7 +1162,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
           // On Electron, route license through proxy for Origin/Referer headers
           // On Android, the WebView handles cross-origin requests natively (no proxy needed)
           if (isElectron && proxyUrl && /^https?:\/\//.test(licenseUrl)) {
-            licenseUrl = proxyUrl + encodeURIComponent(licenseUrl)
+            licenseUrl = withProxyHeaders(proxyUrl + encodeURIComponent(licenseUrl), stream.drm?.headers)
           }
           drmConfig.drm = {
             servers: {

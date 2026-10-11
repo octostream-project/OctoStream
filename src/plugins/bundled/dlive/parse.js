@@ -11,6 +11,8 @@ export const decodeEntities = (s) => String(s || '')
 
 // Strip emojis, regional-indicator flags and icon prefixes (⚽ 📺 🏀 …).
 export const stripIcons = (s) => decodeEntities(s)
+  // eslint-disable-next-line no-misleading-character-class -- se eliminan
+  // code points sueltos a propósito (las banderas son pares RI×2).
   .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
   .replace(/\s{2,}/g, ' ')
   .trim()

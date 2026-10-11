@@ -660,6 +660,11 @@ public class ExoPlayerPlugin extends Plugin {
             android.webkit.CookieManager.getInstance().setAcceptCookie(true);
             android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(headlessWebView, true);
 
+            // Anti-leak: el documento del embed ejecuta JS de terceros que
+            // podría usar WebRTC (STUN) para revelar la IP real del usuario,
+            // saltándose WARP. Mismo blindaje que el WebView principal.
+            com.octostream.cloudproxy.CloudProxyPlugin.applyAntiLeak(headlessWebView, true);
+
             final String[] lastPageUrl = {url};
             final Runnable[] finishRef = new Runnable[1];
             finishRef[0] = () -> {
@@ -1833,6 +1838,11 @@ public class ExoPlayerPlugin extends Plugin {
         android.webkit.CookieManager.getInstance().setAcceptCookie(true);
         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(resolverWebView, true);
 
+        // Anti-leak: la página del embed corre JS de terceros que podría usar
+        // WebRTC (STUN) para revelar la IP real, saltándose WARP. Mismo
+        // blindaje que el WebView principal.
+        com.octostream.cloudproxy.CloudProxyPlugin.applyAntiLeak(resolverWebView, true);
+
         // En móvil/tablet la página del embed sale diminuta (está hecha para
         // escritorio): pinch-zoom táctil y la zona del captcha se agranda por
         // CSS al revelar la página. En TV no aplica (se usa el cursor D-pad).
@@ -2629,6 +2639,10 @@ public class ExoPlayerPlugin extends Plugin {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+
+        // Anti-leak: el documento relay corre en el origen del embed — mismo
+        // blindaje WebRTC que el resto de WebViews.
+        com.octostream.cloudproxy.CloudProxyPlugin.applyAntiLeak(relayWebView, true);
 
         relayWebView.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
@@ -5636,8 +5650,8 @@ public class ExoPlayerPlugin extends Plugin {
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
         if (isTdtSpainDomain(url) || isLoopbackUrl(url)) return false;
-        String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
-        return socksProxy != null && !socksProxy.isEmpty();
+        String httpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
+        return httpProxy != null && !httpProxy.isEmpty();
     }
 
     // Construye el DataSource.Factory del stream principal (o de un zap),
@@ -5649,7 +5663,7 @@ public class ExoPlayerPlugin extends Plugin {
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
         if (shouldUseWarpProxy(url, direct, forceBypassProxy)) {
             try {
-                String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
+                String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
                 String[] parts = socksProxy.split(":", 2);
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                         .connectTimeout(15, TimeUnit.SECONDS)
@@ -5695,7 +5709,7 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
-        String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getSocksProxy();
+        String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
         boolean loopback = isLoopbackUrl(url);
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
         if (!direct && !loopback && warpProxy != null && !warpProxy.isEmpty()) {

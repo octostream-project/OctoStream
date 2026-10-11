@@ -29,9 +29,13 @@ function effectiveSignal(signal) {
 // durante los 20s del timeout por defecto.
 export function shortSignal(signal, ms) {
   const ctl = new AbortController()
-  if (signal?.aborted) ctl.abort(signal.reason)
-  else signal?.addEventListener('abort', () => ctl.abort(signal.reason), { once: true })
-  setTimeout(() => ctl.abort(new Error(`probe timeout ${ms}ms`)), ms)
+  const timer = setTimeout(() => ctl.abort(new Error(`probe timeout ${ms}ms`)), ms)
+  const onOuterAbort = () => {
+    clearTimeout(timer) // abort temprano: no dejar el timer vivo hasta ms
+    ctl.abort(signal.reason)
+  }
+  if (signal?.aborted) onOuterAbort()
+  else signal?.addEventListener('abort', onOuterAbort, { once: true })
   return ctl.signal
 }
 
@@ -44,9 +48,10 @@ export function shortSignal(signal, ms) {
 export async function httpGetJson(url, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
+    const isGz = url.endsWith('.gz')
+    let response
     try {
-      const isGz = url.endsWith('.gz')
-      const response = await CapacitorHttp.request({
+      response = await CapacitorHttp.request({
         ...NATIVE_TIMEOUTS,
         method: 'GET',
         url,
@@ -58,35 +63,6 @@ export async function httpGetJson(url, headers = {}, signal) {
         err.httpStatus = response.status
         throw err
       }
-
-      if (isGz) {
-        let blob
-        if (response.data instanceof Blob) {
-          blob = response.data
-        } else if (typeof response.data === 'string') {
-          try {
-            const binary = atob(response.data)
-            const bytes = new Uint8Array(binary.length)
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-            blob = new Blob([bytes])
-          } catch {
-            blob = new Blob([response.data])
-          }
-        } else {
-          blob = response.data
-        }
-        if (typeof DecompressionStream !== 'undefined') {
-          const ds = new DecompressionStream('gzip')
-          const decompressed = blob.stream().pipeThrough(ds)
-          const text = await new Response(decompressed).text()
-          try { return JSON.parse(text) } catch { throw new Error('Respuesta gzip no es JSON válido') }
-        }
-        throw new Error('DecompressionStream not available for gzip')
-      }
-
-      const data = response.data || ''
-      try { return typeof data === 'string' ? JSON.parse(data) : data }
-      catch { throw new Error('Respuesta no es JSON válido') }
     } catch (e) {
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
@@ -97,6 +73,36 @@ export async function httpGetJson(url, headers = {}, signal) {
       }
       try { return await res.json() } catch { throw new Error('Respuesta no es JSON válido') }
     }
+    // Parseo FUERA del try de red: un cuerpo no-JSON no debe reintentar la
+    // petición (antes el catch lo recogía y hacía un segundo fetch idéntico).
+    if (isGz) {
+      let blob
+      if (response.data instanceof Blob) {
+        blob = response.data
+      } else if (typeof response.data === 'string') {
+        try {
+          const binary = atob(response.data)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+          blob = new Blob([bytes])
+        } catch {
+          blob = new Blob([response.data])
+        }
+      } else {
+        blob = response.data
+      }
+      if (typeof DecompressionStream !== 'undefined') {
+        const ds = new DecompressionStream('gzip')
+        const decompressed = blob.stream().pipeThrough(ds)
+        const text = await new Response(decompressed).text()
+        try { return JSON.parse(text) } catch { throw new Error('Respuesta gzip no es JSON válido') }
+      }
+      throw new Error('DecompressionStream not available for gzip')
+    }
+
+    const data = response.data || ''
+    try { return typeof data === 'string' ? JSON.parse(data) : data }
+    catch { throw new Error('Respuesta no es JSON válido') }
   }
 
   const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
@@ -119,10 +125,16 @@ export async function httpPostJson(url, body, headers = {}, form = false, signal
       method: 'POST',
       url,
       headers: { 'User-Agent': DEFAULT_UA, ...headers },
-      data: form ? body : (typeof body === 'string' ? JSON.parse(body) : body),
+      // parseBodyForCapacitor respeta strings form-urlencode y deja pasar
+      // texto no-JSON — antes JSON.parse() lanzaba SyntaxError con esos bodies.
+      data: form ? body : parseBodyForCapacitor(body, headers),
       responseType: 'json',
     })
-    if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
+    if (response.status >= 400) {
+      const err = new Error(`HTTP ${response.status}`)
+      err.httpStatus = response.status
+      throw err
+    }
     try { return typeof response.data === 'string' ? JSON.parse(response.data) : response.data }
     catch { throw new Error('Respuesta no es JSON válido') }
   }

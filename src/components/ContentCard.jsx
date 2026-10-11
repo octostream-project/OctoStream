@@ -2,7 +2,21 @@ import { memo, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Star, Play, Tv } from 'lucide-react'
 
+// Cache de blobs para pósters de AniList (evitan re-fetch con hotlink-block).
+// LRU acotado: sin límite ni revokeObjectURL las URLs blob se acumulaban
+// en sesiones largas de zapping por anime.
+const POSTER_CACHE_MAX = 100
 const posterCache = new Map()
+
+function cachePoster(key, objectUrl) {
+  if (posterCache.has(key)) posterCache.delete(key)
+  posterCache.set(key, objectUrl)
+  while (posterCache.size > POSTER_CACHE_MAX) {
+    const [oldKey, oldUrl] = posterCache.entries().next().value
+    posterCache.delete(oldKey)
+    URL.revokeObjectURL(oldUrl)
+  }
+}
 
 function Poster({ item }) {
   const [src, setSrc] = useState(item.poster)
@@ -35,7 +49,7 @@ function Poster({ item }) {
       })
       if (!response.ok) throw new Error(String(response.status))
       const objectUrl = URL.createObjectURL(await response.blob())
-      posterCache.set(src, objectUrl)
+      cachePoster(src, objectUrl)
       setSrc(objectUrl)
     } catch {
       setFailed(true)

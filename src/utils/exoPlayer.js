@@ -3,7 +3,7 @@
 
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
-import { sanitizeUrl } from './sanitizeUrl.js'
+import { sanitizeHttpUrl } from './sanitizeUrl.js'
 
 let stateListener = null
 let zapListener = null
@@ -57,7 +57,7 @@ export async function playStream(options, onStateChange) {
   if (!isAndroidNative()) {
     throw new Error('ExoPlayer only available on Android native')
   }
-  const url = sanitizeUrl(options.url)
+  const url = sanitizeHttpUrl(options.url)
   if (!url) throw new Error('URL de stream no válida')
   stateListener = onStateChange
   zapListener = options.onZap || null
@@ -97,7 +97,7 @@ export async function playStream(options, onStateChange) {
  */
 export async function switchChannel(options) {
   if (!isAndroidNative()) return
-  const url = sanitizeUrl(options.url)
+  const url = sanitizeHttpUrl(options.url)
   if (!url) return
   return ExoPlayer.switchChannel({
     url,
@@ -184,7 +184,7 @@ export async function stopPlayback() {
  */
 export async function playPip(options) {
   if (!isAndroidNative()) return { status: 'unsupported' }
-  const url = sanitizeUrl(options?.url)
+  const url = sanitizeHttpUrl(options?.url)
   if (!url) return { status: 'failed' }
   try {
     return await ExoPlayer.playPip({
@@ -243,9 +243,9 @@ export async function playEmbed(url, title = '', referer = '', playback = false,
   if (!isAndroidNative()) {
     throw new Error('ExoPlayer playEmbed only available on Android native')
   }
-  const safeUrl = sanitizeUrl(url)
+  const safeUrl = sanitizeHttpUrl(url)
   if (!safeUrl) throw new Error('URL de embed no válida')
-  const safeRef = referer ? sanitizeUrl(referer) : null
+  const safeRef = referer ? sanitizeHttpUrl(referer) : null
   return ExoPlayer.playEmbed({
     url: safeUrl,
     title,
@@ -272,9 +272,9 @@ export function setPlaybackStateListener(cb) {
  */
 export async function resolveEmbed(url, timeout = 20000, referer = '') {
   if (!isAndroidNative()) return { status: 'failed' }
-  const safeUrl = sanitizeUrl(url)
+  const safeUrl = sanitizeHttpUrl(url)
   if (!safeUrl) return { status: 'failed' }
-  const safeRef = referer ? sanitizeUrl(referer) : null
+  const safeRef = referer ? sanitizeHttpUrl(referer) : null
   try {
     return await ExoPlayer.resolveEmbed({ url: safeUrl, timeout, referer: safeRef || undefined })
   } catch {
@@ -295,9 +295,9 @@ export async function resolveEmbed(url, timeout = 20000, referer = '') {
  */
 export async function playRelay(url, referer = '', title = '', mode = 'live') {
   if (!isAndroidNative()) return { status: 'failed' }
-  const safeUrl = sanitizeUrl(url)
+  const safeUrl = sanitizeHttpUrl(url)
   if (!safeUrl) return { status: 'failed' }
-  const safeRef = referer ? sanitizeUrl(referer) : null
+  const safeRef = referer ? sanitizeHttpUrl(referer) : null
   try {
     return await ExoPlayer.playRelay({ url: safeUrl, referer: safeRef || undefined, title, mode })
   } catch {

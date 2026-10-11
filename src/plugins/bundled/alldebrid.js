@@ -344,6 +344,14 @@ const SUPPORTED_DOMAINS = [
 
 export function isAlldebridSupported(url) {
   if (!url) return false
-  const lower = url.toLowerCase()
-  return SUPPORTED_DOMAINS.some(d => lower.includes(d))
+  // Match por hostname real: el substring anterior casaba dominios lookalike
+  // (p.ej. 1fichier.evil.com o notstreamtape.com). Dominios con punto →
+  // coincidencia exacta o subdominio; '1fichier' suelto cubre mirrors
+  // 1fichier.xyz/etc. como etiqueta completa del host.
+  let hostname = ''
+  try { hostname = new URL(url).hostname.toLowerCase() } catch { return false }
+  return SUPPORTED_DOMAINS.some(d =>
+    d.includes('.')
+      ? hostname === d || hostname.endsWith('.' + d)
+      : hostname.split('.').includes(d))
 }

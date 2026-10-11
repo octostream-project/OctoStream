@@ -97,7 +97,9 @@ export default function SearchPage() {
       if (suggestAbortRef.current) suggestAbortRef.current.abort()
       const controller = new AbortController()
       suggestAbortRef.current = controller
-      fetchSuggestions(q, controller.signal).then(setSuggestions)
+      fetchSuggestions(q, controller.signal)
+        .then(setSuggestions)
+        .catch(() => { /* abort o fallo de red: ignorar sugerencias */ })
     }, 200)
     return () => clearTimeout(timer)
   }, [input])

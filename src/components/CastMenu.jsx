@@ -27,8 +27,12 @@ export default function CastMenu({
   const [miraState, setMiraState] = useState(null) // null | 'scanning' | 'connected' | 'peers' | 'nodev'
   const [lastDevice, setLastDevice] = useState(() => getLastDevice())
   const scanAbort = useRef(false)
+  const sendAbort = useRef(null)
 
-  useEffect(() => () => { scanAbort.current = true }, [])
+  useEffect(() => () => {
+    scanAbort.current = true
+    sendAbort.current?.abort()
+  }, [])
 
   const payload = () => ({
     url: stream?.url || '',
@@ -65,8 +69,10 @@ export default function CastMenu({
     if (!force && sendState === 'sending') return
     setSendState('sending')
     setSendTarget(device)
+    sendAbort.current?.abort()
+    sendAbort.current = new AbortController()
     try {
-      const ok = await sendPlay(device.url || `http://${device.ip}:8765`, payload(), device)
+      const ok = await sendPlay(device.url || `http://${device.ip}:8765`, payload(), device, sendAbort.current.signal)
       if (ok === 'pair') { setSendState('pair'); return }
       if (ok === 'denied') { setSendState('denied'); return }
       if (!ok) throw new Error('respuesta inválida')

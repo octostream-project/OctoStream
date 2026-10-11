@@ -93,14 +93,22 @@ export async function getDiscovered() {
   } catch { return [] }
 }
 
+// Combina un timeout propio con un signal externo (AbortSignal.any no está
+// en WebViews antiguos — sin él se pierde el timeout pero no la cancelación).
+function linkSignal(signal, timeoutMs) {
+  const t = AbortSignal.timeout(timeoutMs)
+  if (!signal) return t
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([t, signal]) : signal
+}
+
 // /pair: el receptor responde {pending:true} mientras el usuario decide;
-// se re-pregunta hasta aceptar ({ok, token}), rechazar (403) o agotar el
-// tiempo. Devuelve true | 'denied' | 'unsupported' (versión vieja sin /pair).
-export async function pairDevice(deviceUrl, devId) {
+// se re-pregunta hasta aceptar ({ok, token}), rechazar (403), cancelar o
+// agotar el tiempo. Devuelve true | 'denied' | 'aborted' | 'unsupported'.
+export async function pairDevice(deviceUrl, devId, signal) {
   const me = await getDeviceInfo()
   if (!me?.deviceId) return 'unsupported'
   const deadline = Date.now() + 75000
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !signal?.aborted) {
     let res
     try {
       res = await httpPostJson(
@@ -108,9 +116,10 @@ export async function pairDevice(deviceUrl, devId) {
         JSON.stringify({ deviceId: me.deviceId, alias: me.alias, fingerprint: me.fingerprint }),
         { 'Content-Type': 'application/json' },
         false,
-        AbortSignal.timeout(6000)
+        linkSignal(signal, 6000)
       )
     } catch (e) {
+      if (signal?.aborted) return 'aborted'
       if (/404/.test(e?.message || '')) return 'unsupported'
       // Error de red puntual: reintentar mientras quede tiempo.
       await new Promise(r => setTimeout(r, 1500))
@@ -126,7 +135,7 @@ export async function pairDevice(deviceUrl, devId) {
     }
     return 'denied'
   }
-  return 'denied'
+  return signal?.aborted ? 'aborted' : 'denied'
 }
 
 async function authHeaders(deviceUrl, device) {
@@ -148,6 +157,9 @@ export async function scanDevices(onProgress) {
   const found = new Map()
   for (const d of await getDiscovered()) found.set(d.ip, d)
   const { ip } = await SyncServer.getIpAddress()
+  // Sin red local (o respuesta inesperada del nativo) devolvemos solo lo
+  // descubierto por UDP — ip.split fallaba con TypeError no capturado.
+  if (!ip || typeof ip !== 'string') return [...found.values()]
   const prefix = ip.split('.').slice(0, 3).join('.')
   const hosts = []
   for (let i = 1; i <= 254; i++) {
@@ -185,7 +197,7 @@ export async function pingDevice(deviceUrl) {
 // | 'denied' (rechazado) | false.
 // Con token de emparejamiento va autenticado; sin él intenta /pair primero
 // (diálogo con alias+fingerprint en el receptor) y reintenta solo.
-export async function sendPlay(deviceUrl, { url, title, type = 'hls', mode = 'live', imdbId, season, episode }, device = null) {
+export async function sendPlay(deviceUrl, { url, title, type = 'hls', mode = 'live', imdbId, season, episode }, device = null, signal = null) {
   const body = JSON.stringify({ url, title, type, mode, imdbId, season, episode })
   const devId = device?.deviceId || null
   const headers = { 'Content-Type': 'application/json' }
@@ -194,19 +206,23 @@ export async function sendPlay(deviceUrl, { url, title, type = 'hls', mode = 'li
     // Sin token pero con identidad remota conocida: emparejar primero —
     // /pair queda pendiente hasta que el usuario acepta en la otra pantalla.
     if (!auth && devId) {
-      const p = await pairDevice(deviceUrl, devId)
+      const p = await pairDevice(deviceUrl, devId, signal)
       if (p === true) auth = await authHeaders(deviceUrl, device)
       else if (p === 'denied') return 'denied'
+      else if (p === 'aborted') return false
       // 'unsupported': receptor viejo → flujo legacy por IP abajo
     }
     const res = await httpPostJson(
       `${deviceUrl}/play`, body,
       auth ? { ...headers, ...auth } : headers,
-      false, AbortSignal.timeout(6000)
+      false, linkSignal(signal, 6000)
     )
     if (res?.ok) {
+      // URL() maneja IPv6 ([::1]) y puertos; replace+split(':') los rompía.
+      let ip = deviceUrl
+      try { ip = new URL(deviceUrl).hostname } catch { /* deviceUrl sin esquema: se guarda tal cual */ }
       saveLastDevice({
-        url: deviceUrl, ip: deviceUrl.replace(/^https?:\/\//, '').split(':')[0],
+        url: deviceUrl, ip,
         name: device?.alias || device?.name || 'OctoStream', deviceId: devId,
       })
     }
@@ -232,20 +248,21 @@ export async function sendStop(deviceUrl, device = null) {
 
 // Sync autenticado: GET/POST /sync con token; si falta, empareja primero.
 // Devuelve los datos (pull) | true (push) | 'pair' | 'denied' | lanza error.
-async function syncRequest(deviceUrl, device, method, data) {
+async function syncRequest(deviceUrl, device, method, data, signal) {
   let auth = await authHeaders(deviceUrl, device)
   if (!auth && device?.deviceId) {
-    const p = await pairDevice(deviceUrl, device.deviceId)
+    const p = await pairDevice(deviceUrl, device.deviceId, signal)
     if (p === true) auth = await authHeaders(deviceUrl, device)
     else if (p === 'denied') return 'denied'
+    else if (p === 'aborted') throw new DOMException('Sync abortado', 'AbortError')
   }
   const headers = { 'Content-Type': 'application/json', ...(auth || {}) }
   if (method === 'GET') {
-    return await httpGetJson(`${deviceUrl}/sync`, headers, AbortSignal.timeout(10000))
+    return await httpGetJson(`${deviceUrl}/sync`, headers, linkSignal(signal, 10000))
   }
-  await httpPostJson(`${deviceUrl}/sync`, JSON.stringify(data), headers, false, AbortSignal.timeout(10000))
+  await httpPostJson(`${deviceUrl}/sync`, JSON.stringify(data), headers, false, linkSignal(signal, 10000))
   return true
 }
 
-export const pullSync = (deviceUrl, device) => syncRequest(deviceUrl, device, 'GET')
-export const pushSync = (deviceUrl, device, data) => syncRequest(deviceUrl, device, 'POST', data)
+export const pullSync = (deviceUrl, device, signal) => syncRequest(deviceUrl, device, 'GET', undefined, signal)
+export const pushSync = (deviceUrl, device, data, signal) => syncRequest(deviceUrl, device, 'POST', data, signal)

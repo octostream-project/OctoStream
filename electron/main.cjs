@@ -79,6 +79,8 @@ const LOCAL_IP = getLocalIP()
 const PROXY_TOKEN = crypto.randomBytes(32).toString('hex')
 // Proxy prefix for renderer (localhost) and for Chromecast (LAN IP)
 const PROXY_PREFIX_LOCAL = `http://127.0.0.1:${PROXY_PORT}/proxy?token=${PROXY_TOKEN}&url=`
+// Playlists (m3u8/mpd) se acumulan enteros para reescribir URLs — tope anti-DoS.
+const MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
 const PROXY_PREFIX_LAN = `http://${LOCAL_IP}:${PROXY_PORT}/proxy?token=${PROXY_TOKEN}&url=`
 let proxyServer = null
 
@@ -125,7 +127,26 @@ function headersForHost(host) {
   return headers
 }
 
-function proxyFetch(targetUrl, res, proxyPrefix) {
+// Whitelist para el param ?headers= (JSON). Sin ella, un cliente LAN con el
+// token podría inyectar Host/Content-Length arbitrarios (smuggling).
+const PROXY_REQ_HEADER_ALLOW =
+  /^(accept|accept-language|authorization|cache-control|cookie|origin|pragma|range|referer|user-agent|x-[a-z0-9_-]+)$/i
+
+function sanitizeProxyHeaders(obj) {
+  const out = {}
+  if (!obj || typeof obj !== 'object') return out
+  let count = 0
+  for (const [k, v] of Object.entries(obj)) {
+    if (count >= 20) break
+    if (typeof v !== 'string' || v.length > 2048 || /[\r\n]/.test(v)) continue
+    if (!PROXY_REQ_HEADER_ALLOW.test(k)) continue
+    out[k] = v
+    count++
+  }
+  return out
+}
+
+function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders) {
   const prefix = proxyPrefix || PROXY_PREFIX_LOCAL
   console.log('[Proxy] fetching:', hostOf(targetUrl))
   const target = validProxyTarget(targetUrl)
@@ -134,7 +155,13 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
     return
   }
 
-  const headers = headersForHost(target.hostname)
+  // Headers del resolver (Referer/cookies/UA) ganan a los defaults por host.
+  const headers = { ...headersForHost(target.hostname), ...sanitizeProxyHeaders(extraHeaders) }
+  // Sufijo que propaga esos headers a segmentos/subplaylists reescritos —
+  // sin él el manifest pasaba pero los .ts seguían dando 403.
+  const hdrSuffix = extraHeaders && Object.keys(extraHeaders).length
+    ? '&headers=' + encodeURIComponent(JSON.stringify(sanitizeProxyHeaders(extraHeaders)))
+    : ''
   const isHttps = target.protocol === 'https:'
   const options = {
     hostname: target.hostname,
@@ -154,7 +181,7 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
       const redirectUrl = proxyRes.headers.location
       const absoluteRedirect = redirectUrl.startsWith('http') ? redirectUrl : new URL(redirectUrl, targetUrl).href
       console.log('[Proxy] redirect', proxyRes.statusCode, '->', hostOf(absoluteRedirect))
-      res.writeHead(302, { 'Location': `${prefix}${encodeURIComponent(absoluteRedirect)}` })
+      res.writeHead(302, { 'Location': `${prefix}${encodeURIComponent(absoluteRedirect)}${hdrSuffix}` })
       res.end()
       return
     }
@@ -201,11 +228,24 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
     }
 
     if (isM3u8) {
-      // Rewrite m3u8: convert relative/absolute segment URLs to proxy URLs
+      // Rewrite m3u8: convert relative/absolute segment URLs to proxy URLs.
+      // Capado: el playlist se acumula entero en memoria — sin tope un "m3u8"
+      // malicioso agotaría la RAM del proceso principal.
       let body = ''
-      proxyRes.on('data', (chunk) => { body += chunk.toString() })
+      let bodyLen = 0
+      proxyRes.on('data', (chunk) => {
+        bodyLen += chunk.length
+        if (bodyLen > MAX_PLAYLIST_BYTES) { proxyRes.destroy(); return }
+        body += chunk.toString()
+      })
       proxyRes.on('end', () => {
-      const rewritten = lines.map(line => {
+        if (bodyLen > MAX_PLAYLIST_BYTES) {
+          res.writeHead(413, respHeaders)
+          res.end('Playlist too large')
+          return
+        }
+        const lines = body.split('\n')
+        const rewritten = lines.map(line => {
           const trimmed = line.trim()
           if (!trimmed || trimmed.startsWith('#')) {
             // Rewrite URI= in #EXT-X-KEY, #EXT-X-MAP, #EXT-X-MEDIA and #EXT-X-SESSION-DATA tags
@@ -214,7 +254,7 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
               if (uriMatch) {
                 const originalUri = uriMatch[1]
                 const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
-                return trimmed.replace(uriMatch[0], `URI="${prefix}${encodeURIComponent(absoluteUri)}"`)
+                return trimmed.replace(uriMatch[0], `URI="${prefix}${encodeURIComponent(absoluteUri)}${hdrSuffix}"`)
               }
             }
             // Also rewrite URL= in #EXT-X-I-FRAME-STREAM-INF tags
@@ -223,19 +263,19 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
               if (urlMatch) {
                 const originalUri = urlMatch[1]
                 const absoluteUri = originalUri.startsWith('http') ? originalUri : new URL(originalUri, targetUrl).href
-                return trimmed.replace(urlMatch[0], `URL="${prefix}${encodeURIComponent(absoluteUri)}"`)
+                return trimmed.replace(urlMatch[0], `URL="${prefix}${encodeURIComponent(absoluteUri)}${hdrSuffix}"`)
               }
             }
             return line
           }
           // It's a segment URL (relative or absolute)
           if (/^https?:\/\//.test(trimmed)) {
-            return `${prefix}${encodeURIComponent(trimmed)}`
+            return `${prefix}${encodeURIComponent(trimmed)}${hdrSuffix}`
           }
           // Relative URL: resolve against the m3u8 base URL
           try {
             const absolute = new URL(trimmed, targetUrl).href
-            return `${prefix}${encodeURIComponent(absolute)}`
+            return `${prefix}${encodeURIComponent(absolute)}${hdrSuffix}`
           } catch {
             return line
           }
@@ -252,18 +292,28 @@ function proxyFetch(targetUrl, res, proxyPrefix) {
     } else if (isMpd) {
       // Rewrite MPD: convert <BaseURL> to proxy URL so segments resolve through proxy
       let body = ''
-      proxyRes.on('data', (chunk) => { body += chunk.toString() })
+      let bodyLen = 0
+      proxyRes.on('data', (chunk) => {
+        bodyLen += chunk.length
+        if (bodyLen > MAX_PLAYLIST_BYTES) { proxyRes.destroy(); return }
+        body += chunk.toString()
+      })
       proxyRes.on('end', () => {
+        if (bodyLen > MAX_PLAYLIST_BYTES) {
+          res.writeHead(413, respHeaders)
+          res.end('Playlist too large')
+          return
+        }
         // Rewrite <BaseURL> elements - segments are relative to BaseURL
         let rewritten = body.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (match, url) => {
           try {
             const absolute = url.startsWith('http') ? url : new URL(url, targetUrl).href
-            return `<BaseURL>${prefix}${encodeURIComponent(absolute)}</BaseURL>`
+            return `<BaseURL>${prefix}${encodeURIComponent(absolute)}${hdrSuffix}</BaseURL>`
           } catch { return match }
         })
         // Also rewrite any absolute http(s) URLs in initialization/media/sourceURL attributes
         rewritten = rewritten.replace(/(initialization|media|sourceURL)="(https?:\/\/[^"]+)"/g, (match, attr, url) => {
-          return `${attr}="${prefix}${encodeURIComponent(url)}"`
+          return `${attr}="${prefix}${encodeURIComponent(url)}${hdrSuffix}"`
         })
         console.log('[Proxy] mpd rewritten (first 500 chars):\n',
           rewritten.substring(0, 500).split(PROXY_TOKEN).join('[TOKEN]'))
@@ -495,6 +545,13 @@ function startProxyServer() {
       return
     }
 
+    // Headers extra del stream (Referer/cookies/UA de los resolvers), como en /post.
+    let extraHeaders = {}
+    const headersParam = parsed.searchParams.get('headers')
+    if (headersParam) {
+      try { extraHeaders = JSON.parse(headersParam) } catch { /* JSON inválido: sin headers extra */ }
+    }
+
     // Determine which proxy prefix to use based on client IP
     // If request comes from localhost (renderer), use 127.0.0.1
     // If from LAN (Chromecast), use the machine's LAN IP
@@ -509,12 +566,13 @@ function startProxyServer() {
       req.on('data', (chunk) => { chunks.push(chunk) })
       req.on('end', () => {
         const contentType = req.headers['content-type'] || 'application/octet-stream'
-        proxyPost(targetUrl, Buffer.concat(chunks), { 'Content-Type': contentType }, res)
+        proxyPost(targetUrl, Buffer.concat(chunks),
+          { ...sanitizeProxyHeaders(extraHeaders), 'Content-Type': contentType }, res)
       })
       return
     }
 
-    proxyFetch(targetUrl, res, prefix)
+    proxyFetch(targetUrl, res, prefix, extraHeaders)
   })
 
   // Listen on all interfaces so Chromecast can reach the proxy
@@ -571,28 +629,9 @@ app.whenReady().then(async () => {
     callback(permission === 'media')
   })
 
-  // Inject custom headers for API calls (not proxied streams)
-  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const url = details.url
-    if (/rtve|atresplayer|atresmedia|mediaset|widevine\.entitlement\.theplatform\.eu|doubleclick\.net\/ssai|tdtchannels|tdtspain/i.test(url) && !url.includes('127.0.0.1')) {
-      if (!details.requestHeaders['User-Agent']) {
-        details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
-      }
-      if (/rtve/i.test(url)) {
-        details.requestHeaders['Origin'] = 'https://www.rtve.es'
-        details.requestHeaders['Referer'] = 'https://www.rtve.es/'
-      } else if (/atresplayer|atresmedia/i.test(url)) {
-        details.requestHeaders['Origin'] = 'https://www.atresplayer.com'
-        details.requestHeaders['Referer'] = 'https://www.atresplayer.com/'
-      } else if (/mediaset|widevine\.entitlement\.theplatform\.eu|doubleclick\.net\/ssai/i.test(url)) {
-        details.requestHeaders['Origin'] = 'https://www.mediasetinfinity.es'
-        details.requestHeaders['Referer'] = 'https://www.mediasetinfinity.es/'
-      } else if (/tdtchannels/i.test(url)) {
-        details.requestHeaders['Referer'] = 'https://www.tdtchannels.com/'
-      }
-    }
-    callback({ requestHeaders: details.requestHeaders })
-  })
+  // La inyección de Origin/Referer/UA vive en el listener de createWindow():
+  // webRequest solo admite UN listener por evento y sesión, y la ventana usa
+  // defaultSession — un listener aquí quedaría reemplazado (código muerto).
 
   createWindow()
 })

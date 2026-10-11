@@ -72,9 +72,13 @@ export async function getChannelsAndEpg(cache) {
 }
 
 export async function getU7d(cache) {
-  if (cache.u7d && Date.now() - cache.ts < 60 * 60 * 1000) return cache
+  // u7dTs propio: cache.ts cambia en cada saveCache() (incluidos los de
+  // EPG/canales), así que usando ts el catálogo U7D quedaba "fresco" para
+  // siempre en sesiones largas y nunca se refrescaba.
+  if (cache.u7d && Date.now() - (cache.u7dTs || 0) < 60 * 60 * 1000) return cache
   try {
     cache.u7d = await fetchJson(U7D_URL)
+    cache.u7dTs = Date.now()
     saveCache(cache)
   } catch (e) {
     logWarn('TDT Spain U7D fetch failed', String(e?.message || e))
@@ -84,7 +88,8 @@ export async function getU7d(cache) {
 }
 
 export async function getRtveHls(cache) {
-  if (cache.rtveHls && Date.now() - cache.ts < 60 * 60 * 1000) return cache.rtveHls
+  // Igual que u7d: rtveHlsTs propio en vez del ts global de último guardado.
+  if (cache.rtveHls && Date.now() - (cache.rtveHlsTs || 0) < 60 * 60 * 1000) return cache.rtveHls
   const m = {}
   for (const [cid, url] of Object.entries(RTVE_HLS_FALLBACK)) {
     m[cid] = url
@@ -120,6 +125,7 @@ export async function getRtveHls(cache) {
   }
 
   cache.rtveHls = m
+  cache.rtveHlsTs = Date.now()
   saveCache(cache)
   return m
 }

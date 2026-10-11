@@ -50,12 +50,17 @@ public class CloudProxyPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // Clean up proxy settings when the app is destroyed
-        if (connected || aetherProcess != null) {
-            disconnect(false);
-        } else {
-            clearAppProxy();
-        }
+        // Clean up proxy settings when the app is destroyed.
+        // stopAether() does process.waitFor(5s) — running it on the main
+        // thread here would risk an ANR, so the teardown goes to a
+        // background thread and only the proxy-clear posts back to main.
+        new Thread(() -> {
+            if (connected || aetherProcess != null) {
+                disconnect(false);
+            } else {
+                clearAppProxy();
+            }
+        }, "aether-destroy").start();
         super.handleOnDestroy();
     }
 
@@ -68,6 +73,7 @@ public class CloudProxyPlugin extends Plugin {
         Log.i(TAG, "connect() called");
 
         final long generation;
+        final boolean needsStop;
         synchronized (PROCESS_LOCK) {
             if (connected && aetherProcess != null && aetherProcess.isAlive()) {
                 call.resolve(new JSObject().put("status", "connected"));
@@ -95,7 +101,9 @@ public class CloudProxyPlugin extends Plugin {
             // Aether can remain alive while its tunnel is down and retrying.
             // Reconnect must stop that stale process first, otherwise a second
             // instance races for ports 1819/1820 and leaks CPU/battery.
-            if (aetherProcess != null) stopAether();
+            // IMPORTANTE: no llamar a stopAether() dentro del lock — hace
+            // process.waitFor(5s) y bloquearía el hilo del bridge hasta 5s.
+            needsStop = aetherProcess != null;
             connecting = true;
             lastError = null;
             generation = ++connectionGeneration;
@@ -103,6 +111,9 @@ public class CloudProxyPlugin extends Plugin {
 
         new Thread(() -> {
             try {
+                // Parar el proceso viejo fuera del lock y del hilo del bridge:
+                // waitFor(5s) aquí es tolerable (hilo propio), no en el caller.
+                if (needsStop) stopAether();
                 startAether();
                 Process startedProcess = aetherProcess;
                 synchronized (PROCESS_LOCK) {
@@ -211,7 +222,9 @@ public class CloudProxyPlugin extends Plugin {
         boolean processAlive = aetherProcess != null && aetherProcess.isAlive();
         boolean isConnected = connected && processAlive && isSocksProxyUp();
         if (connected && !isConnected) {
-            connected = false;
+            synchronized (PROCESS_LOCK) {
+                connected = false;
+            }
         }
         JSObject result = new JSObject();
         result.put("connected", isConnected);
@@ -222,8 +235,19 @@ public class CloudProxyPlugin extends Plugin {
         call.resolve(result);
     }
 
-    public static String getSocksProxy() {
+    /**
+     * Devuelve el proxy HTTP CONNECT local ("127.0.0.1:1820") o null si WARP
+     * no está conectado. A pesar del nombre legacy {@code getSocksProxy}, los
+     * consumidores (ExoPlayer DataSource, OkHttp) lo usan como Proxy.Type.HTTP.
+     */
+    public static String getHttpProxy() {
         return connected ? HTTP_PROXY_ADDR : null;
+    }
+
+    /** @deprecated usar {@link #getHttpProxy()} — nunca devolvió el puerto SOCKS. */
+    @Deprecated
+    public static String getSocksProxy() {
+        return getHttpProxy();
     }
 
     /**
@@ -311,37 +335,8 @@ public class CloudProxyPlugin extends Plugin {
             try {
                 android.webkit.WebView webView = getBridge().getWebView();
                 if (webView != null) {
-                    // Disable WebRTC via JavaScript injection
-                    String antiLeakScript =
-                        "try {" +
-                        "  // Disable WebRTC (prevents IP leak via STUN/TURN)\n" +
-                        "  if (window.RTCPeerConnection) { window.RTCPeerConnection = undefined; }" +
-                        "  if (window.webkitRTCPeerConnection) { window.webkitRTCPeerConnection = undefined; }" +
-                        "  if (window.mozRTCPeerConnection) { window.mozRTCPeerConnection = undefined; }" +
-                        "  // Disable WebRTC data channels\n" +
-                        "  if (window.RTCDataChannel) { window.RTCDataChannel = undefined; }" +
-                        "  // Block STUN/TURN requests\n" +
-                        "  if (window.RTCIceCandidate) { window.RTCIceCandidate = undefined; }" +
-                        "  // Override navigator.mediaDevices.getUserMedia to block WebRTC media\n" +
-                        "  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {" +
-                        "    navigator.mediaDevices.getUserMedia = function() { return Promise.reject(new Error('WebRTC disabled')); };" +
-                        "  }" +
-                        "  console.log('[AntiLeak] WebRTC disabled');" +
-                        "} catch(e) { console.error('[AntiLeak] Error:', e); }";
-
-                    // Inject on every page load
-                    webView.evaluateJavascript(antiLeakScript, null);
-
-                    // Also inject at document start without replacing Capacitor's WebViewClient
-                    if (!antiLeakScriptInstalled && androidx.webkit.WebViewFeature.isFeatureSupported(
-                            androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                        androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
-                            webView,
-                            antiLeakScript,
-                            java.util.Collections.singleton("*"));
-                        antiLeakScriptInstalled = true;
-                    }
-
+                    applyAntiLeak(webView, !antiLeakScriptInstalled);
+                    antiLeakScriptInstalled = true;
                     Log.i(TAG, "WebRTC disabled in WebView (anti-leak)");
                 }
             } catch (Exception e) {
@@ -349,6 +344,42 @@ public class CloudProxyPlugin extends Plugin {
             }
             if (onReady != null) onReady.run();
         });
+    }
+
+    /**
+     * Script anti-leak compartido: neutraliza RTCPeerConnection y getUserMedia
+     * para que ningún documento (incluidos embeds de terceros) pueda revelar
+     * la IP real vía STUN/TURN mientras WARP está activo.
+     * Expuesto como static para que otros plugins (ExoPlayer: embed/relay
+     * WebViews) apliquen la misma protección a sus WebViews auxiliares.
+     */
+    public static final String ANTI_LEAK_SCRIPT =
+        "try {" +
+        "  if (window.RTCPeerConnection) { window.RTCPeerConnection = undefined; }" +
+        "  if (window.webkitRTCPeerConnection) { window.webkitRTCPeerConnection = undefined; }" +
+        "  if (window.mozRTCPeerConnection) { window.mozRTCPeerConnection = undefined; }" +
+        "  if (window.RTCDataChannel) { window.RTCDataChannel = undefined; }" +
+        "  if (window.RTCIceCandidate) { window.RTCIceCandidate = undefined; }" +
+        "  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {" +
+        "    navigator.mediaDevices.getUserMedia = function() { return Promise.reject(new Error('WebRTC disabled')); };" +
+        "  }" +
+        "} catch(e) {}";
+
+    /**
+     * Aplica el blindaje anti-leak a un WebView cualquiera.
+     * {@code documentStart}=true lo inyecta también al inicio de cada documento
+     * (persiste entre navegaciones); debe llamarse una sola vez por WebView.
+     */
+    public static void applyAntiLeak(android.webkit.WebView webView, boolean documentStart) {
+        if (webView == null) return;
+        webView.evaluateJavascript(ANTI_LEAK_SCRIPT, null);
+        if (documentStart && androidx.webkit.WebViewFeature.isFeatureSupported(
+                androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                ANTI_LEAK_SCRIPT,
+                java.util.Collections.singleton("*"));
+        }
     }
 
     /**
@@ -444,10 +475,18 @@ public class CloudProxyPlugin extends Plugin {
         new Thread(() -> readAetherLogs(aetherProcess)).start();
 
         // Wait for the SOCKS5 proxy to come up (check every 500ms for up to 60s)
-        // Reduced from 150s to 60s for faster feedback (and battery savings)
+        // Reduced from 150s to 60s for faster feedback (and battery savings).
+        // Bail out early si esta conexión fue reemplazada/cancelada (un
+        // disconnect() incrementa connectionGeneration) o el proceso murió:
+        // seguir durmiendo 60s solo retrasa el rechazo y gasta batería.
         int attempts = 0;
         int maxAttempts = 120; // 60 seconds
         while (!isSocksProxyUp() && attempts < maxAttempts) {
+            synchronized (PROCESS_LOCK) {
+                if (!connecting) throw new InterruptedException("connect cancelled");
+            }
+            Process p = aetherProcess;
+            if (p == null || !p.isAlive()) break;
             Thread.sleep(500);
             attempts++;
         }
