@@ -3886,38 +3886,10 @@ public class ExoPlayerPlugin extends Plugin {
             return true;
         });
 
-        // GestureDetector para swipes verticales (zapping) en móvil.
-        boolean canZapAtOpen = "live".equals(playerMode) && liveChannels != null && liveChannels.length() > 1;
-        if (canZapAtOpen) {
-            swipeGestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
-                private static final int SWIPE_THRESHOLD = 80;
-                private static final int SWIPE_VELOCITY = 100;
-                private float downY = 0;
-                @Override
-                public boolean onDown(MotionEvent e) {
-                    downY = e.getY();
-                    return true;
-                }
-                @Override
-                public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
-                    float dy = e2.getY() - e1.getY();
-                    float dx = Math.abs(e2.getX() - e1.getX());
-                    // Swipe vertical: dy dominante, no horizontal
-                    if (Math.abs(dy) > SWIPE_THRESHOLD && Math.abs(dy) > dx
-                            && Math.abs(vy) > SWIPE_VELOCITY) {
-                        boolean canZap = "live".equals(playerMode)
-                                && liveChannels != null && liveChannels.length() > 1;
-                        if (canZap) {
-                            // Swipe arriba (dy negativo) → canal siguiente
-                            // Swipe abajo (dy positivo) → canal anterior
-                            zapChannel(dy < 0 ? 1 : -1);
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-            });
-        }
+        // GestureDetector para swipes verticales (zapping) en móvil — lazy:
+        // la lista de canales puede llegar tarde vía setChannels (p. ej. al
+        // abrir desde Seguir viendo) y el detector debe crearse entonces.
+        ensureSwipeGestureDetector(context);
 
         // Capturar el foco en el rootLayout para que los eventos D-pad lleguen
         // al setOnKeyListener del dialog cuando los controles están ocultos.
@@ -5528,6 +5500,10 @@ public class ExoPlayerPlugin extends Plugin {
                     && liveChannels != null && liveChannels.length() > 1) {
                 populateChannelList(getContext());
             }
+            // La lista llegó tarde (abierto desde Seguir viendo/Details):
+            // crear ahora el detector de swipe — en móvil era el único camino
+            // de zapping y quedaba muerto para siempre.
+            ensureSwipeGestureDetector(getContext());
             updateControlsUi();
             updatePlayerSubtitle(channelNameAt(channelIndex));
             Log.i(TAG, "setChannels: done, liveChannels now=" + (liveChannels == null ? "null" : liveChannels.length()));
@@ -5685,6 +5661,43 @@ public class ExoPlayerPlugin extends Plugin {
 
     private static AudioAttributes mainAudioAttrs() {
         return new AudioAttributes.Builder().setContentType(2).setUsage(1).build();
+    }
+
+    // Crea el detector de swipe vertical para zapping en móvil cuando haya
+    // lista de canales. Se llama desde openPlayer y desde setChannels — antes
+    // solo existía si la lista llegaba ya en play(), así que abrir un directo
+    // desde Seguir viendo (lista asíncrona) dejaba el zapping táctil muerto.
+    private void ensureSwipeGestureDetector(Context context) {
+        if (swipeGestureDetector != null) return;
+        if (!"live".equals(playerMode) || liveChannels == null || liveChannels.length() <= 1) return;
+        swipeGestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            private static final int SWIPE_THRESHOLD = 80;
+            private static final int SWIPE_VELOCITY = 100;
+            private float downY = 0;
+            @Override
+            public boolean onDown(MotionEvent e) {
+                downY = e.getY();
+                return true;
+            }
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
+                float dy = e2.getY() - e1.getY();
+                float dx = Math.abs(e2.getX() - e1.getX());
+                // Swipe vertical: dy dominante, no horizontal
+                if (Math.abs(dy) > SWIPE_THRESHOLD && Math.abs(dy) > dx
+                        && Math.abs(vy) > SWIPE_VELOCITY) {
+                    boolean canZap = "live".equals(playerMode)
+                            && liveChannels != null && liveChannels.length() > 1;
+                    if (canZap) {
+                        // Swipe arriba (dy negativo) → canal siguiente
+                        // Swipe abajo (dy positivo) → canal anterior
+                        zapChannel(dy < 0 ? 1 : -1);
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
     }
 
     // Política de enrutado WARP compartida por openPlayer/zapChannel: decide si

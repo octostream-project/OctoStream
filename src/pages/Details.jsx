@@ -901,35 +901,53 @@ export default function Details() {
   // Zapping nativo (mismo patrón que LiveTV): el player emite 'channelZap' con
   // el índice destino; aquí se resuelve el stream y se hace switchChannel.
   // Lock para evitar race conditions al zappear rápido (audio se puede perder).
+  // Zapping "último gana" (mismo patrón que LiveTV): si llega un zap mientras
+  // se resuelve otro, no se descarta — queda en pendingZap y el bucle lo aplica
+  // al terminar. El lock evita solapar switchChannel (el audio se pierde).
   const zappingLockRef = useRef(false)
+  const pendingZapRef = useRef(null)
   const handleZapChannel = async (event) => {
-    if (zappingLockRef.current) return
     const ch = liveChannelsRef.current[event.index]
     if (!ch) return
-    // Guardar el canal actual para que onClose lo añada al historial
-    // (solo el último canal, no cada canal por el que se pasa)
-    currentChannelRef.current = ch
+    pendingZapRef.current = { ch, index: event.index }
+    if (zappingLockRef.current) return
     zappingLockRef.current = true
     try {
-      const streams = await pluginManager.getStreams(ch.type || 'live', ch.id, ch.name)
-      const stream = streams?.[0]
-      if (stream?.url) {
-        await switchChannel({
-          url: stream.url,
-          streamType: stream.streamType || 'hls',
-          headers: stream.headers || {},
-          title: ch.name,
-          channelIndex: event.index,
-          epgNow: ch.nowPlaying || '',
-          epgNext: ch.nextPlaying || '',
-          epgStart: ch.nowPlayingStart || 0,
-          epgEnd: ch.nowPlayingEnd || 0,
-        })
-        // No guardar al historial en cada zap — solo se guarda el último canal
-        // al cerrar el player (onClose abajo), igual que en LiveTV.jsx.
+      while (pendingZapRef.current) {
+        const { ch: target, index } = pendingZapRef.current
+        pendingZapRef.current = null
+        // Guardar el canal actual para que onClose lo añada al historial
+        // (solo el último canal, no cada canal por el que se pasa)
+        currentChannelRef.current = target
+        try {
+          const streams = await pluginManager.getStreams(target.type || 'live', target.id, target.name)
+          const stream = streams?.[0]
+          if (stream?.url) {
+            await switchChannel({
+              url: stream.url,
+              streamType: stream.streamType || 'hls',
+              direct: stream.direct === true,
+              headers: stream.headers || {},
+              title: target.name,
+              channelIndex: index,
+              epgNow: target.nowPlaying || '',
+              epgNext: target.nextPlaying || '',
+              epgStart: target.nowPlayingStart || 0,
+              epgEnd: target.nowPlayingEnd || 0,
+            })
+            // No guardar al historial en cada zap — solo se guarda el último
+            // canal al cerrar el player (onClose abajo), igual que en LiveTV.
+          } else {
+            console.warn('[Details] Zap: sin stream para', target.name)
+          }
+        } catch (e) {
+          // El overlay nativo queda en "Cargando…" y se puede reintentar
+          console.warn('[Details] Zap failed:', e?.message || e)
+        }
       }
-    } catch { /* el overlay nativo queda en "Cargando…" y se puede reintentar */ }
-    finally { zappingLockRef.current = false }
+    } finally {
+      zappingLockRef.current = false
+    }
   }
 
   const handleEnded = () => {
