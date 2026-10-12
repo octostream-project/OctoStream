@@ -1,19 +1,19 @@
 {
-  "versionCode": 158,
-  "versionName": "1.58",
+  "versionCode": 159,
+  "versionName": "1.59",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-arm64-v8a.apk",
-  "sha256": "cf2a843333700ac593c3828ac65727c727c2a45631d9858340eb016eeda486e8",
-  "notes": "Torrents reparados (DonTorrent, peliculas y series). Fix pantalla negra permanente tras errores de reproduccion. Lista de enlaces instantanea con AllDebrid. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.59/octostream-1.59-arm64-v8a.apk",
+  "sha256": "72a6a258d35d0c1c365ddd0056c2426910b22cc6f1a5a385edc5512cdd874bd3",
+  "notes": "Trakt con cuenta por PIN (watchlist, recomendaciones y listas propias en el catalogo). El dialogo Continuar reproduccion captura el foco. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.59/octostream-1.59-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.59/octostream-1.59-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.59/octostream-1.59-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "cf2a843333700ac593c3828ac65727c727c2a45631d9858340eb016eeda486e8",
-    "armeabi-v7a": "73c65d5c675b01d103a4c393ed8407711185ac94fff87256f1fec81f3f00491e",
-    "x86_64": "9283d990110fc83a95792a81a468cb53356b818310821098c5f44e367c41f92d"
+    "arm64-v8a": "72a6a258d35d0c1c365ddd0056c2426910b22cc6f1a5a385edc5512cdd874bd3",
+    "armeabi-v7a": "3367ccf3a6ad340012a14bf9fa81743447ffa97ab92ac85d8257a48b053be515",
+    "x86_64": "a6118dcb24a1259009f7ab9cb0dd1fabdfe4a883bb9d9f800666029d523b360b"
   },
   "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4"
 }
