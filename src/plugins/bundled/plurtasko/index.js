@@ -338,6 +338,29 @@ function significantWords(s) {
   return (s || '').toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !GENERIC_TITLE_WORD.test(w))
 }
 
+// Año de un resultado de canal: it.year si el canal lo expone, o un año
+// "(2019)"/"2019" extraído del nombre/título del resultado.
+function yearOfItem(it) {
+  if (Number.isInteger(it?.year)) return it.year
+  const s = `${it?.name || ''} ${it?.title || ''}`
+  const m = s.match(/\b(19\d{2}|20\d{2})\b/)
+  return m ? parseInt(m[1], 10) : null
+}
+
+// Filtro blando por año para desambiguar remakes con el mismo título
+// ("Llamada perdida" 2003 JP vs 2008 US): descarta resultados con año
+// claramente distinto solo cuando queda al menos un candidato compatible.
+// Si todos difieren (o ninguno trae año) se conserva la lista — el dato
+// del sitio puede estar mal y es preferible un match dudoso a ninguno.
+function softYearFilter(items, wantedYear) {
+  if (wantedYear == null || !items || items.length < 2) return items || []
+  const ok = items.filter(it => {
+    const y = yearOfItem(it)
+    return y == null || Math.abs(y - wantedYear) <= 1
+  })
+  return ok.length > 0 ? ok : items
+}
+
 // Find the channel that owns a given catalog id.
 function channelForCatalog(catalogId) {
   for (const ch of activeChannels()) {
@@ -944,7 +967,7 @@ export const plurtaskoFactory = (config) => {
       }
     },
 
-    async getStreams({ type, id, name, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, onBatch }) {
+    async getStreams({ type, id, name, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch }) {
       const debridEnabled = isAlldebridEnabled()
       try {
         if (isEpisodicType(type) && (season == null || episode == null)) return []
@@ -967,7 +990,7 @@ export const plurtaskoFactory = (config) => {
         if (!name) return []
 
         // Check cache first (avoid re-searching the same title)
-        const cacheKey = `${name.toLowerCase()}|${type}|${season || ''}|${episode || ''}`
+        const cacheKey = `${name.toLowerCase()}|${type}|${season || ''}|${episode || ''}|${year || ''}`
         const cached = getCachedSearch(cacheKey)
         if (cached) {
           console.log(`[Plurtasko] Cache hit for "${name}" S${season || '?'}E${episode || '?'} (${cached.length} streams)`)
@@ -1120,14 +1143,20 @@ export const plurtaskoFactory = (config) => {
               return m === wantedMarker
             }
 
+            // Año de la ficha (TMDB): desambigua remakes/mismo título
+            // ("Llamada perdida" 2003 vs 2008, "The Office" UK vs US).
+            const wantedYear = Number.isInteger(year) ? year
+              : (parseInt(year, 10) || null)
+
             // Fallback a title matching si no hay validación por ID
             if (!match) {
-              const titleMatches = items.filter(it =>
+              let titleMatches = items.filter(it =>
                 (isTitleMatch(it.name, name) || isTitleMatch(it.title, name) ||
                 (originalName && (isTitleMatch(it.name, originalName) || isTitleMatch(it.title, originalName))) ||
                 (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))) &&
                 markerOk(it)
               )
+              titleMatches = softYearFilter(titleMatches, wantedYear)
               // Entre varios matches elegir el más cercano al título buscado
               // ("Naruto" sobre "Naruto Shippuden" cuando se pide "Naruto").
               match = titleMatches
@@ -1162,10 +1191,10 @@ export const plurtaskoFactory = (config) => {
               const querySlug = normalize(name)
               const origSlug = normalize(originalName)
               const enSlug = normalize(englishName)
-              match = items.find(it => {
+              match = softYearFilter(items.filter(it => {
                 const slug = normalize((it.url || '').split('/').pop())
                 return slug === querySlug || slug === origSlug || slug === enSlug
-              })
+              }), wantedYear)[0] || null
               if (match) {
                 console.log(`[Plurtasko] Channel ${ch.id}: slug match found "${match.name}" for "${name}"`)
               }
@@ -1176,7 +1205,7 @@ export const plurtaskoFactory = (config) => {
             // "season"/"2nd" don't count, so "Ao no Hako 2nd Season" can't
             // accept "Edens Zero 2nd Season" — and it must carry the same
             // season marker so a franchise/old-season page can't win).
-            const markerItems = items.filter(markerOk)
+            const markerItems = softYearFilter(items.filter(markerOk), wantedYear)
             if (!match && markerItems.length > 0) {
               const first = markerItems[0]
               const nameWords = significantWords(first.name || first.title)

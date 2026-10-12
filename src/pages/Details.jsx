@@ -452,7 +452,7 @@ export default function Details() {
                 setLoading(false)
               }
             },
-            m.genres, null, null, m.originalName, m.originCountry, m.originalLanguage, m.seasonsList, m.englishName
+            m.genres, null, null, m.originalName, m.originCountry, m.originalLanguage, m.seasonsList, m.englishName, m.year
           ).then((allStreams) => {
             if (!resolved) {
               resolved = true
@@ -833,7 +833,7 @@ export default function Details() {
             setEpisodeStreams(batch)
             setEpisodeLoading(false)
           },
-          meta.genres, ep.season, ep.episode, meta.originalName, meta.originCountry, meta.originalLanguage, meta.seasonsList
+          meta.genres, ep.season, ep.episode, meta.originalName, meta.originCountry, meta.originalLanguage, meta.seasonsList, meta.englishName, meta.year
         ).then((allStreams) => {
           if (!resolved) {
             resolved = true

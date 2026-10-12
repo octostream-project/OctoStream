@@ -246,6 +246,64 @@ describe('titleSeasonMarker (marcador de temporada en el título)', () => {
     }
   })
 
+  it('desambigua remakes con el mismo título por año', async () => {
+    // Regresión: "Llamada perdida" existe como película japonesa (2003) y
+    // remake americano (2008) — el sitio devuelve ambas y el match debe
+    // preferir la del año pedido por la ficha.
+    const movieChannel = CHANNELS.find(ch => ch.id === 'repelishd')
+    const origGetStreams = movieChannel.getStreams
+    const searchStub = stubAllSearches({
+      repelishd: [
+        { id: 'r:old', url: 'https://x/llamada-perdida-2003', name: 'Llamada perdida', year: 2003 },
+        { id: 'r:new', url: 'https://x/llamada-perdida-2008', name: 'Llamada perdida', year: 2008 },
+      ],
+    })
+    movieChannel.getStreams = vi.fn().mockResolvedValue([
+      { url: 'https://cdn.x/llamada-2008.mp4', streamType: 'mp4', server: 'Directo' },
+    ])
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'tmdb-movie-480',
+        name: 'Llamada perdida',
+        year: 2008,
+      })
+      expect(movieChannel.getStreams).toHaveBeenCalledWith(expect.objectContaining({ id: 'r:new' }))
+      expect(streams).toEqual([expect.objectContaining({ url: 'https://cdn.x/llamada-2008.mp4' })])
+    } finally {
+      movieChannel.getStreams = origGetStreams
+      searchStub.restore()
+    }
+  })
+
+  it('sin año pedido, conserva el mejor match por título aunque haya varios', async () => {
+    const movieChannel = CHANNELS.find(ch => ch.id === 'repelishd')
+    const origGetStreams = movieChannel.getStreams
+    const searchStub = stubAllSearches({
+      repelishd: [
+        { id: 'r:old', url: 'https://x/llamada-perdida-2003', name: 'Llamada perdida', year: 2003 },
+        { id: 'r:new', url: 'https://x/llamada-perdida-2008', name: 'Llamada perdida', year: 2008 },
+      ],
+    })
+    movieChannel.getStreams = vi.fn().mockResolvedValue([
+      { url: 'https://cdn.x/llamada.mp4', streamType: 'mp4', server: 'Directo' },
+    ])
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'tmdb-movie-480',
+        name: 'Llamada perdida',
+      })
+      expect(movieChannel.getStreams).toHaveBeenCalled()
+      expect(streams).toEqual([expect.objectContaining({ url: 'https://cdn.x/llamada.mp4' })])
+    } finally {
+      movieChannel.getStreams = origGetStreams
+      searchStub.restore()
+    }
+  })
+
   it('no reproduce la temporada vieja cuando el sitio solo tiene la franquicia', async () => {
     // Regresión del bug reportado: la query pide "2nd Season" y el sitio
     // solo tiene la página de la franquicia (S1) o una temporada distinta →

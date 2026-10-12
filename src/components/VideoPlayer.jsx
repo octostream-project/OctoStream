@@ -2355,7 +2355,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             </div>
           )}
 
-          <div className="flex items-center justify-center gap-1 sm:gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-2">
 
             {/* Play/Pause */}
             <button

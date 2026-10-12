@@ -372,7 +372,7 @@ export class PluginManager {
     PluginManager.streamCache.clear()
   }
 
-  async getStreams(type, id, name, signal, genres, season, episode, originalName, originCountry, originalLanguage, englishName) {
+  async getStreams(type, id, name, signal, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year) {
     await this.ensureReady()
     // Check cache first - avoids re-fetching when navigating back
     const cacheKey = `${type}:${id}${season ? `:S${season}E${episode || ''}` : ''}`
@@ -388,7 +388,7 @@ export class PluginManager {
     const promises = candidates.map(async plugin => {
       try {
         const streams = await withCancelTimeout(
-          sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, englishName }),
+          sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
         if (streams && streams.length > 0) {
           return streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain' }))
@@ -426,7 +426,7 @@ export class PluginManager {
 
   // Progressive stream loading: calls onBatch as each plugin returns streams.
   // Returns the full list when all plugins finish.
-  async getStreamsProgressive(type, id, name, signal, onBatch, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName) {
+  async getStreamsProgressive(type, id, name, signal, onBatch, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year) {
 
     await this.ensureReady()
     // Check cache first
@@ -455,7 +455,7 @@ export class PluginManager {
           onBatch(allStreams)
         } : null
         const streams = await withCancelTimeout(
-          sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, onBatch: pluginOnBatch }),
+          sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch: pluginOnBatch }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
         if (streams && streams.length > 0) {
           const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain' })).filter(noTorrent)

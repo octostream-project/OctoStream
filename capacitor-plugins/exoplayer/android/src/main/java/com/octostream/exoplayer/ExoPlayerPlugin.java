@@ -294,6 +294,14 @@ public class ExoPlayerPlugin extends Plugin {
 
     // --- Controles propios (sin PlayerControlView de Media3) ---
     private LinearLayout controlsOverlay = null;
+    private ImageButton octoFullscreenBtn = null;
+    // Insets de las barras del sistema: el diálogo es fullscreen y la barra
+    // de navegación/gestos puede dibujarse sobre los controles inferiores.
+    private int systemInsetTop = 0;
+    private int systemInsetBottom = 0;
+    // Pantalla completa "forzada": las barras del sistema permanecen
+    // ocultas incluso con los controles visibles (toggle del botón).
+    private boolean immersiveMode = false;
     private SeekBar octoSeek = null;
     private TextView octoPosition = null;
     private TextView octoDuration = null;
@@ -3862,6 +3870,18 @@ public class ExoPlayerPlugin extends Plugin {
         // el salvapantallas de Android TV salta encima del vídeo.
         dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         dialog.show();
+        // Insets del sistema: la barra de navegación/gestos puede cubrir los
+        // controles inferiores (y la status bar la topBar). Los guardamos y
+        // los aplicamos como margen para elevar los controles sobre la barra.
+        rootLayout.setOnApplyWindowInsetsListener((v, insets) -> {
+            systemInsetTop = insets.getSystemWindowInsetTop();
+            systemInsetBottom = insets.getSystemWindowInsetBottom();
+            applySystemInsets();
+            return insets;
+        });
+        rootLayout.requestApplyInsets();
+        // Estado inicial: controles ocultos → barras del sistema ocultas.
+        applySystemBarVisibility();
         // Pantalla de marca mientras el enlace carga (hasta el primer READY)
         showStreamLoading();
 
@@ -4668,6 +4688,25 @@ public class ExoPlayerPlugin extends Plugin {
             });
         }
 
+        // Pantalla completa: alterna el modo inmersivo (barras del sistema
+        // siempre ocultas). Las barras ya se ocultan solas al esconderse los
+        // controles — el botón mantiene la ocultación con controles visibles.
+        octoFullscreenBtn = controlsOverlay.findViewById(R.id.octo_fullscreen);
+        if (octoFullscreenBtn != null) {
+            octoFullscreenBtn.setColorFilter(Color.WHITE);
+            octoFullscreenBtn.setImageResource(immersiveMode
+                    ? androidx.media3.ui.R.drawable.exo_ic_fullscreen_exit
+                    : androidx.media3.ui.R.drawable.exo_ic_fullscreen_enter);
+            octoFullscreenBtn.setOnClickListener(v -> {
+                immersiveMode = !immersiveMode;
+                octoFullscreenBtn.setImageResource(immersiveMode
+                        ? androidx.media3.ui.R.drawable.exo_ic_fullscreen_exit
+                        : androidx.media3.ui.R.drawable.exo_ic_fullscreen_enter);
+                applySystemBarVisibility();
+                resetControlsTimer();
+            });
+        }
+
         // Focus scale en la fila única de controles (octo_seek tiene su
         // propio listener de foco con engorde + commit de scrub).
         applyFocusScaleToAll((ViewGroup) controlsOverlay.findViewById(R.id.octo_row_transport));
@@ -4694,7 +4733,8 @@ public class ExoPlayerPlugin extends Plugin {
                 speedLabel,
                 controlsOverlay.findViewById(R.id.octo_settings),
                 octoCastBtn,
-                octoPipBtn};
+                octoPipBtn,
+                octoFullscreenBtn};
         for (int i = 0; i < row.length; i++) {
             View view = row[i];
             if (view == null) continue;
@@ -4927,6 +4967,7 @@ public class ExoPlayerPlugin extends Plugin {
         mainHandler.postDelayed(hideControlsRunnable, 7000);
         mainHandler.removeCallbacks(controlsTickRunnable);
         mainHandler.post(controlsTickRunnable);
+        applySystemBarVisibility();
         // Foco en play
         if (octoPlayBtn != null) octoPlayBtn.requestFocus();
     }
@@ -4936,10 +4977,54 @@ public class ExoPlayerPlugin extends Plugin {
         if (topBar != null) topBar.setVisibility(View.GONE);
         mainHandler.removeCallbacks(hideControlsRunnable);
         mainHandler.removeCallbacks(controlsTickRunnable);
+        applySystemBarVisibility();
         // Devolver el foco al rootLayout para que el D-pad siga llegando.
         // Con un menú overlay abierto NO se mueve el foco: robarlo dejaría
         // el menú visible pero inerte al D-pad.
         if (overlayView == null && rootLayoutRef != null) rootLayoutRef.requestFocus();
+    }
+
+    // Eleva los controles/topBar sobre las barras del sistema aplicando los
+    // insets como margen (en TV y modo inmersivo los insets son 0).
+    private void applySystemInsets() {
+        if (controlsOverlay != null) {
+            ViewGroup.LayoutParams lp = controlsOverlay.getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams
+                    && ((FrameLayout.LayoutParams) lp).bottomMargin != systemInsetBottom) {
+                ((FrameLayout.LayoutParams) lp).bottomMargin = systemInsetBottom;
+                controlsOverlay.setLayoutParams(lp);
+            }
+        }
+        if (topBar != null) {
+            ViewGroup.LayoutParams lp = topBar.getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams
+                    && ((FrameLayout.LayoutParams) lp).topMargin != systemInsetTop) {
+                ((FrameLayout.LayoutParams) lp).topMargin = systemInsetTop;
+                topBar.setLayoutParams(lp);
+            }
+        }
+    }
+
+    // Con los controles ocultos (o modo inmersivo forzado) las barras del
+    // sistema se ocultan; al mostrar los controles vuelven a verse y los
+    // insets mantienen los controles por encima de la barra de navegación.
+    private void applySystemBarVisibility() {
+        if (dialog == null || dialog.getWindow() == null) return;
+        View decor = dialog.getWindow().getDecorView();
+        if (immersiveMode || !isControlsVisible()) {
+            decor.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        } else {
+            decor.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
     }
 
     private ViewGroup rootLayoutRef = null;
