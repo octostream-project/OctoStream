@@ -1,18 +1,18 @@
 {
-  "versionCode": 161,
-  "versionName": "1.61",
+  "versionCode": 162,
+  "versionName": "1.62",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-arm64-v8a.apk",
-  "sha256": "310cab12130870e8bc29d05762dd3c9b15b31b48b93c112ab76b4932a9653fbc",
-  "notes": "Sincronizacion estilo LocalSend en Ajustes: los dispositivos OctoStream se descubren solos y al pulsarlos eliges Descargar o Enviar. Arreglada la sincronizacion por IP y desde PC (CORS). YouTube en escritorio via yt-dlp con fallback Invidious. Splash de carga con logo. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.62/octostream-1.62-arm64-v8a.apk",
+  "sha256": "ea53452c503091b327cb1c5377b07784bd80294bffe215819c14a304f6b1ff3f",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.62/octostream-1.62-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.62/octostream-1.62-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.62/octostream-1.62-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "310cab12130870e8bc29d05762dd3c9b15b31b48b93c112ab76b4932a9653fbc",
-    "armeabi-v7a": "8bfa4224a9d8b0568e4d29c27d762bd444b411210579b1b742fdb3da4ab46056",
-    "x86_64": "bf2c7a64d2da5b98701f84bc293dca56555e24f1b1008a311aa27d261e87b73d"
+    "arm64-v8a": "ea53452c503091b327cb1c5377b07784bd80294bffe215819c14a304f6b1ff3f",
+    "armeabi-v7a": "80317f6a59af0ccd968f9f11187943b0d2168a5b973d6005ab25d7ea587e6fb9",
+    "x86_64": "4f2e8400925821bc0acc3750114b1a6fd1924ba2c312a678e6626a267ad12f89"
   }
 }

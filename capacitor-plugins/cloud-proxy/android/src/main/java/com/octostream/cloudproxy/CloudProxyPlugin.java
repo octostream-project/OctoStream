@@ -431,6 +431,23 @@ public class CloudProxyPlugin extends Plugin {
      * The binary is bundled as libaether.so in jniLibs.
      */
     private void startAether() throws Exception {
+        // Orphan cleanup: a previous libaether process can outlive the app
+        // (Android doesn't always reap children on process death) and keep
+        // ports 1819/1820 bound — every subsequent connect() would then time
+        // out forever. killall works without root for same-uid processes.
+        if (aetherProcess == null && isSocksProxyUp()) {
+            Log.w(TAG, "Stale Aether holding proxy ports — killing orphan");
+            try {
+                new ProcessBuilder("killall", "-9", "libaether.so").start()
+                    .waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                Log.w(TAG, "killall libaether failed: " + e.getMessage());
+            }
+            for (int i = 0; i < 20 && isSocksProxyUp(); i++) {
+                try { Thread.sleep(150); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+
         // Find the aether binary in nativeLibraryDir
         String nativeLibDir = getContext().getApplicationInfo().nativeLibraryDir;
         File executable = new File(nativeLibDir, "libaether.so");

@@ -121,10 +121,24 @@ export default function App() {
         console.log('[App] WARP status:', s.connected)
         if (!s.connected) {
           console.log('[App] WARP auto-connecting...')
-          CloudProxy.connect().then(async r => {
+          // Reintentos como en onResume: el primer intento puede fallar
+          // justo tras el arranque (radio aún despertando). Sin reintentos
+          // un solo fallo dejaba el overlay "Conectando WARP" para siempre.
+          const connectWithRetry = async () => {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const r = await CloudProxy.connect()
+                await refreshWarpStatus()
+                console.log('[App] WARP auto-connect:', r.status)
+                return
+              } catch (e) {
+                console.warn(`[App] WARP auto-connect attempt ${attempt} failed:`, e?.message)
+                if (attempt < 3) await new Promise(r => setTimeout(r, 4000))
+              }
+            }
             await refreshWarpStatus()
-            console.log('[App] WARP auto-connect:', r.status)
-          }).catch(e => console.warn('[App] WARP auto-connect failed:', e?.message))
+          }
+          connectWithRetry()
         } else {
           refreshWarpStatus()
         }
@@ -379,12 +393,58 @@ export default function App() {
     return unsub
   }, [android])
 
+  // Escape del overlay: si WARP no conecta en 25s (ISP bloquea Cloudflare,
+  // aether muerto, etc.) se muestran opciones — sin esto la app quedaba
+  // brickeada en "Conectando WARP" para siempre ante cualquier fallo.
+  const [warpStuck, setWarpStuck] = useState(false)
+  const [warpError, setWarpError] = useState('')
+  const [warpRetrying, setWarpRetrying] = useState(false)
+  const [prevBlocking, setPrevBlocking] = useState(false)
+  if (warpBlocking !== prevBlocking) {
+    setPrevBlocking(warpBlocking)
+    if (!warpBlocking) { setWarpStuck(false); setWarpError('') }
+  }
+  useEffect(() => {
+    if (!warpBlocking) return
+    const t = setTimeout(async () => {
+      setWarpStuck(true)
+      try {
+        const s = await CloudProxy.getStatus()
+        if (s?.error) setWarpError(s.error)
+      } catch { /* estado del proxy no disponible */ }
+    }, 25000)
+    return () => clearTimeout(t)
+  }, [warpBlocking])
+
+  const retryWarp = async () => {
+    setWarpRetrying(true)
+    setWarpError('')
+    try {
+      await CloudProxy.connect()
+      await refreshWarpStatus()
+    } catch (e) {
+      setWarpError(e?.message || String(e))
+      setWarpStuck(true)
+    }
+    setWarpRetrying(false)
+  }
+
+  const skipWarp = async () => {
+    // El usuario elige seguir sin WARP: desactiva autoconnect, limpia el
+    // proxy (dead-port o no) para que el tráfico vaya directo y cierra el
+    // overlay. Desde Ajustes → VPN puede volver a activarlo.
+    localStorage.setItem('octostream_warp_autoconnect', 'false')
+    try { await CloudProxy.disconnect() } catch { /* best-effort */ }
+    resetWarpReady()
+    setWarpBlocking(false)
+  }
+
   return (
     <ErrorBoundary>
       <div className={android ? 'flex flex-col h-screen bg-dark-950' : 'flex min-h-screen bg-dark-950'}>
         {/* WARP connecting overlay: blocks ALL interaction while WARP is down */}
         {warpBlocking && android && (
-          <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center" data-warp-overlay>
+          <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center px-8" data-warp-overlay>
             <img
               src="/logo-symbol.png"
               alt="OctoStream"
@@ -393,6 +453,27 @@ export default function App() {
             />
             <h2 className="text-white text-xl font-bold mb-2">Conectando WARP</h2>
             <p className="text-white/60 text-sm">Protegiendo tu conexión…</p>
+            {warpStuck && (
+              <div className="mt-8 flex flex-col items-center gap-3 max-w-xs text-center">
+                {warpError && <p className="text-red-400/80 text-xs break-words">{warpError}</p>}
+                <p className="text-white/50 text-xs">La conexión está tardando más de lo normal.</p>
+                <div className="flex gap-3 mt-1">
+                  <button
+                    onClick={retryWarp}
+                    disabled={warpRetrying}
+                    className="px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-semibold disabled:opacity-50"
+                  >
+                    {warpRetrying ? 'Conectando…' : 'Reintentar'}
+                  </button>
+                  <button
+                    onClick={skipWarp}
+                    className="px-5 py-2.5 rounded-xl bg-dark-700 border border-white/15 text-white/80 text-sm"
+                  >
+                    Continuar sin WARP
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
