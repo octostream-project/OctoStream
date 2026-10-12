@@ -22,6 +22,8 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -50,6 +52,13 @@ public class PalantirPlugin extends Plugin {
     // Key material for catalog links: AES-OFB, key = bytes[16:48], IV = bytes[0:16].
     private static final String LINK_KEY_B64 =
         "hTh8uRnL5bX8PZC6Tc3t46nVDFfBpB6Tjw3qazQThpexpg8bLdimevNHj5vJR0nP";
+
+    // Single-threaded executor for DB work: SQLite access stays serialized but
+    // the Capacitor bridge thread returns immediately. Without this, a heavy
+    // query on the ~250MB catalog (or an .up update script) blocks every other
+    // native call in the app — CapacitorHttp fetches included — and the APK
+    // appears frozen until the query finishes.
+    private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
 
     private File dbFile() {
         return new File(getContext().getFilesDir(), "palantir/moria.db");
@@ -86,13 +95,15 @@ public class PalantirPlugin extends Plugin {
 
     @PluginMethod
     public void getStatus(PluginCall call) {
-        File f = dbFile();
-        JSObject r = new JSObject();
-        r.put("installed", f.isFile() && f.length() > 1024);
-        r.put("sizeBytes", f.isFile() ? f.length() : 0);
-        r.put("lastUpdate", prefs().getString(KEY_LAST_UPDATE, ""));
-        r.put("version", f.isFile() ? readDbVersion() : "");
-        call.resolve(r);
+        dbExecutor.execute(() -> {
+            File f = dbFile();
+            JSObject r = new JSObject();
+            r.put("installed", f.isFile() && f.length() > 1024);
+            r.put("sizeBytes", f.isFile() ? f.length() : 0);
+            r.put("lastUpdate", prefs().getString(KEY_LAST_UPDATE, ""));
+            r.put("version", f.isFile() ? readDbVersion() : "");
+            call.resolve(r);
+        });
     }
 
     @PluginMethod
@@ -102,6 +113,9 @@ public class PalantirPlugin extends Plugin {
             call.reject("install requires an https:// url");
             return;
         }
+        // Own thread, not dbExecutor: a multi-minute download must not queue
+        // every query behind it. The db swap is atomic (renameTo), so a query
+        // racing the replace at worst sees "not installed" once.
         new Thread(() -> {
             File tmp = null;
             File outTmp = null;
@@ -212,43 +226,46 @@ public class PalantirPlugin extends Plugin {
             call.reject("invalid args: " + e.getMessage());
             return;
         }
-        SQLiteDatabase db = null;
-        Cursor c = null;
-        try {
-            File f = dbFile();
-            if (!f.isFile()) {
-                call.reject("database not installed");
-                return;
-            }
-            db = SQLiteDatabase.openDatabase(f.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
-            c = db.rawQuery(sql, bindArgs);
-            String[] cols = c.getColumnNames();
-            JSArray columns = new JSArray();
-            for (String col : cols) columns.put(col);
-            JSArray rows = new JSArray();
-            while (c.moveToNext() && rows.length() < MAX_ROWS) {
-                JSArray row = new JSArray();
-                for (int i = 0; i < cols.length; i++) {
-                    switch (c.getType(i)) {
-                        case Cursor.FIELD_TYPE_INTEGER: row.put(c.getLong(i)); break;
-                        case Cursor.FIELD_TYPE_FLOAT:   row.put(c.getDouble(i)); break;
-                        case Cursor.FIELD_TYPE_STRING:  row.put(c.getString(i)); break;
-                        default:                      row.put(JSONObjectNull.NULL); break;
-                    }
+        final String fSql = sql;
+        dbExecutor.execute(() -> {
+            SQLiteDatabase db = null;
+            Cursor c = null;
+            try {
+                File f = dbFile();
+                if (!f.isFile()) {
+                    call.reject("database not installed");
+                    return;
                 }
-                rows.put(row);
+                db = SQLiteDatabase.openDatabase(f.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
+                c = db.rawQuery(fSql, bindArgs);
+                String[] cols = c.getColumnNames();
+                JSArray columns = new JSArray();
+                for (String col : cols) columns.put(col);
+                JSArray rows = new JSArray();
+                while (c.moveToNext() && rows.length() < MAX_ROWS) {
+                    JSArray row = new JSArray();
+                    for (int i = 0; i < cols.length; i++) {
+                        switch (c.getType(i)) {
+                            case Cursor.FIELD_TYPE_INTEGER: row.put(c.getLong(i)); break;
+                            case Cursor.FIELD_TYPE_FLOAT:   row.put(c.getDouble(i)); break;
+                            case Cursor.FIELD_TYPE_STRING:  row.put(c.getString(i)); break;
+                            default:                      row.put(JSONObjectNull.NULL); break;
+                        }
+                    }
+                    rows.put(row);
+                }
+                JSObject r = new JSObject();
+                r.put("columns", columns);
+                r.put("rows", rows);
+                call.resolve(r);
+            } catch (Exception e) {
+                Log.e(TAG, "query failed", e);
+                call.reject("query failed: " + e.getMessage());
+            } finally {
+                if (c != null) c.close();
+                if (db != null) db.close();
             }
-            JSObject r = new JSObject();
-            r.put("columns", columns);
-            r.put("rows", rows);
-            call.resolve(r);
-        } catch (Exception e) {
-            Log.e(TAG, "query failed", e);
-            call.reject("query failed: " + e.getMessage());
-        } finally {
-            if (c != null) c.close();
-            if (db != null) db.close();
-        }
+        });
     }
 
     @PluginMethod
@@ -258,30 +275,32 @@ public class PalantirPlugin extends Plugin {
             call.reject("empty script");
             return;
         }
-        SQLiteDatabase db = null;
-        try {
-            File f = dbFile();
-            if (!f.isFile()) {
-                call.reject("database not installed");
-                return;
-            }
-            db = SQLiteDatabase.openDatabase(f.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
-            db.beginTransaction();
+        dbExecutor.execute(() -> {
+            SQLiteDatabase db = null;
             try {
-                for (String stmt : splitSql(script)) db.execSQL(stmt);
-                db.setTransactionSuccessful();
+                File f = dbFile();
+                if (!f.isFile()) {
+                    call.reject("database not installed");
+                    return;
+                }
+                db = SQLiteDatabase.openDatabase(f.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
+                db.beginTransaction();
+                try {
+                    for (String stmt : splitSql(script)) db.execSQL(stmt);
+                    db.setTransactionSuccessful();
+                } finally {
+                    db.endTransaction();
+                }
+                JSObject r = new JSObject();
+                r.put("ok", true);
+                call.resolve(r);
+            } catch (Exception e) {
+                Log.e(TAG, "execScript failed", e);
+                call.reject("execScript failed: " + e.getMessage());
             } finally {
-                db.endTransaction();
+                if (db != null) db.close();
             }
-            JSObject r = new JSObject();
-            r.put("ok", true);
-            call.resolve(r);
-        } catch (Exception e) {
-            Log.e(TAG, "execScript failed", e);
-            call.reject("execScript failed: " + e.getMessage());
-        } finally {
-            if (db != null) db.close();
-        }
+        });
     }
 
     /** Splits a SQL script on ';' outside strings/comments. */
@@ -327,32 +346,34 @@ public class PalantirPlugin extends Plugin {
             call.reject("links array required");
             return;
         }
-        try {
-            byte[] material = Base64.decode(LINK_KEY_B64, Base64.DEFAULT);
-            SecretKeySpec key = new SecretKeySpec(Arrays.copyOfRange(material, 16, 48), "AES");
-            IvParameterSpec iv = new IvParameterSpec(Arrays.copyOfRange(material, 0, 16));
-            Cipher cipher = Cipher.getInstance("AES/OFB/NoPadding");
-            JSArray urls = new JSArray();
-            for (int i = 0; i < links.length(); i++) {
-                String link = links.optString(i, null);
-                if (link == null) { urls.put(JSONObjectNull.NULL); continue; }
-                if (link.startsWith("http")) { urls.put(link); continue; }
-                try {
-                    String padded = link;
-                    while (padded.length() % 4 != 0) padded += "=";
-                    byte[] cipherBytes = Base64.decode(padded, Base64.URL_SAFE);
-                    cipher.init(Cipher.DECRYPT_MODE, key, iv);
-                    urls.put(new String(cipher.doFinal(cipherBytes), "UTF-8").trim());
-                } catch (Exception e) {
-                    urls.put(JSONObjectNull.NULL);
+        dbExecutor.execute(() -> {
+            try {
+                byte[] material = Base64.decode(LINK_KEY_B64, Base64.DEFAULT);
+                SecretKeySpec key = new SecretKeySpec(Arrays.copyOfRange(material, 16, 48), "AES");
+                IvParameterSpec iv = new IvParameterSpec(Arrays.copyOfRange(material, 0, 16));
+                Cipher cipher = Cipher.getInstance("AES/OFB/NoPadding");
+                JSArray urls = new JSArray();
+                for (int i = 0; i < links.length(); i++) {
+                    String link = links.optString(i, null);
+                    if (link == null) { urls.put(JSONObjectNull.NULL); continue; }
+                    if (link.startsWith("http")) { urls.put(link); continue; }
+                    try {
+                        String padded = link;
+                        while (padded.length() % 4 != 0) padded += "=";
+                        byte[] cipherBytes = Base64.decode(padded, Base64.URL_SAFE);
+                        cipher.init(Cipher.DECRYPT_MODE, key, iv);
+                        urls.put(new String(cipher.doFinal(cipherBytes), "UTF-8").trim());
+                    } catch (Exception e) {
+                        urls.put(JSONObjectNull.NULL);
+                    }
                 }
+                JSObject r = new JSObject();
+                r.put("urls", urls);
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("decryptLinks failed: " + e.getMessage());
             }
-            JSObject r = new JSObject();
-            r.put("urls", urls);
-            call.resolve(r);
-        } catch (Exception e) {
-            call.reject("decryptLinks failed: " + e.getMessage());
-        }
+        });
     }
 
     @PluginMethod

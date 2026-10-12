@@ -572,7 +572,16 @@ export default function Details() {
         })
       )
       let resolved = null
-      try { resolved = await Promise.any(attempts) } catch { /* todos fallaron */ }
+      try {
+        // Tope global: si los 8 candidatos entran en "delayed" (AllDebrid baja
+        // el archivo a su caché), la espera llegaba a ~2 min en "Resolviendo…"
+        // y parecía que el enlace no abría. A los 90s se informa y se puede
+        // reintentar — el delayed sigue en la caché de AllDebrid.
+        resolved = await Promise.race([
+          Promise.any(attempts),
+          new Promise((_, r) => setTimeout(() => r(new Error('debrid resolve timeout')), 90000)),
+        ])
+      } catch { /* todos fallaron o timeout */ }
       const lastError = errors[errors.length - 1]
       setResolvingStream(false)
       if (!resolved) {
