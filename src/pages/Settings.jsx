@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -71,6 +71,15 @@ export default function Settings() {
   const [osApiKey, setOsApiKey] = useState(localStorage.getItem('octostream_opensubs_apikey') || '')
   const [osSaved, setOsSaved] = useState(false)
   const [osError, setOsError] = useState('')
+
+  // Catálogos temáticos externos (MDBList / Trakt)
+  const [mdbApiKey, setMdbApiKey] = useState(localStorage.getItem('octostream_mdblist_key') || '')
+  const [mdbSaved, setMdbSaved] = useState(false)
+  const [mdbError, setMdbError] = useState('')
+  const [traktKey, setTraktKey] = useState(localStorage.getItem('octostream_trakt_key') || '')
+  const [traktLists, setTraktLists] = useState(localStorage.getItem('octostream_trakt_lists') || '')
+  const [traktSaved, setTraktSaved] = useState(false)
+  const [traktError, setTraktError] = useState('')
 
   // AllDebrid API key
   const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
@@ -219,6 +228,59 @@ export default function Settings() {
     localStorage.setItem('octostream_opensubs_apikey', key)
     setOsSaved(true)
     setTimeout(() => setOsSaved(false), 2000)
+  }
+
+  const handleMdbSave = async () => {
+    setMdbError('')
+    const key = mdbApiKey.trim()
+    if (!key) {
+      localStorage.removeItem('octostream_mdblist_key')
+      setMdbSaved(true)
+      setTimeout(() => setMdbSaved(false), 2000)
+      return
+    }
+    try {
+      const res = await fetch(`https://api.mdblist.com/user?apikey=${encodeURIComponent(key)}`,
+        { signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined })
+      if (!res.ok) {
+        setMdbError('API key inválida. Verifica tu clave en mdblist.com')
+        return
+      }
+      localStorage.setItem('octostream_mdblist_key', key)
+      setMdbSaved(true)
+      setTimeout(() => setMdbSaved(false), 2000)
+    } catch {
+      setMdbError('No se pudo verificar la API key. Revisa tu conexión.')
+    }
+  }
+
+  const handleTraktSave = async () => {
+    setTraktError('')
+    const key = traktKey.trim()
+    if (!key) {
+      localStorage.removeItem('octostream_trakt_key')
+    } else {
+      // Trakt valida el Client ID consultando un endpoint público con los headers.
+      try {
+        const res = await fetch('https://api.trakt.tv/movies/trending?limit=1', {
+          headers: { 'trakt-api-version': '2', 'trakt-api-key': key },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+        })
+        if (!res.ok) {
+          setTraktError('Client ID inválido. Verifícalo en trakt.tv/oauth/applications')
+          return
+        }
+      } catch {
+        setTraktError('No se pudo verificar el Client ID. Revisa tu conexión.')
+        return
+      }
+      localStorage.setItem('octostream_trakt_key', key)
+    }
+    const lists = traktLists.trim()
+    if (lists) localStorage.setItem('octostream_trakt_lists', lists)
+    else localStorage.removeItem('octostream_trakt_lists')
+    setTraktSaved(true)
+    setTimeout(() => setTraktSaved(false), 2000)
   }
 
   const handleHdfullSave = () => {
@@ -642,6 +704,165 @@ export default function Settings() {
 
           {/* AllDebrid moved to Debrid tab */}
 
+          {/* MDBList API key */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <List className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">MDBList API Key</h3>
+                <p className="text-dark-400 text-sm">
+                  Habilita catálogos temáticos (plataformas, géneros, listas curadas)
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <Key size={14} />
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={mdbApiKey}
+                  onChange={e => setMdbApiKey(e.target.value)}
+                  placeholder="Introduce tu MDBList API key"
+                  className="input w-full"
+                  onKeyDown={e => e.key === 'Enter' && handleMdbSave()}
+                />
+              </div>
+
+              {mdbError && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
+                  <AlertCircle size={16} />
+                  {mdbError}
+                </div>
+              )}
+
+              {mdbSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
+                  <Check size={16} />
+                  Configuración guardada correctamente
+                </div>
+              )}
+
+              <button onClick={handleMdbSave} className="btn-primary">
+                <Check size={18} />
+                Guardar
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key gratuita?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en mdblist.com</li>
+                <li>Ve a Preferences → API Key</li>
+                <li>Copia tu API key y pégala arriba</li>
+              </ol>
+              <a
+                href="https://mdblist.com/preferences/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
+              >
+                Ir a mdblist.com
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          {/* Trakt Client ID */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <TrendingUp className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Trakt Client ID</h3>
+                <p className="text-dark-400 text-sm">
+                  Habilita tendencias y listas públicas de Trakt.tv
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <Key size={14} />
+                  Client ID
+                </label>
+                <input
+                  type="password"
+                  value={traktKey}
+                  onChange={e => setTraktKey(e.target.value)}
+                  placeholder="Introduce tu Trakt Client ID"
+                  className="input w-full"
+                  onKeyDown={e => e.key === 'Enter' && handleTraktSave()}
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <List size={14} />
+                  Listas públicas (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={traktLists}
+                  onChange={e => setTraktLists(e.target.value)}
+                  placeholder="usuario/slug, usuario/slug2:Nombre"
+                  className="input w-full"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck="false"
+                />
+                <p className="text-dark-500 text-xs mt-1">
+                  Separadas por coma. Ej: trakt/most-anticipated-movies
+                </p>
+              </div>
+
+              {traktError && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
+                  <AlertCircle size={16} />
+                  {traktError}
+                </div>
+              )}
+
+              {traktSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
+                  <Check size={16} />
+                  Configuración guardada correctamente
+                </div>
+              )}
+
+              <button onClick={handleTraktSave} className="btn-primary">
+                <Check size={18} />
+                Guardar
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener un Client ID gratuito?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en trakt.tv</li>
+                <li>Ve a Settings → Your API Applications → New</li>
+                <li>Rellena el formulario (redirect URI puede ser cualquier URL)</li>
+                <li>Copia el &quot;Client ID&quot; y pégalo arriba</li>
+              </ol>
+              <a
+                href="https://trakt.tv/oauth/applications"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
+              >
+                Ir a trakt.tv
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
           {/* HDFull credentials */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
@@ -766,6 +987,30 @@ export default function Settings() {
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">OpenSubtitles API Key</span>
                 {localStorage.getItem('octostream_opensubs_apikey') ? (
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Check size={14} /> Configurada
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-dark-500">
+                    <AlertCircle size={14} /> No configurada
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-dark-400">MDBList API Key</span>
+                {localStorage.getItem('octostream_mdblist_key') ? (
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Check size={14} /> Configurada
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-dark-500">
+                    <AlertCircle size={14} /> No configurada
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-dark-400">Trakt Client ID</span>
+                {localStorage.getItem('octostream_trakt_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>

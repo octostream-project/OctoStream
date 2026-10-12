@@ -5,12 +5,22 @@ import { tmdbPlugin } from './tmdb.js'
 import { embedStreamPlugin } from './embedStream.js'
 import { openSubtitlesPlugin } from './openSubtitles.js'
 import { screensaverPlugin } from './screensaver.js'
+import {
+  mdblistPlugin,
+  traktPlugin,
+  letterboxdPlugin,
+  filmaffinityPlugin,
+} from './extProviders.js'
 
 export const builtInPlugins = [
   tmdbPlugin,
   embedStreamPlugin,
   openSubtitlesPlugin,
   screensaverPlugin,
+  mdblistPlugin,
+  traktPlugin,
+  letterboxdPlugin,
+  filmaffinityPlugin,
 ]
 
 export {

@@ -669,6 +669,20 @@ export async function searchCategory(query, signal) {
   return groups.flat()
 }
 
+// Resuelve un id externo (IMDb tt*) a ids de TMDB. Usado por proveedores de
+// catálogos externos (MDBList, Trakt, Letterboxd, FilmAffinity) que a veces
+// solo conocen el imdb_id del item.
+export async function findByImdb(imdbId, signal) {
+  const apiKey = getApiKey()
+  if (!apiKey || !imdbId) return null
+  const data = await tmdbFetch(`/find/${imdbId}`, apiKey, { external_source: 'imdb_id' }, signal)
+  const movie = data?.movie_results?.[0]
+  if (movie) return { type: CONTENT_TYPES.MOVIE, tmdbId: movie.id }
+  const tv = data?.tv_results?.[0]
+  if (tv) return { type: CONTENT_TYPES.SERIES, tmdbId: tv.id }
+  return null
+}
+
 export async function searchSpanishInfo(query, signal) {
   const apiKey = getApiKey()
   const data = await tmdbFetch('/search/multi', apiKey, { query, page: 1 }, signal)
