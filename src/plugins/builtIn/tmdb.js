@@ -265,6 +265,44 @@ const CATALOG_ENDPOINTS = {
   'tv-dorama-kr': { endpoint: '/discover/tv', isMovie: false, extra: { with_genres: 18, with_origin_country: 'KR', sort_by: 'popularity.desc' } },
   'tv-dorama-jp': { endpoint: '/discover/tv', isMovie: false, extra: { with_genres: 18, with_origin_country: 'JP', sort_by: 'popularity.desc' } },
   'tv-dorama-cn': { endpoint: '/discover/tv', isMovie: false, extra: { with_genres: 18, with_origin_country: 'CN', sort_by: 'popularity.desc' } },
+
+  // ── Catálogos temáticos ─────────────────────────────────────────────
+  // Estudios (with_companies): el id es la productora en TMDB.
+  'movie-ghibli': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 10342, sort_by: 'popularity.desc' } },
+  'movie-pixar': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 3, sort_by: 'popularity.desc' } },
+  'movie-disney': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 2, sort_by: 'popularity.desc' } },
+  'movie-marvel': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 420, sort_by: 'popularity.desc' } },
+  'movie-dc': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 128064, sort_by: 'popularity.desc' } },
+  'movie-a24': { endpoint: '/discover/movie', isMovie: true, extra: { with_companies: 41077, sort_by: 'popularity.desc' } },
+  // Temáticas por keyword TMDB (with_keywords) — ids resueltos vía /search/keyword
+  'movie-zombies': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 12377, sort_by: 'popularity.desc' } },
+  'movie-vampiros': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 3133, sort_by: 'popularity.desc' } },
+  'movie-halloween': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 3335, sort_by: 'popularity.desc' } },
+  'movie-navidad': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 207317, sort_by: 'popularity.desc' } },
+  'movie-aliens': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 9951, sort_by: 'popularity.desc' } },
+  'movie-timetravel': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 4379, sort_by: 'popularity.desc' } },
+  'movie-distopias': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 4565, sort_by: 'popularity.desc' } },
+  'movie-ww2': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 1956, sort_by: 'popularity.desc' } },
+  'movie-tiburones': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 15097, sort_by: 'popularity.desc' } },
+  'movie-serial': { endpoint: '/discover/movie', isMovie: true, extra: { with_keywords: 10714, sort_by: 'popularity.desc' } },
+  // Series temáticas por keyword
+  'tv-zombies': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 12377, sort_by: 'popularity.desc' } },
+  'tv-vampiros': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 3133, sort_by: 'popularity.desc' } },
+  'tv-superheroes': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 9715, sort_by: 'popularity.desc' } },
+  'tv-ww2': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 1956, sort_by: 'popularity.desc' } },
+  'tv-distopias': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 4565, sort_by: 'popularity.desc' } },
+  'tv-timetravel': { endpoint: '/discover/tv', isMovie: false, extra: { with_keywords: 4379, sort_by: 'popularity.desc' } },
+  // Sagas completas (endpoint /collection/{id} → devuelve `parts`, no `results`)
+  'movie-harry-potter': { endpoint: '/collection/1241', isMovie: true, collection: true },
+  'movie-star-wars': { endpoint: '/collection/10', isMovie: true, collection: true },
+  'movie-a-todo-gas': { endpoint: '/collection/9485', isMovie: true, collection: true },
+  'movie-james-bond': { endpoint: '/collection/645', isMovie: true, collection: true },
+  'movie-jurassic': { endpoint: '/collection/328', isMovie: true, collection: true },
+  'movie-piratas': { endpoint: '/collection/295', isMovie: true, collection: true },
+  'movie-toy-story': { endpoint: '/collection/10194', isMovie: true, collection: true },
+  'movie-john-wick': { endpoint: '/collection/404609', isMovie: true, collection: true },
+  'movie-scream': { endpoint: '/collection/2602', isMovie: true, collection: true },
+  'movie-hobbit': { endpoint: '/collection/121938', isMovie: true, collection: true },
 }
 
 export const tmdbPlugin = createPlugin(
@@ -312,6 +350,41 @@ export const tmdbPlugin = createPlugin(
       { id: 'tv-dorama-kr', name: 'Doramas Coreanos', type: CONTENT_TYPES.SERIES },
       { id: 'tv-dorama-jp', name: 'Doramas Japoneses', type: CONTENT_TYPES.SERIES },
       { id: 'tv-dorama-cn', name: 'Doramas Chinos', type: CONTENT_TYPES.SERIES },
+      // Estudios
+      { id: 'movie-ghibli', name: 'Studio Ghibli', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-pixar', name: 'Pixar', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-disney', name: 'Disney', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-marvel', name: 'Marvel', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-dc', name: 'DC', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-a24', name: 'A24', type: CONTENT_TYPES.MOVIE },
+      // Temáticas
+      { id: 'movie-zombies', name: 'Zombis', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-vampiros', name: 'Vampiros', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-halloween', name: 'Halloween', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-navidad', name: 'Navidad', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-aliens', name: 'Alienígenas', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-timetravel', name: 'Viajes en el tiempo', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-distopias', name: 'Distopías', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-ww2', name: 'II Guerra Mundial', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-tiburones', name: 'Tiburones', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-serial', name: 'Asesinos en serie', type: CONTENT_TYPES.MOVIE },
+      { id: 'tv-zombies', name: 'Series de zombis', type: CONTENT_TYPES.SERIES },
+      { id: 'tv-vampiros', name: 'Series de vampiros', type: CONTENT_TYPES.SERIES },
+      { id: 'tv-superheroes', name: 'Superhéroes', type: CONTENT_TYPES.SERIES },
+      { id: 'tv-ww2', name: 'Series bélicas WWII', type: CONTENT_TYPES.SERIES },
+      { id: 'tv-distopias', name: 'Series distópicas', type: CONTENT_TYPES.SERIES },
+      { id: 'tv-timetravel', name: 'Series de viajes en el tiempo', type: CONTENT_TYPES.SERIES },
+      // Sagas
+      { id: 'movie-harry-potter', name: 'Harry Potter', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-star-wars', name: 'Star Wars', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-a-todo-gas', name: 'A todo gas', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-james-bond', name: 'James Bond', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-jurassic', name: 'Jurassic Park', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-piratas', name: 'Piratas del Caribe', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-toy-story', name: 'Toy Story', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-john-wick', name: 'John Wick', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-scream', name: 'Scream', type: CONTENT_TYPES.MOVIE },
+      { id: 'movie-hobbit', name: 'El Hobbit', type: CONTENT_TYPES.MOVIE },
     ],
     icon: 'film',
   }),
@@ -325,8 +398,13 @@ export const tmdbPlugin = createPlugin(
       const params = { page, ...config.extra }
       const data = await tmdbFetch(config.endpoint, apiKey, params, signal)
       const mapper = config.isMovie ? mapMovie : mapSeries
-      // Strip raw TMDB data from catalog items to save RAM
-      return (data.results || []).map(item => mapper(item, { includeRaw: false }))
+      // Las colecciones devuelven `parts` (sagas ordenadas por fecha);
+      // el resto devuelve `results`. Strip raw TMDB data to save RAM.
+      const items = config.collection
+        ? [...(data.parts || [])].sort((a, b) =>
+            String(a.release_date || '9999').localeCompare(String(b.release_date || '9999')))
+        : (data.results || [])
+      return items.map(item => mapper(item, { includeRaw: false }))
     },
 
     getMeta: async ({ type, id, signal }) => {
