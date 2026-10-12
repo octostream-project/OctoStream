@@ -1252,9 +1252,10 @@ export default function Details() {
         </div>
       )}
 
-      {/* Resume dialog */}
+      {/* Resume dialog — data-tv-modal confina la navegación D-pad al
+          diálogo y autoFocus lleva el foco a "Continuar" al abrirse */}
       {showResumeDialog && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div data-tv-modal className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-dark-800 rounded-2xl p-6 max-w-sm w-full border border-dark-700 shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
               <Clock className="text-primary-400" size={28} />
@@ -1269,6 +1270,8 @@ export default function Details() {
             <div data-tv-row className="flex gap-3">
               <button
                 data-tv-card
+                data-tv-initial
+                autoFocus
                 onClick={handleResume}
                 className="btn-primary flex-1 py-3 flex items-center justify-center gap-2"
               >
@@ -1283,6 +1286,7 @@ export default function Details() {
               </button>
             </div>
             <button
+              data-tv-card
               onClick={() => setShowResumeDialog(false)}
               className="w-full mt-3 text-dark-400 text-sm hover:text-white transition-colors"
             >
