@@ -11,47 +11,282 @@ const crypto = require('crypto')
 const { URL } = require('url')
 const { SyncServer } = require('./sync-server.cjs')
 
-// ─── Aether / WARP local proxy detection ─────────────────────────────────────
-// On this dev machine Aether (Cloudflare WARP userspace client) listens as a
-// SOCKS5 proxy on 127.0.0.1:1819. When present, route ALL renderer traffic
-// through it so provider requests go via WARP — mirroring the Android app's
-// anti-leak behaviour (system proxy → Aether → WARP tunnel).
+// ─── Aether / WARP local proxy ──────────────────────────────────────────────
+// El mismo cliente WARP userspace que en Android (CluvexStudio/Aether):
+// SOCKS5 en 127.0.0.1:1819 y HTTP CONNECT en 127.0.0.1:1820. El binario se
+// empaqueta en resources/aether (scripts/fetch-aether.mjs) y se lanza con
+// las mismas variables de entorno que el plugin CloudProxy de Android.
+// Cuando está conectado: (1) el renderer va por session proxy SOCKS5 y
+// (2) el proxy local de Node rutea por el túnel — paridad total con Android.
+const net = require('net')
+const tls = require('tls')
 const AETHER_SOCKS_HOST = '127.0.0.1'
 const AETHER_SOCKS_PORT = 1819
+const AETHER_HTTP_PORT = 1820
 
-function probeAether() {
+// Hosts que nunca van por el túnel — espejo de nonProxyHosts/bypass del
+// plugin Android (TDT/RTVE/Mediaset/Google DAI dan errores bajo WARP, y la
+// LAN debe ir directa para la sincronización OctoStream).
+const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|doubleclick\.net)$/i
+const AETHER_BYPASS_CHROMIUM = [
+  '<local>', 'localhost', '127.0.0.1', '*.local',
+  '192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '169.254.0.0/16',
+  '*.tdtspain.com', '*.tdtchannels.com', '*.rtve.es', '*.mediaset.net',
+  '*.mediasetinfinity.es', 'dai.google.com', '*.doubleclick.net',
+].join(';')
+function isAetherBypassHost(host) {
+  return AETHER_BYPASS_SUFFIX.test(host || '') || /^dai\.google\.com$/i.test(host || '')
+}
+
+const aetherState = { proc: null, connected: false, connecting: false, error: '' }
+
+function probePort(port) {
   return new Promise((resolve) => {
-    const socket = new (require('net').Socket)()
+    const socket = new net.Socket()
     socket.setTimeout(400)
-    socket.once('connect', () => {
-      socket.destroy()
-      resolve(true)
-    })
+    socket.once('connect', () => { socket.destroy(); resolve(true) })
     socket.once('timeout', () => { socket.destroy(); resolve(false) })
     socket.once('error', () => { socket.destroy(); resolve(false) })
-    socket.connect(AETHER_SOCKS_PORT, AETHER_SOCKS_HOST)
+    socket.connect(port, AETHER_SOCKS_HOST)
   })
+}
+function probeAether() { return probePort(AETHER_SOCKS_PORT) }
+async function isAetherProxyUp() {
+  return (await probePort(AETHER_SOCKS_PORT)) && (await probePort(AETHER_HTTP_PORT))
+}
+
+function resolveAether() {
+  if (process.env.OCTOSTREAM_AETHER && fs.existsSync(process.env.OCTOSTREAM_AETHER)) {
+    return process.env.OCTOSTREAM_AETHER
+  }
+  const exe = process.platform === 'win32' ? 'aether.exe' : 'aether'
+  try {
+    const bundled = path.join(process.resourcesPath || '', 'aether',
+      `${process.platform}-${process.arch}`, exe)
+    if (app.isPackaged && fs.existsSync(bundled)) return bundled
+  } catch {}
+  try {
+    const devPath = path.resolve(__dirname, '..', 'build', 'aether',
+      `${process.platform}-${process.arch}`, exe)
+    if (fs.existsSync(devPath)) return devPath
+  } catch {}
+  // PATH del sistema (aether instalado aparte).
+  return null // sin binario → no se lanza nada; un aether externo en :1819 sí se usa
+}
+
+// Rutea el renderer por el túnel (session proxy) y marca el estado para
+// que el proxy local de Node use el agente SOCKS5 en sus fetches.
+async function applyAetherRouting() {
+  await session.defaultSession.setProxy({
+    proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+    proxyBypassRules: AETHER_BYPASS_CHROMIUM,
+  })
+  aetherState.connected = true
+  console.log('[Aether] routing via WARP — renderer SOCKS5 + proxy local')
+}
+
+async function clearAetherRouting() {
+  aetherState.connected = false
+  try { await session.defaultSession.setProxy({ mode: 'direct' }) } catch {}
 }
 
 async function configureAetherProxy() {
-  const aetherUp = await probeAether()
-  if (!aetherUp) {
+  // Arranque: si un aether ya corre (externo o lanzado antes), adoptar el
+  // túnel existente — el plugin Android también reutiliza el proceso vivo.
+  if (!(await isAetherProxyUp())) {
     console.log('[Aether] No SOCKS5 proxy on 127.0.0.1:1819 — direct traffic')
     return false
   }
   try {
-    // Route all renderer fetch/XHR through Aether SOCKS5, except localhost
-    // (app assets, Capacitor bridge, stream proxy on 19588).
-    await session.defaultSession.setProxy({
-      proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
-      proxyBypassRules: '<local>;127.0.0.1;localhost',
-    })
-    console.log('[Aether] SOCKS5 proxy detected — renderer traffic routed via WARP (127.0.0.1:1819)')
+    await applyAetherRouting()
     return true
   } catch (e) {
     console.error('[Aether] Failed to set proxy:', e.message)
     return false
   }
+}
+
+async function aetherConnect() {
+  if (aetherState.connected && await isAetherProxyUp()) {
+    return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+  }
+  if (aetherState.connecting) {
+    // Otro connect en curso (auto-connect de App.jsx + request bloqueada):
+    // esperar al resultado en vez de fallar con "already in progress".
+    const deadline = Date.now() + 70000
+    while (aetherState.connecting && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500))
+    }
+    if (aetherState.connected) {
+      return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+    }
+    throw new Error('WARP connection failed')
+  }
+  aetherState.connecting = true
+  aetherState.error = ''
+  try {
+    // Un aether externo ya corriendo en :1819 se adopta sin lanzar otro.
+    if (await isAetherProxyUp()) {
+      await applyAetherRouting()
+      return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+    }
+    const exe = resolveAether()
+    if (!exe) throw new Error('binario aether no encontrado (build/aether o resources)')
+    // Matar un proceso viejo primero — aether puede quedar vivo con el
+    // túnel caído reintentando y dos instancias compiten por :1819/:1820.
+    if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
+    const workDir = app.getPath('userData')
+    const env = {
+      ...process.env,
+      AETHER_PROTOCOL: 'masque',
+      AETHER_SCAN: 'ironclad',
+      AETHER_IP: 'v4',
+      AETHER_NOIZE: 'aggressive',
+      AETHER_LOG_LEVEL: 'warn',
+      AETHER_SOCKS: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+      AETHER_HTTP_PROXY: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
+      AETHER_CONFIG: path.join(workDir, 'aether.toml'),
+      AETHER_QUICK_RECONNECT: '1',
+      AETHER_PEER: '162.159.198.1:443',
+      AETHER_QUIC_V2: '1',
+      AETHER_ROUTE_SNIFF: '1',
+      TMPDIR: os.tmpdir(),
+    }
+    const proc = spawn(exe, [], { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    aetherState.proc = proc
+    proc.on('exit', (code) => {
+      console.warn('[Aether] proceso salió code=', code)
+      if (aetherState.proc === proc) {
+        aetherState.proc = null
+        aetherState.connected = false
+        // El session proxy queda apuntando al puerto muerto → fail-closed,
+        // las requests fallan en vez de filtrar la IP real (como Android).
+      }
+    })
+    let stderrTail = ''
+    const onLog = (c) => {
+      const s = c.toString()
+      stderrTail = (stderrTail + s).slice(-4096)
+      for (const line of s.split('\n')) {
+        if (/error|warn|listening|expos/i.test(line)) console.log('[Aether]', line.trim())
+      }
+    }
+    proc.stdout.on('data', onLog)
+    proc.stderr.on('data', onLog)
+
+    // Esperar a que suban ambos proxies (máx. 60s, igual que Android) con
+    // salida anticipada si el proceso muere.
+    const deadline = Date.now() + 60000
+    while (Date.now() < deadline) {
+      if (proc.exitCode !== null) break
+      if (await isAetherProxyUp()) {
+        await applyAetherRouting()
+        return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+      }
+      await new Promise(r => setTimeout(r, 500))
+    }
+    throw new Error(`aether no respondió en 60s${stderrTail ? ': ' + stderrTail.slice(-200) : ''}`)
+  } catch (e) {
+    aetherState.error = e.message
+    if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
+    await clearAetherRouting()
+    throw e
+  } finally {
+    aetherState.connecting = false
+  }
+}
+
+async function aetherDisconnect(keepProxy) {
+  aetherState.connecting = false
+  const proc = aetherState.proc
+  aetherState.proc = null
+  if (proc) {
+    try { proc.kill('SIGKILL') } catch {}
+  }
+  if (keepProxy) {
+    // Desconexión en background: el proxy queda apuntando al puerto muerto →
+    // las requests fallan en vez de filtrar la IP real durante el repose.
+    aetherState.connected = false
+  } else {
+    await clearAetherRouting()
+  }
+  return { status: 'disconnected' }
+}
+
+// ─── Agente SOCKS5 para las fetches Node del proxy local ────────────────────
+// Node no soporta SOCKS de serie: handshake CONNECT mínimo (RFC 1928,
+// sin auth) y TLS por encima para https. Así las requests del proxy local
+// van por WARP igual que el renderer — paridad con OkHttp/ExoPlayer.
+function socksHandshake(host, port, cb) {
+  const sock = net.connect(AETHER_SOCKS_PORT, AETHER_SOCKS_HOST)
+  let done = false
+  const fail = (e) => {
+    if (done) return
+    done = true
+    try { sock.destroy() } catch {}
+    cb(e)
+  }
+  const succeed = () => {
+    if (done) return
+    done = true
+    sock.removeAllListeners('error')
+    sock.removeAllListeners('timeout')
+    sock.removeAllListeners('data')
+    cb(null, sock)
+  }
+  sock.setTimeout(15000, () => fail(new Error('socks5 timeout')))
+  sock.once('error', fail)
+  sock.once('connect', () => {
+    // Saludo: ver 5, 1 método, sin auth.
+    sock.write(Buffer.from([0x05, 0x01, 0x00]))
+    sock.once('data', (greet) => {
+      if (greet.length < 2 || greet[0] !== 0x05 || greet[1] !== 0x00) {
+        return fail(new Error('socks5 greeting rejected'))
+      }
+      // CONNECT host:port (domain form — el DNS lo resuelve el túnel).
+      const hostBuf = Buffer.from(host, 'ascii')
+      sock.write(Buffer.concat([
+        Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
+        hostBuf,
+        Buffer.from([port >> 8, port & 0xff]),
+      ]))
+      let buf = Buffer.alloc(0)
+      const onReply = (d) => {
+        buf = Buffer.concat([buf, d])
+        if (buf.length < 4) return
+        if (buf[0] !== 0x05) return fail(new Error('socks5: bad reply version'))
+        if (buf[1] !== 0x00) return fail(new Error('socks5 connect failed: ' + buf[1]))
+        // Esperar a que llegue el reply completo según atyp.
+        const need = buf[3] === 0x01 ? 10 : buf[3] === 0x03 ? 5 + buf[4] + 2 : buf[3] === 0x04 ? 22 : 10
+        if (buf.length < need) return
+        succeed()
+      }
+      sock.on('data', onReply)
+    })
+  })
+}
+
+const warpHttpAgent = new http.Agent({ keepAlive: true })
+warpHttpAgent.createConnection = (opts, cb) => socksHandshake(opts.host, +opts.port, cb)
+const warpHttpsAgent = new https.Agent({ keepAlive: true })
+warpHttpsAgent.createConnection = (opts, cb) => {
+  socksHandshake(opts.host, +opts.port, (err, sock) => {
+    if (err) return cb(err)
+    cb(null, tls.connect({
+      socket: sock,
+      servername: opts.servername || opts.host,
+      ALPNProtocols: opts.ALPNProtocols,
+      rejectUnauthorized: opts.rejectUnauthorized !== false,
+    }))
+  })
+}
+
+// Agente para fetches Node: WARP cuando está conectado salvo hosts bypass.
+function agentFor(target, isHttps) {
+  if (!aetherState.connected || isAetherBypassHost(target.hostname)) {
+    return isHttps ? secureHttpsAgent : undefined
+  }
+  return isHttps ? warpHttpsAgent : warpHttpAgent
 }
 
 // Get local network IP (for Chromecast access to proxy)
@@ -177,7 +412,7 @@ function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders, clientHeaders) {
     headers,
   }
 
-  if (isHttps) options.agent = secureHttpsAgent
+  options.agent = agentFor(target, isHttps)
 
   const lib = isHttps ? https : http
 
@@ -380,7 +615,7 @@ function proxyPost(targetUrl, postBody, postHeaders, res) {
     headers,
   }
 
-  if (isHttps) options.agent = secureHttpsAgent
+  options.agent = agentFor(target, isHttps)
   const lib = isHttps ? https : http
 
   const proxyReq = lib.request(options, (proxyRes) => {
@@ -471,7 +706,7 @@ function remuxFetch(targetUrl, headers, depth, cb) {
     path: target.pathname + target.search,
     method: 'GET',
     headers,
-    agent: isHttps ? secureHttpsAgent : undefined,
+    agent: agentFor(target, isHttps),
     timeout: 30000,
   }, (up) => {
     if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
@@ -840,6 +1075,23 @@ ipcMain.on('get-proxy-config', (event) => {
 // Abrir el stream en un reproductor externo instalado (mpv/VLC).
 ipcMain.handle('player:open-external', (_event, arg) => openExternalPlayer(arg || {}))
 
+// Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
+ipcMain.handle('cloud:connect', () => aetherConnect())
+ipcMain.handle('cloud:disconnect', () => aetherDisconnect(false))
+ipcMain.handle('cloud:disconnect-background', () => aetherDisconnect(true))
+ipcMain.handle('cloud:status', async () => {
+  const alive = aetherState.proc ? aetherState.proc.exitCode === null : false
+  const up = aetherState.connected && await isAetherProxyUp()
+  if (aetherState.connected && !up && !alive) aetherState.connected = false
+  return {
+    connected: up,
+    connecting: aetherState.connecting,
+    socks: up ? `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}` : '',
+    http: up ? `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` : '',
+    error: aetherState.error,
+  }
+})
+
 // Pantalla completa de la ventana: la app Android reproduce siempre a
 // pantalla completa; en escritorio el player se comporta igual.
 ipcMain.handle('win:fullscreen', (event, on) => {
@@ -1054,6 +1306,10 @@ app.on('activate', () => {
 })
 
 app.on('window-all-closed', () => {
+  if (aetherState.proc) {
+    try { aetherState.proc.kill('SIGKILL') } catch {}
+    aetherState.proc = null
+  }
   if (proxyServer) {
     proxyServer.close()
     proxyServer = null

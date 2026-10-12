@@ -125,7 +125,7 @@ async function connectWarpForBlocked() {
   if (Date.now() - warpConnectAttemptAt < DOWN_TTL_MS) return false
   warpConnectAttemptAt = Date.now()
   try {
-    const { CloudProxy } = await import('@octostream/cloud-proxy')
+    const { CloudProxy } = await import('../../../utils/cloudProxy.js')
     // The Aether handshake can take many seconds; cap it so a stuck tunnel
     // cannot hang a catalog/search request indefinitely.
     await Promise.race([

@@ -11,7 +11,7 @@ import UpdateChecker from './components/UpdateChecker.jsx'
 import { useStore } from './store/useStore.js'
 import { isAndroidNative, isElectron } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
-import { CloudProxy } from '@octostream/cloud-proxy'
+import { CloudProxy } from './utils/cloudProxy.js'
 import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
 import { startLoadPlan } from './utils/loadPlan.js'
 

@@ -11,7 +11,7 @@
     "build": "vite build && node scripts/compat-css.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
-    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && electron-builder",
+    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && node scripts/fetch-aether.mjs && electron-builder",
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
@@ -86,6 +86,14 @@
         {
           "from": "build/ffmpeg/linux-arm64",
           "to": "ffmpeg/linux-arm64"
+        },
+        {
+          "from": "build/aether/linux-x64",
+          "to": "aether/linux-x64"
+        },
+        {
+          "from": "build/aether/linux-arm64",
+          "to": "aether/linux-arm64"
         }
       ],
       "target": [
@@ -109,6 +117,10 @@
         {
           "from": "build/ffmpeg/win32-x64",
           "to": "ffmpeg/win32-x64"
+        },
+        {
+          "from": "build/aether/win32-x64",
+          "to": "aether/win32-x64"
         }
       ],
       "target": [

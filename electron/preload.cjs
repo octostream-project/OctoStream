@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('octostream', {
   getLanProxyUrl: () => ipcRenderer.invoke('get-lan-proxy-url'),
   // Reproductores externos instalados en el sistema (mpv/VLC/ffplay).
   openExternalPlayer: (arg) => ipcRenderer.invoke('player:open-external', arg),
+  // Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
+  cloudProxy: {
+    connect: () => ipcRenderer.invoke('cloud:connect'),
+    disconnect: () => ipcRenderer.invoke('cloud:disconnect'),
+    disconnectBackground: () => ipcRenderer.invoke('cloud:disconnect-background'),
+    getStatus: () => ipcRenderer.invoke('cloud:status'),
+  },
   // Fullscreen de la ventana (mismo comportamiento que el player Android).
   setFullscreen: (on) => ipcRenderer.invoke('win:fullscreen', on),
   isFullscreen: () => ipcRenderer.invoke('win:fullscreen-state'),

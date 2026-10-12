@@ -5,7 +5,7 @@ import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
-import { CloudProxy } from '@octostream/cloud-proxy'
+import { CloudProxy } from '../utils/cloudProxy.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 

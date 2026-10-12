@@ -113,6 +113,16 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
     existen en escritorio).
   - `win:fullscreen` IPC: el player va a ventana completa al abrirse como en
     Android; `win:fullscreen-changed` sincroniza el icono del botón.
+  - Cloud-proxy WARP: `electron/main.cjs` lanza el binario `aether`
+    (CluvexStudio/Aether, `scripts/fetch-aether.mjs` → `build/aether/` →
+    `extraResources`) con las mismas env vars que el plugin Android — SOCKS5
+    :1819 + HTTP :1820. El renderer va por `session.setProxy` y las fetches
+    Node del proxy local usan un agente SOCKS5 propio (handshake RFC 1928 +
+    TLS encima) — mismo bypass de hosts que Android (TDT/RTVE/Mediaset/DAI +
+    LAN). `src/utils/cloudProxy.js` da la misma superficie que el plugin
+    Capacitor (`connect/disconnect/disconnectBackground/getStatus`) — en
+    Electron va por IPC `cloud:*`. Un aether externo ya corriendo en :1819
+    se adopta al arranque (`configureAetherProxy`).
 - Se usa `electron` desde npm (`^33.0.0`). El fork `castlabs/electron-releases` se
   recomienda únicamente si se necesita reproducción Widevine certificada en desktop.
 - `electron/sync-server.cjs` es el port a Node del plugin Android

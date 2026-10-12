@@ -61,9 +61,12 @@ function setConnected(connected) {
 async function refresh() {
   if (_refreshing) return _refreshing
   if (!isAndroidNative()) {
-    // Desktop/Electron: detect Aether/WARP via the Electron session proxy.
-    _refreshing = probeDesktopWarp()
-      .then(up => {
+    // Electron: estado real del proceso aether vía IPC (connecting incluido);
+    // fallback al probe cloudflare.com/trace si no hay bridge (web).
+    const bridge = window.octostream?.cloudProxy
+    _refreshing = (bridge ? bridge.getStatus().then(s => ({ up: !!s.connected, connecting: !!s.connecting })) : probeDesktopWarp().then(up => ({ up, connecting: false })))
+      .then(({ up, connecting }) => {
+        _connecting = connecting
         setConnected(up)
         return _connected
       })
