@@ -5,17 +5,22 @@
 // - Web: stub del plugin — devuelve 'unsupported'.
 // La superficie es la del plugin: connect/disconnect/disconnectBackground/
 // getStatus.
+//
+// IMPORTANTE: import ESTÁTICO del plugin — registra 'CloudProxy' al cargar
+// la app igual que hacía la versión estable. Un import dinámico en frío
+// (chunk + __vite__mapDeps) resultó frágil en WebViews de Android TV
+// antiguos y podía dejar la app bloqueada en "Conectando WARP".
 
-async function api() {
+import { CloudProxy as NativeCloudProxy } from '@octostream/cloud-proxy'
+
+function api() {
   const bridge = window.octostream?.cloudProxy
-  if (bridge) return bridge
-  const { CloudProxy } = await import('@octostream/cloud-proxy')
-  return CloudProxy
+  return bridge || NativeCloudProxy
 }
 
 export const CloudProxy = {
-  connect: () => api().then(a => a.connect()),
-  disconnect: () => api().then(a => a.disconnect()),
-  disconnectBackground: () => api().then(a => a.disconnectBackground()),
-  getStatus: () => api().then(a => a.getStatus()),
+  connect: () => api().connect(),
+  disconnect: () => api().disconnect(),
+  disconnectBackground: () => api().disconnectBackground(),
+  getStatus: () => api().getStatus(),
 }

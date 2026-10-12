@@ -37,6 +37,8 @@ public class CloudProxyPlugin extends Plugin {
     private static Process aetherProcess = null;
     private static volatile boolean connected = false;
     private static volatile boolean connecting = false;
+    private static volatile long connectingSince = 0;
+    private static volatile int statusMisses = 0;
     private static volatile String lastError = null;
     private static long connectionGeneration = 0;
     private static final Object PROCESS_LOCK = new Object();
@@ -75,7 +77,10 @@ public class CloudProxyPlugin extends Plugin {
         final long generation;
         final boolean needsStop;
         synchronized (PROCESS_LOCK) {
-            if (connected && aetherProcess != null && aetherProcess.isAlive()) {
+            // Fast-path: no basta con que el proceso viva — verifica que el
+            // túnel responde, si no un túnel medio muerto devolvería
+            // "connected" sin reconectar nada.
+            if (connected && aetherProcess != null && aetherProcess.isAlive() && isSocksProxyUp()) {
                 call.resolve(new JSObject().put("status", "connected"));
                 return;
             }
@@ -105,6 +110,8 @@ public class CloudProxyPlugin extends Plugin {
             // process.waitFor(5s) y bloquearía el hilo del bridge hasta 5s.
             needsStop = aetherProcess != null;
             connecting = true;
+            connectingSince = System.currentTimeMillis();
+            statusMisses = 0;
             lastError = null;
             generation = ++connectionGeneration;
         }
@@ -219,13 +226,37 @@ public class CloudProxyPlugin extends Plugin {
      */
     @PluginMethod
     public void getStatus(PluginCall call) {
+        // connecting tiene un límite interno de ~60s (startAether); un true
+        // más viejo que eso es estado corrupto (un connect cancelado o un
+        // hilo muerto) — se limpia solo para que los reintentos funcionen.
+        if (connecting && System.currentTimeMillis() - connectingSince > 75000) {
+            synchronized (PROCESS_LOCK) { connecting = false; }
+        }
         boolean processAlive = aetherProcess != null && aetherProcess.isAlive();
-        boolean isConnected = connected && processAlive && isSocksProxyUp();
-        if (connected && !isConnected) {
+        boolean probeUp = connected && processAlive && isSocksProxyUp();
+        // Un fallo transitorio de la sonda no debe tumbar la sesión: en
+        // hardware lento el socket de 500ms falla a veces y un solo miss
+        // antes dejaba connected=false para siempre aunque el túnel siguiera
+        // vivo (overlay "Conectando WARP" permanente). Exige 3 sondeos
+        // fallidos seguidos (~30s) para dar el túnel por caído.
+        if (connected && !processAlive) {
             synchronized (PROCESS_LOCK) {
                 connected = false;
+                statusMisses = 0;
             }
+        } else if (connected && !probeUp) {
+            if (++statusMisses >= 3) {
+                synchronized (PROCESS_LOCK) {
+                    connected = false;
+                    statusMisses = 0;
+                }
+            }
+        } else if (probeUp) {
+            statusMisses = 0;
         }
+        // El estado reportado es el creído (con histéresis), no la sonda
+        // instantánea — evita parpadeo del overlay ante misses sueltos.
+        boolean isConnected = connected && processAlive;
         JSObject result = new JSObject();
         result.put("connected", isConnected);
         result.put("connecting", connecting);
