@@ -33,6 +33,8 @@ export interface SearchResultItem {
   name: string
   url: string
   uploader: string
+  uploaderUrl?: string
+  uploaderAvatarUrl?: string
   duration: number
   views: number
   thumbnailUrl: string

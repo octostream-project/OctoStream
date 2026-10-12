@@ -207,6 +207,24 @@ export async function searchYouTube(query) {
 }
 
 /**
+ * Get a YouTube channel's info + first-tab videos.
+ * @param {string} url - Channel URL (@handle, /channel/UCxxx, /c/xxx)
+ * @returns {Promise<{name, url, description, subscriberCount, avatarUrl, bannerUrl, items} | null>}
+ */
+export async function getChannelInfo(url) {
+  const wrapper = await getPlugin()
+  if (!wrapper) return null
+
+  try {
+    const result = await wrapper.impl.getChannel({ url })
+    return result || null
+  } catch (e) {
+    console.warn('[YouTube] getChannel failed:', e?.message)
+    return null
+  }
+}
+
+/**
  * Get search suggestions from YouTube using NewPipeExtractor.
  * @param {string} query - Partial search query
  * @returns {Promise<string[] | null>}

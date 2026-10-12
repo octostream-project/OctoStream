@@ -260,6 +260,12 @@ public class YoutubePlugin extends Plugin {
                     itemObj.put("name", stream.getName() != null ? stream.getName() : "");
                     itemObj.put("url", stream.getUrl() != null ? stream.getUrl() : "");
                     itemObj.put("uploader", stream.getUploaderName() != null ? stream.getUploaderName() : "");
+                    try {
+                        itemObj.put("uploaderUrl", stream.getUploaderUrl() != null ? stream.getUploaderUrl() : "");
+                    } catch (Exception ignored) { itemObj.put("uploaderUrl", ""); }
+                    try {
+                        itemObj.put("uploaderAvatarUrl", bestImageUrl(stream.getUploaderAvatars()));
+                    } catch (Exception ignored) { itemObj.put("uploaderAvatarUrl", ""); }
                     itemObj.put("duration", stream.getDuration()); // seconds, -1 if unknown/live
                     itemObj.put("views", stream.getViewCount());
                     String thumbUrl = "";
@@ -516,6 +522,12 @@ public class YoutubePlugin extends Plugin {
                                     itemObj.put("name", stream.getName() != null ? stream.getName() : "");
                                     itemObj.put("url", stream.getUrl() != null ? stream.getUrl() : "");
                                     itemObj.put("uploader", stream.getUploaderName() != null ? stream.getUploaderName() : "");
+                                    try {
+                                        itemObj.put("uploaderUrl", stream.getUploaderUrl() != null ? stream.getUploaderUrl() : "");
+                                    } catch (Exception ignored) { itemObj.put("uploaderUrl", ""); }
+                                    try {
+                                        itemObj.put("uploaderAvatarUrl", bestImageUrl(stream.getUploaderAvatars()));
+                                    } catch (Exception ignored) { itemObj.put("uploaderAvatarUrl", ""); }
                                     itemObj.put("duration", stream.getDuration());
                                     itemObj.put("views", stream.getViewCount());
                                     String thumbUrl = "";

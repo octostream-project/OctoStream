@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Search, Youtube, Clock, Eye, X, History, Filter, ArrowUpDown } from 'lucide-react'
+import { Search, Youtube, Clock, Eye, X, History, Filter, ArrowUpDown, Heart } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
-import { searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube, dedupeYouTubeItems } from '../utils/youtube.js'
+import { searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube, dedupeYouTubeItems, getChannelInfo } from '../utils/youtube.js'
 import { isAndroidNative } from '../utils/platform.js'
 import { useStore } from '../store/useStore.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -52,6 +52,7 @@ export default function YouTube() {
   const [error, setError] = useState(null)
   const [playing, setPlaying] = useState(null)
   const [resolving, setResolving] = useState(null)
+  const [channel, setChannel] = useState(null) // vista de canal: {name, url, avatarUrl, bannerUrl}
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const suggestionsRef = useRef(null)
@@ -65,6 +66,8 @@ export default function YouTube() {
   const addToHistory = useStore(s => s.addToHistory)
   const watchHistory = useStore(s => s.watchHistory)
   const updateProgress = useStore(s => s.updateProgress)
+  const favorites = useStore(s => s.favorites)
+  const toggleFavorite = useStore(s => s.toggleFavorite)
   const youtubeSearchHistory = useStore(s => s.youtubeSearchHistory)
   const addYoutubeSearch = useStore(s => s.addYoutubeSearch)
   const removeYoutubeSearch = useStore(s => s.removeYoutubeSearch)
@@ -83,6 +86,13 @@ export default function YouTube() {
     }
     return m
   }, [watchHistory])
+
+  // Lookup O(1) de favoritos por "type:id" (vídeo yt:url, canal ytchannel:url)
+  const favIds = useMemo(() => {
+    const s = new Set()
+    for (const f of favorites) s.add(`${f.type}:${f.id}`)
+    return s
+  }, [favorites])
 
   // Debounced suggestions
   useEffect(() => {
@@ -107,14 +117,58 @@ export default function YouTube() {
     return () => { if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current) }
   }, [query])
 
-  // Open old channel favorites as a normal YouTube search.
+  // Normaliza cualquier referencia de canal a una URL que getChannel acepte.
+  const channelUrl = (ref) => {
+    if (!ref || typeof ref !== 'string') return null
+    if (ref.startsWith('http')) return ref
+    if (ref.startsWith('@')) return `https://www.youtube.com/${ref}`
+    if (ref.startsWith('UC')) return `https://www.youtube.com/channel/${ref}`
+    return null
+  }
+
+  // Carga la vista de un canal (cabecera + vídeos de su pestaña principal).
+  const loadChannel = useCallback(async (fav) => {
+    const url = channelUrl(fav?.url)
+    if (!url) {
+      setQuery(fav?.name || '')
+      return
+    }
+    if (abortRef.current) abortRef.current.aborted = true
+    const abort = { aborted: false }
+    abortRef.current = abort
+    setLoading(true)
+    setError(null)
+    setResults([])
+    setNextPage(null)
+    setPage(1)
+    setChannel(null)
+    try {
+      const info = await getChannelInfo(url)
+      if (abort.aborted) return
+      if (info) {
+        setChannel({ name: info.name || fav?.name || '', url, avatarUrl: info.avatarUrl || '' })
+        setResults(dedupeYouTubeItems(info.items || []))
+        if (!info.items?.length) setError('El canal no tiene vídeos')
+      } else {
+        setError('No se pudo cargar el canal')
+      }
+    } finally {
+      if (!abort.aborted) setLoading(false)
+    }
+  }, [])
+
+  // Canal favorito abierto desde Favoritos (o desde una tarjeta de resultado).
+  // Diferido un tick como el efecto de "Continuar viendo" — loadChannel hace
+  // setState y no debe correr síncrono dentro del efecto.
   useEffect(() => {
     const favChannel = location.state?.channel
-    if (favChannel && favChannel.type === 'youtube_channel') {
-      setQuery(favChannel.name || '')
+    if (!favChannel || favChannel.type !== 'youtube_channel') return
+    const timer = setTimeout(() => {
+      loadChannel(favChannel.url ? favChannel : { ...favChannel, url: favChannel.id?.startsWith('ytchannel:') ? favChannel.id.slice(10) : null })
       window.history.replaceState({}, document.title)
-    }
-  }, [location.state])
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [location.state, loadChannel])
 
   // Prefetch de la resolución al mantener el foco en una tarjeta (~400ms):
   // para cuando el usuario pulsa OK el stream ya está en caché y el vídeo
@@ -169,6 +223,7 @@ export default function YouTube() {
     setResults([])
     setNextPage(null)
     setPage(1)
+    setChannel(null)
 
     try {
       const res = await searchYouTubeFull(q)
@@ -401,6 +456,49 @@ export default function YouTube() {
             </div>
           )}
 
+          {/* Channel header (vista de canal abierta desde uploader o favoritos) */}
+          {channel && (
+            <div className="flex items-center gap-3 mb-4 bg-dark-800 border border-dark-700 rounded-lg p-3">
+              {channel.avatarUrl ? (
+                <LazyImage src={channel.avatarUrl} alt={channel.name} className="w-12 h-12 rounded-full object-cover" />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-dark-700 flex items-center justify-center">
+                  <Youtube size={22} className="text-dark-500" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium truncate">{channel.name}</p>
+                <p className="text-[10px] text-dark-500">Canal de YouTube</p>
+              </div>
+              {(() => {
+                const favId = `ytchannel:${channel.url}`
+                const fav = favIds.has(`youtube_channel:${favId}`)
+                return (
+                  <button
+                    type="button"
+                    data-tv-item
+                    tabIndex={0}
+                    title={fav ? 'Quitar canal de favoritos' : 'Añadir canal a favoritos'}
+                    onClick={() => toggleFavorite({ id: favId, type: 'youtube_channel', name: channel.name, poster: channel.avatarUrl })}
+                    className="p-2 rounded-full bg-dark-700 hover:bg-dark-600 transition-colors"
+                  >
+                    <Heart size={18} className={fav ? 'fill-red-500 text-red-500' : 'text-white'} />
+                  </button>
+                )
+              })()}
+              <button
+                type="button"
+                data-tv-item
+                tabIndex={0}
+                title="Cerrar canal"
+                onClick={() => { setChannel(null); setResults([]); setError(null) }}
+                className="p-2 rounded-full bg-dark-700 hover:bg-dark-600 transition-colors"
+              >
+                <X size={18} className="text-dark-300" />
+              </button>
+            </div>
+          )}
+
           {/* Loading */}
           {loading && !error && (
             <div className="flex items-center justify-center gap-3 py-12 text-primary-400">
@@ -438,6 +536,26 @@ export default function YouTube() {
                           <Youtube size={32} className="text-dark-600" />
                         </div>
                       )}
+                      {(() => {
+                        const fav = favIds.has(`youtube:yt:${item.url}`)
+                        const toggle = (e) => {
+                          e.stopPropagation()
+                          toggleFavorite({ id: `yt:${item.url}`, type: 'youtube', name: item.name, poster: item.thumbnailUrl })
+                        }
+                        return (
+                          <button
+                            type="button"
+                            data-tv-item
+                            tabIndex={0}
+                            title={fav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                            onClick={toggle}
+                            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e) } }}
+                            className="absolute top-1 right-1 z-10 p-1.5 rounded-full bg-black/70 backdrop-blur transition-colors hover:bg-black/90"
+                          >
+                            <Heart size={14} className={fav ? 'fill-red-500 text-red-500' : 'text-white'} />
+                          </button>
+                        )
+                      })()}
                       {item.duration > 0 && (
                         <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded">
                           {formatDuration(item.duration)}
@@ -461,7 +579,21 @@ export default function YouTube() {
                     </div>
                     <div className="p-2">
                       <h3 className="text-xs font-medium text-white line-clamp-2 mb-0.5">{item.name}</h3>
-                      <p className="text-[10px] text-dark-400 truncate">{item.uploader}</p>
+                      {item.uploaderUrl ? (
+                        <button
+                          type="button"
+                          data-tv-item
+                          tabIndex={0}
+                          title={`Abrir canal de ${item.uploader}`}
+                          onClick={e => { e.stopPropagation(); loadChannel({ name: item.uploader, url: item.uploaderUrl }) }}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); loadChannel({ name: item.uploader, url: item.uploaderUrl }) } }}
+                          className="text-[10px] text-dark-400 truncate hover:text-primary-400 transition-colors text-left max-w-full"
+                        >
+                          {item.uploader}
+                        </button>
+                      ) : (
+                        <p className="text-[10px] text-dark-400 truncate">{item.uploader}</p>
+                      )}
                       <div className="flex items-center gap-2 mt-0.5 text-[10px] text-dark-500">
                         {item.views > 0 && (
                           <span className="flex items-center gap-1">

@@ -74,14 +74,19 @@ function ContentCard({ item }) {
   const navigate = useNavigate()
 
   const handleClick = useCallback(() => {
-    // YouTube channels are favorited with type 'youtube_channel' and id 'ytchannel:@handle'
+    // YouTube channels are favorited with type 'youtube_channel' and id 'ytchannel:<url>'
     // Navigate to the YouTube page instead of Details (which would hang trying to resolve streams)
     if (item.type === 'youtube_channel' && item.id?.startsWith('ytchannel:')) {
-      navigate('/youtube', { state: { channel: item } })
+      navigate('/youtube', { state: { channel: { ...item, url: item.id.slice(10) } } })
+      return
+    }
+    // YouTube videos are favorited with type 'youtube' and id 'yt:<watch url>'
+    if (item.type === 'youtube' && item.id?.startsWith('yt:')) {
+      navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster } } })
       return
     }
     navigate(`/details/${item.type}/${item.id}`)
-  }, [navigate, item.type, item.id])
+  }, [navigate, item])
 
   return (
     <div

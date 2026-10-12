@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockYoutube = { search: vi.fn(), searchMore: vi.fn() }
+const mockYoutube = { search: vi.fn(), searchMore: vi.fn(), getChannel: vi.fn() }
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -11,7 +11,7 @@ vi.mock('@capacitor/core', () => ({
 
 vi.mock('@octostream/youtube', () => ({ Youtube: mockYoutube }))
 
-const { searchYouTubeFull, dedupeYouTubeItems, youtubeVideoId } = await import('./youtube.js')
+const { searchYouTubeFull, dedupeYouTubeItems, youtubeVideoId, getChannelInfo } = await import('./youtube.js')
 
 const item = (id, name = 'video') => ({
   name: `${name} ${id}`,
@@ -86,5 +86,25 @@ describe('searchYouTubeFull', () => {
     const res = await searchYouTubeFull('gatos', { url: 'u', id: 't' })
     expect(res.items).toEqual([])
     expect(res.error).toMatch(/429/)
+  })
+})
+
+describe('getChannelInfo', () => {
+  beforeEach(() => { mockYoutube.getChannel.mockReset() })
+
+  it('devuelve info y vídeos del canal', async () => {
+    mockYoutube.getChannel.mockResolvedValue({
+      name: 'Canal', url: 'https://www.youtube.com/@canal',
+      items: [item('aaaaaaaaaaa')],
+    })
+    const res = await getChannelInfo('https://www.youtube.com/@canal')
+    expect(mockYoutube.getChannel).toHaveBeenCalledWith({ url: 'https://www.youtube.com/@canal' })
+    expect(res.name).toBe('Canal')
+    expect(res.items).toHaveLength(1)
+  })
+
+  it('error nativo devuelve null', async () => {
+    mockYoutube.getChannel.mockRejectedValue(new Error('channel not found'))
+    expect(await getChannelInfo('https://www.youtube.com/@x')).toBeNull()
   })
 })
