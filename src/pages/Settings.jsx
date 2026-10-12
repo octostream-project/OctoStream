@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
+import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
@@ -77,9 +78,18 @@ export default function Settings() {
   const [mdbSaved, setMdbSaved] = useState(false)
   const [mdbError, setMdbError] = useState('')
   const [traktKey, setTraktKey] = useState(localStorage.getItem('octostream_trakt_key') || '')
+  const [traktSecret, setTraktSecret] = useState(localStorage.getItem('octostream_trakt_secret') || '')
   const [traktLists, setTraktLists] = useState(localStorage.getItem('octostream_trakt_lists') || '')
   const [traktSaved, setTraktSaved] = useState(false)
   const [traktError, setTraktError] = useState('')
+  const [traktUser, setTraktUser] = useState(localStorage.getItem('octostream_trakt_user') || '')
+
+  // PIN flow state (Trakt OAuth device)
+  const [traktPin, setTraktPin] = useState(null) // { userCode, verificationUrl, expiresIn, deviceCode }
+  const [traktPinLoading, setTraktPinLoading] = useState(false)
+  const [traktPinError, setTraktPinError] = useState('')
+  const traktPinTimerRef = useRef(null)
+  const traktPinPollingRef = useRef(false)
 
   // AllDebrid API key
   const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
@@ -103,6 +113,7 @@ export default function Settings() {
   useEffect(() => {
     return () => {
       if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
+      if (traktPinTimerRef.current) clearInterval(traktPinTimerRef.current)
     }
   }, [])
 
@@ -276,6 +287,9 @@ export default function Settings() {
       }
       localStorage.setItem('octostream_trakt_key', key)
     }
+    const secret = traktSecret.trim()
+    if (secret) localStorage.setItem('octostream_trakt_secret', secret)
+    else localStorage.removeItem('octostream_trakt_secret')
     const lists = traktLists.trim()
     if (lists) localStorage.setItem('octostream_trakt_lists', lists)
     else localStorage.removeItem('octostream_trakt_lists')
@@ -381,6 +395,70 @@ export default function Settings() {
     if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
     setAdPin(null)
     setAdPinLoading(false)
+  }, [])
+
+  // --- Trakt PIN flow (OAuth device auth) ---
+  // Necesita Client ID guardado; el Secret se usa para canjear el código.
+  const handleTraktPinStart = useCallback(async () => {
+    setTraktPinError('')
+    const key = traktKey.trim() || localStorage.getItem('octostream_trakt_key') || ''
+    const secret = traktSecret.trim() || localStorage.getItem('octostream_trakt_secret') || ''
+    if (!key || !secret) {
+      setTraktPinError('Guarda primero el Client ID y el Client Secret')
+      return
+    }
+    localStorage.setItem('octostream_trakt_key', key)
+    localStorage.setItem('octostream_trakt_secret', secret)
+    setTraktPinLoading(true)
+    setTraktPin(null)
+    if (traktPinTimerRef.current) clearInterval(traktPinTimerRef.current)
+    try {
+      const dc = await traktDeviceCode(key)
+      setTraktPin(dc)
+      const startTime = Date.now()
+      traktPinTimerRef.current = setInterval(async () => {
+        if (traktPinPollingRef.current) return
+        if (Date.now() - startTime > dc.expiresIn * 1000) {
+          clearInterval(traktPinTimerRef.current)
+          setTraktPinError('El código ha expirado')
+          setTraktPin(null)
+          setTraktPinLoading(false)
+          return
+        }
+        traktPinPollingRef.current = true
+        try {
+          const result = await traktDeviceToken(dc.deviceCode, key, secret)
+          if (result?.access_token) {
+            clearInterval(traktPinTimerRef.current)
+            setTraktPin(null)
+            setTraktPinLoading(false)
+            const me = await traktMe().catch(() => null)
+            setTraktUser(me?.username || 'conectado')
+          }
+        } catch (e) {
+          clearInterval(traktPinTimerRef.current)
+          setTraktPinError(e?.message || 'Error al verificar el código')
+          setTraktPin(null)
+          setTraktPinLoading(false)
+        } finally {
+          traktPinPollingRef.current = false
+        }
+      }, dc.interval * 1000)
+    } catch (e) {
+      setTraktPinError(e?.message || 'Error al obtener el código')
+      setTraktPinLoading(false)
+    }
+  }, [traktKey, traktSecret])
+
+  const handleTraktPinCancel = useCallback(() => {
+    if (traktPinTimerRef.current) clearInterval(traktPinTimerRef.current)
+    setTraktPin(null)
+    setTraktPinLoading(false)
+  }, [])
+
+  const handleTraktDisconnect = useCallback(() => {
+    clearTraktTokens()
+    setTraktUser('')
   }, [])
 
   return (
@@ -805,6 +883,21 @@ export default function Settings() {
 
               <div>
                 <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <Key size={14} />
+                  Client Secret <span className="text-dark-500">(para conectar tu cuenta)</span>
+                </label>
+                <input
+                  type="password"
+                  value={traktSecret}
+                  onChange={e => setTraktSecret(e.target.value)}
+                  placeholder="Introduce tu Trakt Client Secret"
+                  className="input w-full"
+                  onKeyDown={e => e.key === 'Enter' && handleTraktSave()}
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
                   <List size={14} />
                   Listas públicas (opcional)
                 </label>
@@ -841,6 +934,65 @@ export default function Settings() {
                 <Check size={18} />
                 Guardar
               </button>
+
+              {/* Cuenta Trakt por PIN: watchlist, recomendaciones y listas propias */}
+              <div className="pt-4 border-t border-dark-700">
+                <p className="text-dark-400 text-sm mb-3">
+                  Conecta tu cuenta para ver tu watchlist, recomendaciones y tus listas:
+                </p>
+                {(traktUser || getTraktToken()) && !traktPin && !traktPinLoading && (
+                  <div className="flex items-center justify-between bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                    <span className="flex items-center gap-2 text-green-400 text-sm">
+                      <Check size={16} />
+                      Conectado{traktUser ? ` como @${traktUser}` : ''}
+                    </span>
+                    <button onClick={handleTraktDisconnect} className="text-dark-400 text-sm hover:text-red-400">
+                      Desconectar
+                    </button>
+                  </div>
+                )}
+                {!traktUser && !getTraktToken() && !traktPin && !traktPinLoading && (
+                  <button onClick={handleTraktPinStart} className="btn-secondary">
+                    <Key size={16} />
+                    Conectar con PIN
+                  </button>
+                )}
+                {traktPinLoading && !traktPin && (
+                  <div className="flex items-center gap-2 text-dark-400 text-sm">
+                    <OctoLoader size={16} />
+                    Obteniendo código...
+                  </div>
+                )}
+                {traktPin && (
+                  <div className="bg-primary-600/10 border border-primary-600/30 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-3xl font-bold text-primary-400 tracking-wider">{traktPin.userCode}</div>
+                      <div className="flex items-center gap-1 text-dark-400 text-sm">
+                        <OctoLoader size={14} />
+                        Esperando autorización...
+                      </div>
+                    </div>
+                    <a
+                      href={traktPin.verificationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary-400 text-sm hover:text-primary-300"
+                    >
+                      Introduce el código en trakt.tv/activate
+                      <ExternalLink size={14} />
+                    </a>
+                    <button onClick={handleTraktPinCancel} className="text-dark-400 text-sm hover:text-red-400">
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+                {traktPinError && (
+                  <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3 mt-2">
+                    <AlertCircle size={16} />
+                    {traktPinError}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="mt-4 pt-4 border-t border-dark-700">
@@ -849,7 +1001,7 @@ export default function Settings() {
                 <li>Regístrate en trakt.tv</li>
                 <li>Ve a Settings → Your API Applications → New</li>
                 <li>Rellena el formulario (redirect URI puede ser cualquier URL)</li>
-                <li>Copia el &quot;Client ID&quot; y pégalo arriba</li>
+                <li>Copia el &quot;Client ID&quot; (y el &quot;Client Secret&quot; para conectar tu cuenta)</li>
               </ol>
               <a
                 href="https://trakt.tv/oauth/applications"
@@ -1017,6 +1169,18 @@ export default function Settings() {
                 ) : (
                   <span className="flex items-center gap-1 text-dark-500">
                     <AlertCircle size={14} /> No configurada
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-dark-400">Trakt cuenta</span>
+                {localStorage.getItem('octostream_trakt_token') ? (
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Check size={14} /> Conectada{localStorage.getItem('octostream_trakt_user') ? ` (@${localStorage.getItem('octostream_trakt_user')})` : ''}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-dark-500">
+                    <AlertCircle size={14} /> No conectada
                   </span>
                 )}
               </div>

@@ -6,6 +6,12 @@ import {
   letterboxdPlugin,
   filmaffinityPlugin,
   getTraktUserLists,
+  getTraktToken,
+  getTraktMyLists,
+  traktDeviceCode,
+  traktDeviceToken,
+  traktMe,
+  clearTraktTokens,
   __clearExtProvidersCache,
 } from './extProviders.js'
 
@@ -147,6 +153,120 @@ describe('Trakt plugin', () => {
     localStorage.setItem('octostream_trakt_key', 'cid')
     const cats = traktPlugin.manifest.catalogs
     expect(cats.some(c => c.id === 'user-list-trakt-most-anticipated-movies')).toBe(true)
+  })
+
+  it('device code flow: POSTs client_id and returns user code', async () => {
+    let body
+    vi.stubGlobal('fetch', vi.fn(async (url, opts) => {
+      body = JSON.parse(opts.body)
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          device_code: 'dev123', user_code: 'ABCD-1234',
+          verification_url: 'https://trakt.tv/activate', expires_in: 600, interval: 5,
+        }),
+      }
+    }))
+    const dc = await traktDeviceCode('cid')
+    expect(body).toEqual({ client_id: 'cid' })
+    expect(dc).toMatchObject({ deviceCode: 'dev123', userCode: 'ABCD-1234', interval: 5 })
+  })
+
+  it('device token poll: null while pending, saves tokens on success', async () => {
+    // 400 = authorization_pending
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({}) })))
+    expect(await traktDeviceToken('dev', 'cid', 'sec')).toBeNull()
+    expect(getTraktToken()).toBe('')
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({
+        access_token: 'tok1', refresh_token: 'ref1',
+        created_at: Math.floor(Date.now() / 1000), expires_in: 7776000,
+      }),
+    })))
+    const res = await traktDeviceToken('dev', 'cid', 'sec')
+    expect(res.access_token).toBe('tok1')
+    expect(getTraktToken()).toBe('tok1')
+    expect(localStorage.getItem('octostream_trakt_refresh')).toBe('ref1')
+    clearTraktTokens()
+    expect(getTraktToken()).toBe('')
+    expect(localStorage.getItem('octostream_trakt_refresh') || '').toBe('')
+  })
+
+  it('device token poll: throws on definitive failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 410,
+      json: async () => ({ error: 'expired', error_description: 'Code expired' }),
+    })))
+    await expect(traktDeviceToken('dev', 'cid', 'sec')).rejects.toThrow('Code expired')
+  })
+
+  it('exposes personal catalogs only when connected', () => {
+    localStorage.setItem('octostream_trakt_key', 'cid')
+    expect(traktPlugin.manifest.catalogs.some(c => c.id === 'my-watchlist-movies')).toBe(false)
+    localStorage.setItem('octostream_trakt_token', 'tok')
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ([]) })))
+    const cats = traktPlugin.manifest.catalogs
+    expect(cats.some(c => c.id === 'my-watchlist-movies')).toBe(true)
+    expect(cats.some(c => c.id === 'my-watchlist-shows')).toBe(true)
+    expect(cats.some(c => c.id === 'my-rec-shows')).toBe(true)
+  })
+
+  it('fetches watchlist with Authorization Bearer header', async () => {
+    localStorage.setItem('octostream_trakt_key', 'cid')
+    localStorage.setItem('octostream_trakt_token', 'tok')
+    let captured
+    vi.stubGlobal('fetch', vi.fn(async (url, opts) => {
+      captured = { url: String(url), headers: opts.headers }
+      return {
+        ok: true, status: 200,
+        json: async () => ([
+          { movie: { title: 'Dune', year: 2021, ids: { imdb: 'tt1160419', tmdb: 438631 } } },
+        ]),
+      }
+    }))
+    const items = await traktPlugin.getCatalog({ id: 'my-watchlist-movies', top: 50 })
+    expect(captured.url).toContain('/users/me/watchlist/movies')
+    expect(captured.headers.Authorization).toBe('Bearer tok')
+    expect(items[0]).toMatchObject({ id: 'tmdb-movie-438631', type: CONTENT_TYPES.MOVIE })
+  })
+
+  it('fetches own lists and their items with auth headers', async () => {
+    localStorage.setItem('octostream_trakt_key', 'cid')
+    localStorage.setItem('octostream_trakt_token', 'tok')
+    localStorage.setItem('octostream_trakt_mylists', JSON.stringify({
+      lists: [{ slug: 'favoritas-2024', name: 'Favoritas 2024' }],
+    }))
+    expect(getTraktMyLists()[0].slug).toBe('favoritas-2024')
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ([]) })))
+    expect(traktPlugin.manifest.catalogs.some(c => c.id === 'my-list-favoritas-2024')).toBe(true)
+
+    let url
+    vi.stubGlobal('fetch', vi.fn(async (u) => {
+      url = String(u)
+      return {
+        ok: true, status: 200,
+        json: async () => ([
+          { type: 'movie', movie: { title: 'Alien', year: 1979, ids: { imdb: 'tt0078748', tmdb: 348 } } },
+        ]),
+      }
+    }))
+    const items = await traktPlugin.getCatalog({ id: 'my-list-favoritas-2024', top: 50 })
+    expect(url).toContain('/users/me/lists/favoritas-2024/items')
+    expect(items[0]).toMatchObject({ id: 'tmdb-movie-348', name: 'Alien' })
+  })
+
+  it('traktMe caches the connected username', async () => {
+    localStorage.setItem('octostream_trakt_key', 'cid')
+    localStorage.setItem('octostream_trakt_token', 'tok')
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ user: { username: 'octofan', ids: { slug: 'octofan' } } }),
+    })))
+    const me = await traktMe()
+    expect(me.username).toBe('octofan')
+    expect(localStorage.getItem('octostream_trakt_user')).toBe('octofan')
   })
 })
 

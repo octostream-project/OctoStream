@@ -13,7 +13,7 @@
 // propio plugin resuelve a TMDB vía /find o búsqueda.
 
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
-import { getItemSync } from '../../utils/storage.js'
+import { getItemSync, setItemSync } from '../../utils/storage.js'
 import { tmdbPlugin, findByImdb, searchMulti } from './tmdb.js'
 
 const TIMEOUT_MS = 15000
@@ -276,6 +276,152 @@ export function getTraktUserLists() {
   } catch { return [] }
 }
 
+// --- OAuth device auth (PIN en trakt.tv/activate) ---
+// Da acceso a los endpoints personales: watchlist, recomendaciones y las
+// listas propias del usuario. Requiere Client ID + Client Secret (misma app
+// de trakt.tv/oauth/applications). Tokens en octostream_trakt_token/_refresh.
+
+const TRAKT_API = 'https://api.trakt.tv'
+
+export function getTraktSecret() {
+  try { return (getItemSync('octostream_trakt_secret') || '').trim() } catch { return '' }
+}
+export function getTraktToken() {
+  try { return (getItemSync('octostream_trakt_token') || '').trim() } catch { return '' }
+}
+
+function saveTraktTokens(d) {
+  try {
+    setItemSync('octostream_trakt_token', d.access_token || '')
+    setItemSync('octostream_trakt_refresh', d.refresh_token || '')
+    const created = d.created_at || Math.floor(Date.now() / 1000)
+    setItemSync('octostream_trakt_token_exp', String((created + (d.expires_in || 7776000)) * 1000))
+  } catch { /* almacenamiento lleno/deshabilitado */ }
+}
+
+export function clearTraktTokens() {
+  try {
+    for (const k of ['octostream_trakt_token', 'octostream_trakt_refresh',
+      'octostream_trakt_token_exp', 'octostream_trakt_user', 'octostream_trakt_mylists']) {
+      setItemSync(k, '')
+    }
+  } catch { /* ignore */ }
+}
+
+// Paso 1: pedir el código que el usuario introduce en trakt.tv/activate.
+export async function traktDeviceCode(clientId) {
+  const res = await fetch(`${TRAKT_API}/oauth/device/code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined,
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const d = await res.json()
+  return {
+    deviceCode: d.device_code,
+    userCode: d.user_code,
+    verificationUrl: d.verification_url || 'https://trakt.tv/activate',
+    expiresIn: d.expires_in || 600,
+    interval: Math.max(2, d.interval || 5),
+  }
+}
+
+// Paso 2 (polling): null = pendiente; lanza error en fallo definitivo.
+export async function traktDeviceToken(deviceCode, clientId, clientSecret) {
+  const res = await fetch(`${TRAKT_API}/oauth/device/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: deviceCode, client_id: clientId, client_secret: clientSecret }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined,
+  })
+  if (res.status === 400) return null // aún no autorizado
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(d?.error_description || d?.error || `HTTP ${res.status}`)
+  saveTraktTokens(d)
+  return d
+}
+
+// Headers con Bearer; refresca el token si quedan <7 días (duran ~3 meses).
+let traktRefreshing = null
+export async function getTraktAuthHeaders() {
+  const key = getTraktKey()
+  let token = getTraktToken()
+  if (!key || !token) return null
+  const exp = parseInt(getItemSync('octostream_trakt_token_exp') || '0', 10)
+  const refresh = (getItemSync('octostream_trakt_refresh') || '').trim()
+  if (exp && Date.now() > exp - 7 * 86400000 && refresh) {
+    traktRefreshing = traktRefreshing || (async () => {
+      try {
+        const res = await fetch(`${TRAKT_API}/oauth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            refresh_token: refresh,
+            client_id: key,
+            client_secret: getTraktSecret(),
+            redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+            grant_type: 'refresh_token',
+          }),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined,
+        })
+        const d = await res.json().catch(() => ({}))
+        if (res.ok && d.access_token) saveTraktTokens(d)
+      } catch { /* conservar el token actual */ } finally { traktRefreshing = null }
+    })()
+    await traktRefreshing
+    token = getTraktToken()
+  }
+  return { ...TRAKT_HEADERS(key), Authorization: `Bearer ${token}` }
+}
+
+// Perfil del usuario conectado (para mostrar en ajustes). Se cachea en
+// localStorage para no pedirlo en cada arranque.
+export async function traktMe(signal) {
+  const headers = await getTraktAuthHeaders()
+  if (!headers) return null
+  try {
+    const d = await fetchJson(`${TRAKT_API}/users/settings`, { signal, headers })
+    const user = d?.user || null
+    if (user?.username) setItemSync('octostream_trakt_user', user.username)
+    return user
+  } catch { return null }
+}
+
+// Catálogos personales disponibles cuando hay token OAuth.
+const TRAKT_PERSONAL = [
+  ['my-watchlist-movies', 'Mi watchlist · Películas', '/users/me/watchlist/movies', 'movie', CONTENT_TYPES.MOVIE],
+  ['my-watchlist-shows', 'Mi watchlist · Series', '/users/me/watchlist/shows', 'show', CONTENT_TYPES.SERIES],
+  ['my-rec-movies', 'Recomendadas · Películas', '/recommendations/movies', 'movie', CONTENT_TYPES.MOVIE],
+  ['my-rec-shows', 'Recomendadas · Series', '/recommendations/shows', 'show', CONTENT_TYPES.SERIES],
+]
+const TRAKT_PERSONAL_BY_ID = new Map(TRAKT_PERSONAL.map(l => [l[0], l]))
+
+// Las listas propias del usuario no se pueden descubrir síncronamente desde
+// el getter de catalogs: se piden en segundo plano y se cachean en
+// octostream_trakt_mylists — aparecen en la siguiente lectura del sidebar.
+export function getTraktMyLists() {
+  try {
+    const raw = getItemSync('octostream_trakt_mylists') || ''
+    return raw ? (JSON.parse(raw).lists || []) : []
+  } catch { return [] }
+}
+
+let myListsFetchedAt = 0
+export async function refreshTraktMyLists() {
+  if (!getTraktToken() || Date.now() - myListsFetchedAt < CACHE_TTL_MS) return
+  myListsFetchedAt = Date.now()
+  try {
+    const headers = await getTraktAuthHeaders()
+    const data = await fetchJson(`${TRAKT_API}/users/me/lists`, { headers })
+    const lists = (data || []).map(l => ({
+      slug: l?.ids?.slug || '', name: l?.name || l?.ids?.slug || '',
+      items: l?.item_count || 0,
+    })).filter(l => l.slug)
+    setItemSync('octostream_trakt_mylists', JSON.stringify({ lists, ts: Date.now() }))
+  } catch { /* mantener la caché anterior */ }
+}
+
 function mapTraktItem(raw, kind) {
   const obj = raw?.[kind] || raw?.movie || raw?.show || raw
   if (!obj) return null
@@ -310,6 +456,22 @@ async function traktGetCatalog({ id, skip = 0, top = 50, signal }) {
     const data = await fetchJson(
       `https://api.trakt.tv/users/${ref}/items?page=${page}&limit=${top}`, { signal, headers })
     return (data || []).map(it => mapTraktItem(it, it.type === 'show' ? 'show' : 'movie')).filter(Boolean)
+  }
+
+  // Catálogos personales (requieren token OAuth): watchlist, recomendadas
+  // y listas propias — endpoints /users/me/* con Authorization: Bearer.
+  const myList = id.match(/^my-list-(.+)$/)
+  const personal = myList
+    ? [null, null, `/users/me/lists/${myList[1]}/items`, null]
+    : TRAKT_PERSONAL_BY_ID.get(id)
+  if (personal) {
+    const authHeaders = await getTraktAuthHeaders()
+    if (!authHeaders) return []
+    const [, , endpoint, kind] = personal
+    const data = await fetchJson(
+      `https://api.trakt.tv${endpoint}?page=${page}&limit=${top}`, { signal, headers: authHeaders })
+    return (data || []).map(it =>
+      mapTraktItem(it, kind || (it.type === 'show' ? 'show' : 'movie'))).filter(Boolean)
   }
 
   const list = TRAKT_BY_ID.get(id)
@@ -364,7 +526,16 @@ Object.defineProperty(traktManifest, 'catalogs', {
       name: `Trakt · ${l.name}`,
       type: CONTENT_TYPES.MOVIE,
     }))
-    return [...fixed, ...custom]
+    // Cuenta conectada por PIN: watchlist, recomendadas y listas propias.
+    let personal = []
+    if (getTraktToken()) {
+      personal = TRAKT_PERSONAL.map(([id, name, , , type]) => ({ id, name: `Trakt · ${name}`, type }))
+      refreshTraktMyLists() // refresco en segundo plano de las listas propias
+      for (const l of getTraktMyLists()) {
+        personal.push({ id: `my-list-${l.slug}`, name: `Trakt · ${l.name}`, type: CONTENT_TYPES.MOVIE })
+      }
+    }
+    return [...fixed, ...personal, ...custom]
   },
 })
 
