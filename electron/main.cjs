@@ -1164,10 +1164,20 @@ async function getTorrentEngine() {
   if (!torrentEngine) {
     let mod
     if (torrentModulePath) {
-      // Dentro del asar import(file://) no está garantizado — se lee el
-      // bundle y se importa como módulo data:, que siempre funciona.
-      const src = fs.readFileSync(torrentModulePath, 'utf8')
-      mod = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`)
+      let bundlePath = torrentModulePath
+      // import() desde app.asar puede fallar según la versión de Electron;
+      // además el bundle hace createRequire(import.meta.url), que exige una
+      // URL file:// real. Se extrae a temp y se importa desde disco.
+      if (bundlePath.includes('app.asar')) {
+        const dest = path.join(app.getPath('temp'), 'octostream-torrent.bundle.mjs')
+        try {
+          if (!fs.existsSync(dest) || fs.statSync(dest).size !== fs.statSync(bundlePath).size) {
+            fs.copyFileSync(bundlePath, dest)
+          }
+        } catch { /* si ya existe lo usamos igual */ }
+        bundlePath = fs.existsSync(dest) ? dest : bundlePath
+      }
+      mod = await import(require('url').pathToFileURL(bundlePath).href)
     } else {
       mod = require('./torrent.cjs')
     }

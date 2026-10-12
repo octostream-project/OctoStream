@@ -160,8 +160,10 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   `http://127.0.0.1:<port>/stream` con Range requests; selección de episodio
   idéntica a `src/utils/torrentPick.js`. En el asar no hay node_modules:
   `scripts/bundle-torrent.mjs` (rolldown) genera `electron/torrent.bundle.mjs`
-  self-contained, que el main importa como módulo `data:` (import de file://
-  dentro del asar no es fiable). En dev sin bundle se usa `torrent.cjs` +
+  self-contained; el main lo extrae de `app.asar` a `temp` y lo importa por
+  URL `file://` — el bundle usa `createRequire(import.meta.url)`, que exige
+  una URL file real (un módulo `data:` lanza ERR_INVALID_ARG_VALUE). En dev
+  sin bundle se usa `torrent.cjs` +
   `webtorrent` de npm. `src/utils/torrentEngine.js` es la fachada compartida:
   Android → plugin Capacitor, Electron → `window.octostream.torrent`.
   Archivos mkv/avi/etc. del torrent pasan por el remux `/ffmpeg` (Chromium no
