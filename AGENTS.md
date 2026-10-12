@@ -105,7 +105,8 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - Seguridad LAN (SyncServer :8765, estilo LocalSend):
   - Cada dispositivo tiene identidad persistente: `deviceId` (UUID), alias
     generado ("Pulpo Sabio") y fingerprint `XXXX-XXXX` (SHA-256 de un secreto
-    local). Se anuncia en `/ping` y por broadcast UDP :8766 cada ~2.5s —
+    local). Se anuncia en `/ping` y por UDP :8766 (multicast 239.255.60.60
+    + broadcast 255.255.255.255, ~2.5s) —
     los demás OctoStream se descubren solos sin barrer el /24 (el barrido
     queda como fallback para versiones viejas).
   - Emparejamiento: `POST /pair {deviceId, alias, fingerprint}` → si es nuevo

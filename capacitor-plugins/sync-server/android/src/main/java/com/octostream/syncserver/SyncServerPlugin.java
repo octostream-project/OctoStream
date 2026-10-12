@@ -19,6 +19,7 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.MulticastSocket;
 import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -647,10 +648,14 @@ public class SyncServerPlugin extends Plugin {
 
     // ── Descubrimiento UDP (estilo LocalSend) ────────────────────────────
     // Cada dispositivo anuncia {deviceId, alias, fingerprint, port} por
-    // broadcast cada ~2.5s; los demás escuchan y responden una vez al ver un
-    // dispositivo nuevo (descubrimiento mutuo rápido). Sustituye al barrido
-    // de las 254 IPs del /24.
-    private DatagramSocket discSocket;
+    // multicast + broadcast cada ~2.5s; los demás escuchan y responden una
+    // vez al ver un dispositivo nuevo (descubrimiento mutuo rápido).
+    // LocalSend usa multicast (224.0.0.167): muchos APs filtran el broadcast
+    // 255.255.255.255 pero sí reenvían multicast, y algunos Android solo
+    // reciben broadcast si el socket escucha también multicast. Un solo
+    // MulticastSocket recibe ambos tipos de paquete en el mismo puerto.
+    private static final String DISC_GROUP = "239.255.60.60";
+    private MulticastSocket discSocket;
     private Thread announceThread;
     private Thread listenThread;
     private volatile boolean discRunning = false;
@@ -664,10 +669,23 @@ public class SyncServerPlugin extends Plugin {
         if (discRunning) return;
         discRunning = true;
         try {
-            discSocket = new DatagramSocket(null);
+            discSocket = new MulticastSocket(null);
             discSocket.setReuseAddress(true);
             discSocket.bind(new InetSocketAddress(DISC_PORT));
             discSocket.setBroadcast(true);
+            // Unirse al grupo en cada interfaz utilizable (joinGroup con
+            // NetworkInterface null puede elegir una interfaz equivocada
+            // en dispositivos multihomed — TV con Ethernet + WiFi).
+            InetAddress group = InetAddress.getByName(DISC_GROUP);
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            while (ifs != null && ifs.hasMoreElements()) {
+                NetworkInterface ni = ifs.nextElement();
+                try {
+                    if (!ni.isUp() || ni.isLoopback() || !ni.supportsMulticast()) continue;
+                    discSocket.joinGroup(new InetSocketAddress(group, DISC_PORT), ni);
+                } catch (Exception ignored) {}
+            }
+            discSocket.setTimeToLive(4); // basta para cruzar un par de switches
             WifiManager wm = (WifiManager) getContext().getApplicationContext()
                     .getSystemService(Context.WIFI_SERVICE);
             if (wm != null) {
@@ -714,11 +732,21 @@ public class SyncServerPlugin extends Plugin {
 
     private void announceLoop() {
         byte[] payload = announcement();
+        // Dos destinos por ciclo: el grupo multicast (el que atraviesa los
+        // APs que filtran broadcast, como hace LocalSend) y el broadcast
+        // clásico por si el AP bloquea multicast (IGMP snooping agresivo).
+        InetAddress group = null;
+        InetAddress bcast = null;
+        try { group = InetAddress.getByName(DISC_GROUP); } catch (Exception ignored) {}
+        try { bcast = InetAddress.getByName("255.255.255.255"); } catch (Exception ignored) {}
         while (discRunning) {
             try {
-                DatagramPacket p = new DatagramPacket(payload, payload.length,
-                        InetAddress.getByName("255.255.255.255"), DISC_PORT);
-                discSocket.send(p);
+                if (group != null) {
+                    discSocket.send(new DatagramPacket(payload, payload.length, group, DISC_PORT));
+                }
+                if (bcast != null) {
+                    discSocket.send(new DatagramPacket(payload, payload.length, bcast, DISC_PORT));
+                }
                 Thread.sleep(2500);
             } catch (InterruptedException e) {
                 break;
