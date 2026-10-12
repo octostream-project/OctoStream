@@ -691,6 +691,8 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0f172a',
     title: 'OctoStream',
+    icon: path.join(__dirname, '..', 'dist', 'logo-symbol.png'),
+    autoHideMenuBar: true, // sin barra de menú — misma apariencia que la app móvil
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

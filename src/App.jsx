@@ -358,6 +358,9 @@ export default function App() {
   }, [location.pathname])
 
   const android = isAndroidNative()
+  // La app de escritorio usa el mismo layout que Android (barra de iconos
+  // superior, sin sidebar): misma ejecución y apariencia en todas las apps.
+  const appShell = android || isElectron()
 
   // Subscribe to WARP status to show blocking overlay when connecting.
   // The overlay blocks ALL UI interaction while WARP is down, preventing
@@ -403,12 +406,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Sidebar only on web/Electron; Android uses TopNav */}
-        {!android && <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
+        {/* Sidebar solo en la versión web de navegador; las apps usan TopNav */}
+        {!appShell && <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
 
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Header with hamburger only on web/Electron */}
-          {!android && (
+          {/* Header con hamburguesa solo en la versión web de navegador */}
+          {!appShell && (
             <header className="sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-dark-900 border-b border-dark-800">
               <button
                 onClick={() => setSidebarOpen(true)}
@@ -423,11 +426,11 @@ export default function App() {
             </header>
           )}
 
-          {/* Top navigation bar only on Android - always visible above content */}
-          {android && <BottomNav />}
+          {/* Barra de navegación superior en las apps (Android y escritorio) */}
+          {appShell && <BottomNav />}
 
-          {/* Main content: scrollable on Android, normal on web */}
-          <main className={`flex-1 ${android ? 'overflow-y-auto' : ''}`}>
+          {/* Main content: scroll interno en las apps, normal en web */}
+          <main className={`flex-1 ${appShell ? 'overflow-y-auto' : ''}`}>
             <Suspense fallback={<div className="flex items-center justify-center h-64 text-white/60">Cargando...</div>}>
               <Routes>
                 <Route path="/" element={<Home />} />
