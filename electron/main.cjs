@@ -11,6 +11,11 @@ const crypto = require('crypto')
 const { URL } = require('url')
 const { SyncServer } = require('./sync-server.cjs')
 const Youtube = require('./youtube.cjs')
+// El motor torrent llega bundleado (electron/torrent.bundle.mjs, generado
+// por scripts/bundle-torrent.mjs) porque el asar no incluye node_modules;
+// en dev sin bundle se usa el fuente (torrent.cjs + webtorrent de npm).
+const torrentBundlePath = path.join(__dirname, 'torrent.bundle.mjs')
+const torrentModulePath = fs.existsSync(torrentBundlePath) ? torrentBundlePath : null
 
 // ─── Aether / WARP local proxy ──────────────────────────────────────────────
 // El mismo cliente WARP userspace que en Android (CluvexStudio/Aether):
@@ -731,7 +736,9 @@ function resolveFfmpeg() {
 // servidores (Cloudflare) durante el handshake.
 function remuxFetch(targetUrl, headers, depth, cb) {
   if (depth > 5) return cb(new Error('too many redirects'))
-  const target = validProxyTarget(targetUrl)
+  // El target ya viene validado por remuxStream (incl. el caso loopback del
+  // servidor torrent); los redirects se re-validan aquí.
+  const target = depth === 0 ? new URL(targetUrl) : validProxyTarget(targetUrl)
   if (!target) return cb(new Error('forbidden url'))
   const isHttps = target.protocol === 'https:'
   const lib = isHttps ? https : http
@@ -758,7 +765,18 @@ function remuxFetch(targetUrl, headers, depth, cb) {
 }
 
 function remuxStream(targetUrl, extraHeaders, res) {
-  const target = validProxyTarget(targetUrl)
+  // Loopback solo si es el servidor de streaming del torrent engine
+  // (remux de .mkv/.avi P2P); cualquier otra IP privada sigue bloqueada.
+  let target = validProxyTarget(targetUrl)
+  if (!target) {
+    try {
+      const u = new URL(targetUrl)
+      const tp = typeof torrentStreamPort === 'function' ? torrentStreamPort() : 0
+      if (tp && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && Number(u.port) === tp) {
+        target = u
+      }
+    } catch { /* URL inválida */ }
+  }
   if (!target) {
     res.writeHead(400); res.end('Invalid or forbidden url')
     return
@@ -1139,6 +1157,41 @@ for (const [method, fn] of Object.entries({
   ipcMain.handle(method, (_event, arg) => Youtube[fn](arg || {}))
 }
 
+// Torrent P2P — misma superficie que el plugin TorrentEngine de Android
+// (jlibtorrent) implementado con WebTorrent en el main.
+let torrentEngine = null
+async function getTorrentEngine() {
+  if (!torrentEngine) {
+    let mod
+    if (torrentModulePath) {
+      // Dentro del asar import(file://) no está garantizado — se lee el
+      // bundle y se importa como módulo data:, que siempre funciona.
+      const src = fs.readFileSync(torrentModulePath, 'utf8')
+      mod = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`)
+    } else {
+      mod = require('./torrent.cjs')
+    }
+    const E = mod.TorrentEngine || mod.default?.TorrentEngine
+    torrentEngine = new E({
+      sendEvent: (name, data) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          try { w.webContents.send('torrent-event', { name, data }) } catch {}
+        }
+      },
+      downloadDir: path.join(app.getPath('temp'), 'octostream-torrent'),
+    })
+  }
+  return torrentEngine
+}
+// Puerto del servidor de streaming del torrent (para dejar pasar loopback
+// en /ffmpeg cuando el archivo es mkv/avi y hay que remultiplexar).
+function torrentStreamPort() {
+  return torrentEngine?.server?.address()?.port || 0
+}
+ipcMain.handle('torrent:start', async (_e, arg) => (await getTorrentEngine()).start(arg || {}))
+ipcMain.handle('torrent:stop', async () => (await getTorrentEngine()).stop())
+ipcMain.handle('torrent:status', async () => (await getTorrentEngine()).status())
+
 // Pantalla completa de la ventana: la app Android reproduce siempre a
 // pantalla completa; en escritorio el player se comporta igual.
 ipcMain.handle('win:fullscreen', (event, on) => {
@@ -1364,6 +1417,10 @@ app.on('window-all-closed', () => {
   if (syncServer) {
     syncServer.stop().catch(() => {})
     syncServer = null
+  }
+  if (torrentEngine) {
+    torrentEngine.stop().catch(() => {})
+    torrentEngine = null
   }
   if (process.platform !== 'darwin') {
     app.quit()

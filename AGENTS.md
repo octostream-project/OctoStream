@@ -152,6 +152,21 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   - Tokens del emisor: `localStorage octostream_pair_tokens` (deviceId→token).
   - Las rechazadas quedan en lista de sesión y no re-notifican. Cooldown
     anti-spam: máx. 1 `pairRequest` por IP cada 30s.
+- Torrent P2P en desktop (Linux/Windows): `electron/torrent.cjs` implementa la
+  misma superficie del plugin Android `@octostream/torrent-engine` (`start/
+  stop/status` + evento `torrentProgress`) con **webtorrent** en el proceso
+  principal — TCP/UDP/DHT/trackers, sin binarios nativos (los módulos nativos
+  opcionales uTP/WebRTC se stubbean). Sirve el archivo elegido en
+  `http://127.0.0.1:<port>/stream` con Range requests; selección de episodio
+  idéntica a `src/utils/torrentPick.js`. En el asar no hay node_modules:
+  `scripts/bundle-torrent.mjs` (rolldown) genera `electron/torrent.bundle.mjs`
+  self-contained, que el main importa como módulo `data:` (import de file://
+  dentro del asar no es fiable). En dev sin bundle se usa `torrent.cjs` +
+  `webtorrent` de npm. `src/utils/torrentEngine.js` es la fachada compartida:
+  Android → plugin Capacitor, Electron → `window.octostream.torrent`.
+  Archivos mkv/avi/etc. del torrent pasan por el remux `/ffmpeg` (Chromium no
+  reproduce Matroska) — `remuxStream` acepta loopback solo para el puerto del
+  servidor torrent.
 - El DataSource de ExoPlayer con WARP usa validación TLS normal (sin trust-all).
 - Logs: no volcar headers ni URLs completas firmadas a logcat (host solamente).
 - URLs loopback (`127.0.0.1`/`localhost`) **nunca** van por el proxy WARP — el

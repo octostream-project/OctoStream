@@ -6,6 +6,7 @@ import { isAndroidNative } from '../utils/platform.js'
 import { createAndroidHlsLoader, setManifestBaseUrl } from '../utils/hlsAndroidLoader.js'
 import { setPlayerOpen, markPlayerClosed } from '../utils/tvNavigation.js'
 import { playStream, stopPlayback, isExoPlayerAvailable, playEmbed, playRelay, resolveEmbed, setChannels, setEpisodes, setNextEpisode, setCastRequestListener, setLoadingText, setPlaybackStateListener } from '../utils/exoPlayer.js'
+import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
 import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { pluginManager } from '../plugins/manager.js'
@@ -214,10 +215,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     setTorrentProgress(null)
     // Si el mini-player PiP sigue reproduciendo la URL loopback del torrent,
     // parar el motor cortaría su stream — solo se para si no hay PiP activo.
+    const doStop = () => getTorrentEngine().then(te => te?.stop()).catch(() => {})
     import('@octostream/exo-player').then(m => m.ExoPlayer.isPipActive?.()).then(r => {
       if (r?.active) return
-      return import('@octostream/torrent-engine').then(m2 => m2.TorrentEngine.stop())
-    }).catch(() => import('@octostream/torrent-engine').then(m2 => m2.TorrentEngine.stop()).catch(() => {}))
+      doStop()
+    }).catch(doStop)
   }, [])
 
   useEffect(() => {
@@ -488,6 +490,47 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       return null
     }
 
+    // Arranque del motor P2P compartido: jlibtorrent (plugin Android) o
+    // WebTorrent en el main de Electron — misma superficie vía fachada.
+    const startTorrentEngine = async () => {
+      setTorrentProgress({ state: 'metadata', progress: 0, peers: 0 })
+      const TorrentEngine = await getTorrentEngine()
+      if (!TorrentEngine) throw new Error('Motor torrent no disponible')
+      torrentListenerRef.current = await TorrentEngine.addListener('torrentProgress', ev => {
+        if (!cancelled) setTorrentProgress(ev)
+        // El overlay de carga cubre el vídeo — progreso en vivo.
+        setLoadingText(torrentStatusText(ev))
+        // Watchdog: 0 peers sostenidos con descarga incompleta = torrent
+        // muerto — se avisa y se cierra para elegir otro enlace.
+        if (cancelled || !ev) return
+        if (ev.peers === 0 && (ev.progress || 0) < 1 && playerStalledRef.current) {
+          if (!noPeersSinceRef.current) {
+            noPeersSinceRef.current = Date.now()
+          } else if (Date.now() - noPeersSinceRef.current > 75000) {
+            noPeersSinceRef.current = 0
+            console.warn('[Player] torrent sin peers durante 75s — abortando')
+            setLoadingText('Sin fuentes (0 peers) — cerrando…')
+            setTimeout(() => {
+              stopTorrentEngine()
+              stopPlayback().catch(() => {})
+              setPlayerOpen(false)
+            }, 2500)
+          }
+        } else {
+          noPeersSinceRef.current = 0
+        }
+      })
+      const res = await TorrentEngine.start({
+        url: stream.url,
+        season: meta?.season ?? undefined,
+        episode: meta?.episode ?? undefined,
+        title: title || '',
+      })
+      if (cancelled) return null
+      torrentActiveRef.current = true
+      return res
+    }
+
     // On Android, use native ExoPlayer for all video playback
     // ExoPlayer handles HLS, DASH, and Widevine DRM natively without CORS issues
     // If ExoPlayer previously failed (e.g. 403 from CDN), fall back to HLS.js
@@ -534,41 +577,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       const isTorrent = stream.streamType === 'torrent'
       if (isTorrent) {
         try {
-          setTorrentProgress({ state: 'metadata', progress: 0, peers: 0 })
-          const { TorrentEngine } = await import('@octostream/torrent-engine')
-          torrentListenerRef.current = await TorrentEngine.addListener('torrentProgress', ev => {
-            if (!cancelled) setTorrentProgress(ev)
-            // El overlay de carga nativo cubre el WebView — empujar el
-            // progreso de la predescarga para que se vea en vivo.
-            setLoadingText(torrentStatusText(ev))
-            // Watchdog: 0 peers sostenidos con descarga incompleta = torrent
-            // muerto. Sin esto el player esperaría piezas eternamente. Se
-            // avisa y se cierra para poder elegir otro enlace.
-            if (cancelled || !ev) return
-            if (ev.peers === 0 && (ev.progress || 0) < 1 && playerStalledRef.current) {
-              if (!noPeersSinceRef.current) {
-                noPeersSinceRef.current = Date.now()
-              } else if (Date.now() - noPeersSinceRef.current > 75000) {
-                noPeersSinceRef.current = 0
-                console.warn('[Player] torrent sin peers durante 75s — abortando')
-                setLoadingText('Sin fuentes (0 peers) — cerrando…')
-                setTimeout(() => {
-                  stopTorrentEngine()
-                  stopPlayback().catch(() => {})
-                }, 2500)
-              }
-            } else {
-              noPeersSinceRef.current = 0
-            }
-          })
-          const res = await TorrentEngine.start({
-            url: stream.url,
-            season: meta?.season ?? undefined,
-            episode: meta?.episode ?? undefined,
-            title: title || '',
-          })
-          if (cancelled) return
-          torrentActiveRef.current = true
+          const res = await startTorrentEngine()
+          if (!res) return
           streamUrl = res.url
         } catch (e) {
           if (cancelled) return
@@ -869,12 +879,27 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       }
     }
 
+    // Torrent P2P en desktop: WebTorrent en el proceso principal sirve el
+    // archivo por HTTP loopback (mismo patrón que jlibtorrent en Android).
+    // En web sin app no hay motor — solo debrid puede con un torrent.
+    let torrentLocalUrl = null
+    let torrentNeedsRemux = false
     if (stream.streamType === 'torrent') {
-      // Sin ExoPlayer (web/Electron) no hay motor P2P: el torrent solo es
-      // reproducible si debrid ya lo convirtió a directo antes de llegar aquí.
-      setError('Los torrents necesitan Android (motor P2P) o una cuenta Debrid')
-      setLoading(false)
-      return
+      try {
+        const res = await startTorrentEngine()
+        if (!res) return
+        torrentLocalUrl = res.url
+        // Chromium no reproduce Matroska/AVI: remux por el ffmpeg empaquetado.
+        torrentNeedsRemux = /\.(mkv|avi|wmv|flv|ts|m2ts|mpg|mpeg|vob|mts|3gp|3g2|divx|asf)$/i.test(res.fileName || '')
+      } catch (e) {
+        if (cancelled) return
+        console.warn('[Player] torrent engine failed:', e?.message)
+        setTorrentProgress(null)
+        setPlayerOpen(false)
+        setError(e?.message || 'No se pudo iniciar el motor torrent')
+        setLoading(false)
+        return
+      }
     }
 
     console.log('[Player] ExoPlayer skipped, trying WebView/HLS.js fallback. exoFailed=', exoFailed)
@@ -891,7 +916,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     // For Mediaset live (dai.google.com/doubleclick), skip proxy - CDN cookie chain breaks
     const proxyUrl = window.octostream?.proxyUrl
     const isElectron = !!window.octostream?.isElectron
-    let streamUrl = stream.url
+    let streamUrl = torrentLocalUrl || stream.url
     const skipProxy = stream.streamType === 'dash' || /directos\.mediasetinfinity\.es|dai\.google\.com|doubleclick\.net/i.test(streamUrl)
     // Chromium no reproduce contenedores mkv/avi/ts: en Electron el proxy
     // local los remultiplexa con ffmpeg → fMP4 (vídeo por copia, sin coste
@@ -906,6 +931,10 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     if (needsRemux) {
       remuxTriedRef.current = true
       streamUrl = remuxFor(stream.url)
+    } else if (torrentNeedsRemux && ffmpegUrlPrefix) {
+      // Archivo mkv/avi servido por el motor torrent → remux a fMP4.
+      remuxTriedRef.current = true
+      streamUrl = ffmpegUrlPrefix + encodeURIComponent(torrentLocalUrl)
     } else if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
       streamUrl = withProxyHeaders(proxyUrl + encodeURIComponent(streamUrl), stream.headers)
     }

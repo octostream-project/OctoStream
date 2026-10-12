@@ -41,6 +41,18 @@ contextBridge.exposeInMainWorld('octostream', {
     getChannel: (arg) => ipcRenderer.invoke('youtube:get-channel', arg),
     getChannelInfo: (arg) => ipcRenderer.invoke('youtube:get-channel-info', arg),
   },
+  // Torrent P2P — equivalente del plugin TorrentEngine Android
+  // (jlibtorrent), implementado con WebTorrent en el proceso principal.
+  torrent: {
+    start: (arg) => ipcRenderer.invoke('torrent:start', arg),
+    stop: () => ipcRenderer.invoke('torrent:stop'),
+    status: () => ipcRenderer.invoke('torrent:status'),
+    on: (handler) => {
+      const wrapped = (_e, ev) => handler(ev)
+      ipcRenderer.on('torrent-event', wrapped)
+      return () => ipcRenderer.removeListener('torrent-event', wrapped)
+    },
+  },
   log: (...args) => ipcRenderer.send('renderer-log', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
   // Sync LAN (equivalente del plugin Android @optopus/sync-server): los
   // métodos devuelven promesas con la misma forma que el plugin Capacitor;

@@ -9,6 +9,7 @@ dist-electron/
 .vite/
 .gradle/
 build/
+electron/torrent.bundle.mjs
 *.node
 *.lock
 *.bin

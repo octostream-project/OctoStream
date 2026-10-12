@@ -11,7 +11,7 @@
     "build": "vite build && node scripts/compat-css.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
-    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && node scripts/fetch-aether.mjs && node scripts/fetch-ytdlp.mjs && electron-builder",
+    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && node scripts/fetch-aether.mjs && node scripts/fetch-ytdlp.mjs && node scripts/bundle-torrent.mjs && electron-builder",
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
@@ -39,6 +39,7 @@
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.3",
     "shaka-player": "^5.2.10",
+    "webtorrent": "^3.0.21",
     "zod": "^4.6.4",
     "zustand": "^5.0.15"
   },
