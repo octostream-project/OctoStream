@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { Search, Youtube, Clock, Eye, X, History, Filter, ArrowUpDown } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
-import { searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube } from '../utils/youtube.js'
+import { searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube, dedupeYouTubeItems } from '../utils/youtube.js'
 import { isAndroidNative } from '../utils/platform.js'
 import { useStore } from '../store/useStore.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -25,29 +25,7 @@ function formatViews(views) {
   return `${views} vistas`
 }
 
-// Extrae el videoId de YouTube para deduplicar directos repetidos.
-// Acepta watch?v=, /embed/, youtu.be/ y devuelve null si no encaja.
-function youtubeVideoId(url) {
-  if (!url || typeof url !== 'string') return null
-  const m = url.match(/(?:watch\?v=|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/)
-  return m ? m[1] : url
-}
-
-// Deduplica una lista de resultados de YouTube por videoId conservando el orden.
-function dedupeByVideoId(items) {
-  const seen = new Set()
-  const out = []
-  for (const it of items) {
-    const id = youtubeVideoId(it?.url)
-    if (!id) continue
-    if (seen.has(id)) continue
-    seen.add(id)
-    out.push(it)
-  }
-  return out
-}
-
-// Duration filters (YouTube-style)
+// Duration filters (YouTube-style)// Duration filters (YouTube-style)
 const DURATION_FILTERS = [
   { id: 'all', label: 'Todos', test: () => true },
   { id: 'short', label: '< 4 min', test: (d) => d > 0 && d < 240 },
@@ -197,10 +175,12 @@ export default function YouTube() {
       if (abort.aborted) return
       if (res === null) {
         setError('YouTube search is only available on Android')
+      } else if (res.error) {
+        setError(`Error en la búsqueda: ${res.error}`)
       } else if (res.items.length === 0) {
         setError('No se encontraron resultados')
       } else {
-        setResults(dedupeByVideoId(res.items))
+        setResults(dedupeYouTubeItems(res.items))
         setNextPage(res.nextPage)
       }
     } catch (e) {
@@ -219,26 +199,23 @@ export default function YouTube() {
     setLoadingMore(true)
     try {
       const res = await searchYouTubeFull(q, nextPage)
-      if (res && res.items.length > 0) {
-        setResults(prev => {
-          const seen = new Set(prev.map(i => youtubeVideoId(i.url)).filter(Boolean))
-          const merged = [...prev, ...res.items.filter(i => {
-            const id = youtubeVideoId(i.url)
-            return id && !seen.has(id) && !seen.add(id)
-          })]
-          return merged
-        })
+      if (res === null || res.error) {
+        // Fallo del plugin/extractor: conservar nextPage para poder reintentar.
+        setError(`No se pudo cargar la página ${page + 1}${res?.error ? `: ${res.error}` : ''}`)
+      } else if (res.items.length > 0) {
+        setError(null)
+        setResults(prev => dedupeYouTubeItems([...prev, ...res.items]))
         setNextPage(res.nextPage)
         setPage(p => p + 1)
       } else {
-        setNextPage(null)
+        // Página vacía: puede haber más continuaciones (YouTube a veces
+        // devuelve páginas solo con items no-vídeo que el extractor filtra).
+        setNextPage(res.nextPage)
       }
-    } catch {
-      setNextPage(null)
     } finally {
       setLoadingMore(false)
     }
-  }, [nextPage, loadingMore, loading, query])
+  }, [nextPage, loadingMore, loading, query, page])
 
   const handlePlayVideo = async (item) => {
     setResolving(item.url)

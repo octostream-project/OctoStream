@@ -2,6 +2,28 @@ import { isAndroidNative } from './platform.js'
 
 let youtubePlugin = null
 
+// Extrae el videoId de YouTube para deduplicar directos repetidos.
+// Acepta watch?v=, /embed/, youtu.be/ y devuelve null si no encaja.
+export function youtubeVideoId(url) {
+  if (!url || typeof url !== 'string') return null
+  const m = url.match(/(?:watch\?v=|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/)
+  return m ? m[1] : url
+}
+
+// Deduplica una lista de resultados de YouTube por videoId conservando el orden.
+export function dedupeYouTubeItems(items) {
+  const seen = new Set()
+  const out = []
+  for (const it of items) {
+    const id = youtubeVideoId(it?.url)
+    if (!id) continue
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(it)
+  }
+  return out
+}
+
 async function getPlugin() {
   if (!isAndroidNative()) return null
   if (!youtubePlugin) {
@@ -167,10 +189,10 @@ export async function searchYouTubeFull(query, nextPage = null) {
       ? await wrapper.impl.searchMore({ query, nextPage })
       : await wrapper.impl.search({ query })
     console.log(`[YouTube] Search returned ${result.items?.length || 0} results, hasNext=${!!result.nextPage}`)
-    return { items: result.items || [], nextPage: result.nextPage || null }
+    return { items: result.items || [], nextPage: result.nextPage || null, error: null }
   } catch (e) {
     console.warn('[YouTube] Search failed:', e?.message)
-    return null
+    return { items: [], nextPage: null, error: e?.message || 'error desconocido' }
   }
 }
 
@@ -181,7 +203,7 @@ export async function searchYouTubeFull(query, nextPage = null) {
  */
 export async function searchYouTube(query) {
   const result = await searchYouTubeFull(query)
-  return result ? result.items : null
+  return result && !result.error ? result.items : null
 }
 
 /**
