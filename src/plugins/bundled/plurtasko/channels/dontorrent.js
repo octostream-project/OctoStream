@@ -36,10 +36,14 @@ async function sha256hex(text) {
 
 // Solve the download proof-of-work and return the .torrent URL.
 // Iterates the host list so a rotated domain doesn't kill the stream.
+// Protocolo actual (don_download.js v1.40): JSON a api_validate_pow.php SIN
+// slash final — con slash el servidor devuelve la página HTML, no el API.
+// content_id y nonce van como enteros. Puede responder captcha_required o
+// limit_exceeded (bloqueos por IP) — en ese caso no hay enlace resoluble.
 async function solvePowDownload(contentId, tabla, signal) {
   const { res } = await rotator.rotate(async (host) => {
-    const gen = await postJson(`${host}api_validate_pow.php/`, {
-      action: 'generate', content_id: contentId, tabla,
+    const gen = await postJson(`${host}api_validate_pow.php`, {
+      action: 'generate', content_id: parseInt(contentId, 10) || 0, tabla,
     }, signal)
     if (!gen?.success || !gen.challenge) return null
     let nonce = -1
@@ -49,9 +53,10 @@ async function solvePowDownload(contentId, tabla, signal) {
     }
     if (nonce < 0) return null
 
-    const val = await postJson(`${host}api_validate_pow.php/`, {
-      action: 'validate', challenge: gen.challenge, nonce: String(nonce), unescape: 'False',
+    const val = await postJson(`${host}api_validate_pow.php`, {
+      action: 'validate', challenge: gen.challenge, nonce,
     }, signal)
+    if (val?.status === 'captcha_required' || val?.status === 'limit_exceeded') return null
     return val?.success && val.download_url ? absoluteUrl(val.download_url, host) : null
   })
   return res
@@ -179,8 +184,10 @@ export const dontorrent = {
       // (wrong temporada or missing episode), return nothing rather than
       // playing the wrong episode.
       if (tabla === 'series' && season != null && episode != null) {
+        // Las celdas traen "1x01 - Piloto." (número + título): aceptar texto
+        // tras el SxEE — antes el regex exigía la celda exacta y no casaba nada.
         const rows = findMultipleMatches(info.html,
-          /<td[^>]*>\s*(\d+)x(\d+)\s*<\/td>[\s\S]*?data-content-id="(\d+)"\s+data-tabla="series"/)
+          /<td[^>]*>\s*(\d+)x(\d+)\b[^<]*<\/td>[\s\S]*?data-content-id="(\d+)"\s+data-tabla="series"/)
         const row = rows.find(r => parseInt(r[1], 10) === season && parseInt(r[2], 10) === episode)
         if (!row) return []
         contentId = parseInt(row[3], 10)
