@@ -99,6 +99,20 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 
 ## Dependencias de Electron
 
+- Player de escritorio (`electron/main.cjs` + `preload.cjs`):
+  - `/ffmpeg` en el proxy local remultiplexa mkv/avi/ts → fMP4 en streaming
+    (`-c:v copy -c:a aac`). El fetch lo hace Node (TLS, redirects, headers del
+    resolver) y ffmpeg lee de `pipe:0` — los builds estáticos con gnutls
+    crashean contra ciertos servidores HTTPS si tocan TLS directamente.
+  - Binarios: `scripts/fetch-ffmpeg.mjs` descarga eugeneware/ffmpeg-static
+    (b6.1.1 = ffmpeg 7.0.2) a `build/ffmpeg/` (gitignored) → `extraResources`
+    por plataforma. En PATH del sistema si no hay empaquetado;
+    `OCTOSTREAM_FFMPEG` fuerza ruta.
+  - `player:open-external` IPC lanza mpv/VLC reales por `spawn` con
+    allowlist de rutas habituales por SO (los esquemas `vlc://`/`mpv://` no
+    existen en escritorio).
+  - `win:fullscreen` IPC: el player va a ventana completa al abrirse como en
+    Android; `win:fullscreen-changed` sincroniza el icono del botón.
 - Se usa `electron` desde npm (`^33.0.0`). El fork `castlabs/electron-releases` se
   recomienda únicamente si se necesita reproducción Widevine certificada en desktop.
 - `electron/sync-server.cjs` es el port a Node del plugin Android

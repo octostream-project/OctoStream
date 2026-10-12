@@ -11,7 +11,19 @@ contextBridge.exposeInMainWorld('octostream', {
   proxyPort: proxy.port,
   proxyUrl: proxy.url,
   proxyBase: proxy.base,
+  // Prefijo del endpoint /ffmpeg (remux mkv/avi/ts → mp4 en el main).
+  ffmpegUrl: proxy.ffmpegUrl,
   getLanProxyUrl: () => ipcRenderer.invoke('get-lan-proxy-url'),
+  // Reproductores externos instalados en el sistema (mpv/VLC/ffplay).
+  openExternalPlayer: (arg) => ipcRenderer.invoke('player:open-external', arg),
+  // Fullscreen de la ventana (mismo comportamiento que el player Android).
+  setFullscreen: (on) => ipcRenderer.invoke('win:fullscreen', on),
+  isFullscreen: () => ipcRenderer.invoke('win:fullscreen-state'),
+  onFullscreenChange: (cb) => {
+    const wrapped = (_e, on) => cb(on)
+    ipcRenderer.on('win:fullscreen-changed', wrapped)
+    return () => ipcRenderer.removeListener('win:fullscreen-changed', wrapped)
+  },
   log: (...args) => ipcRenderer.send('renderer-log', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
   // Sync LAN (equivalente del plugin Android @optopus/sync-server): los
   // métodos devuelven promesas con la misma forma que el plugin Capacitor;

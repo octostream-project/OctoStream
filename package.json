@@ -11,7 +11,7 @@
     "build": "vite build && node scripts/compat-css.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
-    "electron:build": "vite build && electron-builder",
+    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && electron-builder",
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
@@ -78,6 +78,16 @@
       "electron/**/*"
     ],
     "linux": {
+      "extraResources": [
+        {
+          "from": "build/ffmpeg/linux-x64",
+          "to": "ffmpeg/linux-x64"
+        },
+        {
+          "from": "build/ffmpeg/linux-arm64",
+          "to": "ffmpeg/linux-arm64"
+        }
+      ],
       "target": [
         "AppImage",
         "pacman"
@@ -95,6 +105,12 @@
       }
     },
     "win": {
+      "extraResources": [
+        {
+          "from": "build/ffmpeg/win32-x64",
+          "to": "ffmpeg/win32-x64"
+        }
+      ],
       "target": [
         "nsis"
       ],

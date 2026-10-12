@@ -7,7 +7,7 @@ import { CONTENT_TYPES } from '../plugins/base.js'
 import EpgGrid from '../components/EpgGrid.jsx'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import { useTranslation } from '../i18n/index.js'
-import { isAndroidTv } from '../utils/platform.js'
+import { isAndroidTv, isAndroidNative } from '../utils/platform.js'
 import { Tv, Play, AlertCircle, LayoutGrid, Calendar, Clock, ArrowLeft } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
@@ -376,19 +376,26 @@ export default function LiveTV() {
           if (ctrl.signal.aborted) continue
           const stream = streams?.[0]
           if (stream?.url) {
-            console.log('[LiveTV] switchChannel to:', urlHost(stream.url))
-            await switchChannel({
-              url: stream.url,
-              streamType: stream.streamType || 'hls',
-              direct: stream.direct === true,
-              headers: stream.headers || {},
-              title: target.name,
-              channelIndex: index,
-              epgNow: target.nowPlaying || '',
-              epgNext: target.nextPlaying || '',
-              epgStart: target.nowPlayingStart || 0,
-              epgEnd: target.nowPlayingEnd || 0,
-            })
+            if (isAndroidNative()) {
+              console.log('[LiveTV] switchChannel to:', urlHost(stream.url))
+              await switchChannel({
+                url: stream.url,
+                streamType: stream.streamType || 'hls',
+                direct: stream.direct === true,
+                headers: stream.headers || {},
+                title: target.name,
+                channelIndex: index,
+                epgNow: target.nowPlaying || '',
+                epgNext: target.nextPlaying || '',
+                epgStart: target.nowPlayingStart || 0,
+                epgEnd: target.nowPlayingEnd || 0,
+              })
+            } else {
+              // Player web/Electron: switchChannel no existe — se recarga el
+              // stream cambiando el estado (mismo efecto que elegir el canal).
+              console.log('[LiveTV] web zap to:', target.name, urlHost(stream.url))
+              setPlaying(prev => ({ stream, channel: target, isU7d: prev?.isU7d }))
+            }
           } else {
             console.warn('[LiveTV] No stream found for channel:', target.name)
           }

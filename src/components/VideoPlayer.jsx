@@ -16,7 +16,7 @@ import { useVideoProgress } from '../hooks/useVideoProgress.js'
 import {
   X, Maximize, Minimize, Volume2, VolumeX, Volume1,
   Captions, Settings, ExternalLink,
-  RotateCcw, Gauge,
+  RotateCcw, Gauge, ChevronUp, ChevronDown, List,
   Play, Pause, SkipBack, SkipForward,
 } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
@@ -98,6 +98,9 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // de la reproducción (CDN devuelve 4xx al refrescar el manifest HLS).
   const reResolveRef = useRef(false)
   const hlsRetriedRef = useRef(false)
+  // Los enlaces debrid a veces no llevan extensión y el contenedor real es
+  // mkv/avi — si el <video> falla se reintenta una vez por el remux ffmpeg.
+  const remuxTriedRef = useRef(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
@@ -122,6 +125,28 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   const [nativeSubs, setNativeSubs] = useState([]) // CEA-608/708 tracks from video element
   const [activeNativeSub, setActiveNativeSub] = useState(-1) // -1 = off
   const [subDelay, setSubDelay] = useState(0) // subtitle delay in seconds (positive = later, negative = earlier)
+  // Zapping en el player web (Electron/navegador): el nativo lo hace dentro
+  // del diálogo ExoPlayer; aquí el índice se trackea localmente y cada zap
+  // llama onZapChannel → LiveTV resuelve el stream y re-renderiza.
+  const [zapIndex, setZapIndex] = useState(channelIndex)
+  const [prevChannelIndex, setPrevChannelIndex] = useState(channelIndex)
+  if (prevChannelIndex !== channelIndex) {
+    // "Adjust state during render" (patrón oficial React) — el cursor de
+    // zap sigue al canal que terminó de cargar sin un efecto extra.
+    setPrevChannelIndex(channelIndex)
+    setZapIndex(channelIndex)
+  }
+  const [showChannels, setShowChannels] = useState(false)
+  const zapByRef = useRef(null)
+  useEffect(() => {
+    zapByRef.current = (dir) => {
+      if (!channels?.length) return
+      const n = channels.length
+      const next = ((zapIndex < 0 ? 0 : zapIndex) + dir + n) % n
+      setZapIndex(next)
+      onZapChannel?.({ index: next, name: channels[next]?.name })
+    }
+  }, [channels, zapIndex, onZapChannel])
   const castSessionRef = useRef(null)
   const streamRef = useRef(stream)
   streamRef.current = stream
@@ -868,7 +893,20 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     const isElectron = !!window.octostream?.isElectron
     let streamUrl = stream.url
     const skipProxy = stream.streamType === 'dash' || /directos\.mediasetinfinity\.es|dai\.google\.com|doubleclick\.net/i.test(streamUrl)
-    if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
+    // Chromium no reproduce contenedores mkv/avi/ts: en Electron el proxy
+    // local los remultiplexa con ffmpeg → fMP4 (vídeo por copia, sin coste
+    // de recodificación). HLS/DASH se excluyen: los manejan hls.js/Shaka.
+    const ffmpegUrlPrefix = window.octostream?.ffmpegUrl
+    const remuxFor = (rawUrl) => ffmpegUrlPrefix + encodeURIComponent(rawUrl) +
+      (stream.headers && Object.keys(stream.headers).length
+        ? '&headers=' + encodeURIComponent(JSON.stringify(stream.headers)) : '')
+    const needsRemux = isElectron && ffmpegUrlPrefix && /^https?:\/\//.test(stream.url || '') &&
+      stream.streamType !== 'hls' && stream.streamType !== 'dash' &&
+      /\.(mkv|avi|wmv|flv|ts|m2ts|mpg|mpeg|vob|mts|3gp|3g2|divx|asf)([?#]|$)/i.test(stream.url || '')
+    if (needsRemux) {
+      remuxTriedRef.current = true
+      streamUrl = remuxFor(stream.url)
+    } else if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
       streamUrl = withProxyHeaders(proxyUrl + encodeURIComponent(streamUrl), stream.headers)
     }
 
@@ -1360,6 +1398,16 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       videoEl.src = streamUrl
       listen(videoEl, 'loadedmetadata', () => setLoading(false))
       listen(videoEl, 'error', () => {
+        // Un mp4 que no carga en Chromium suele ser un mkv/avi sin extensión
+        // (enlaces debrid directos) — reintento único por el remux ffmpeg.
+        if (!remuxTriedRef.current && ffmpegUrlPrefix && /^https?:\/\//.test(stream.url || '')) {
+          remuxTriedRef.current = true
+          console.log('[Player] mp4 load failed — retrying via ffmpeg remux')
+          setError(null)
+          setLoading(true)
+          videoEl.src = remuxFor(stream.url)
+          return
+        }
         setError('Error al cargar el video')
         setLoading(false)
       })
@@ -1372,6 +1420,17 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     } else {
       videoEl.src = streamUrl
       listen(videoEl, 'loadedmetadata', () => setLoading(false))
+      listen(videoEl, 'error', () => {
+        if (!remuxTriedRef.current && ffmpegUrlPrefix && /^https?:\/\//.test(stream.url || '')) {
+          remuxTriedRef.current = true
+          setError(null)
+          setLoading(true)
+          videoEl.src = remuxFor(stream.url)
+          return
+        }
+        setError('Error al cargar el video')
+        setLoading(false)
+      })
       listen(videoEl, 'ended', () => {
         console.log('[Player] Video ended, calling onEnded')
         saveFinalProgress()
@@ -1682,9 +1741,13 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     }
     document.addEventListener('fullscreenchange', handleFsChange)
     document.addEventListener('webkitfullscreenchange', handleFsChange)
+    // En Electron el fullscreen real es de la ventana (BrowserWindow); el
+    // proceso principal notifica sus cambios para sincronizar el icono.
+    const off = window.octostream?.onFullscreenChange?.((on) => setIsFullscreen(!!on))
     return () => {
       document.removeEventListener('fullscreenchange', handleFsChange)
       document.removeEventListener('webkitfullscreenchange', handleFsChange)
+      off?.()
     }
   }, [])
 
@@ -1769,18 +1832,37 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
           if (document.fullscreenElement || document.webkitFullscreenElement) {
             if (document.exitFullscreen) document.exitFullscreen()
             else if (document.webkitExitFullscreen) document.webkitExitFullscreen()
+          } else if (window.octostream?.setFullscreen && isFullscreen) {
+            e.preventDefault()
+            window.octostream.setFullscreen(false).catch?.(() => {})
           } else {
             e.preventDefault()
             onClose?.()
+          }
+          break
+        case 'PageUp':
+        case 'PageDown':
+          if (mode === 'live' && channels?.length > 1 && onZapChannel) {
+            e.preventDefault()
+            zapByRef.current?.(e.key === 'PageUp' ? 1 : -1)
           }
           break
       }
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [currentTime, volume, playing])
+  }, [currentTime, volume, playing, isFullscreen, mode, channels, onZapChannel])
 
   const toggleFullscreen = () => {
+    // Escritorio: fullscreen de la ventana vía IPC (el DOM fullscreen solo
+    // cubre el área de la ventana y no quita el borde/barra de título).
+    if (window.octostream?.setFullscreen) {
+      window.octostream.isFullscreen?.().then((on) => {
+        window.octostream.setFullscreen(!on).catch?.(() => {})
+        setIsFullscreen(!on)
+      }).catch?.(() => {})
+      return
+    }
     const el = containerRef.current
     if (!el) return
     try {
@@ -1833,6 +1915,15 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // On Android, embeds are handled by native WebView (playEmbed), not iframe
   const isNativeEmbed = isEmbed && isExoPlayerAvailable()
   const useNativeExoPlayer = isExoPlayerAvailable() && stream && !isEmbed && !exoFailed
+
+  // En escritorio el player siempre va a ventana completa (como el diálogo
+  // nativo de Android): requestFullscreen DOM solo agranda el elemento
+  // dentro de la ventana, no la ventana.
+  useEffect(() => {
+    if (!window.octostream?.setFullscreen || isEmbed) return undefined
+    window.octostream.setFullscreen(true).catch?.(() => {})
+    return () => { window.octostream.setFullscreen(false).catch?.(() => {}) }
+  }, [isEmbed])
 
   const initAudioBoost = useCallback(() => {
     const videoEl = videoRef.current
@@ -1959,11 +2050,31 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     setShowSettings(false)
   }
 
-  const openInExternal = (player) => {
+  const openInExternal = async (player) => {
     if (!stream) return
     const safeStreamUrl = sanitizeUrl(stream.url)
     if (!safeStreamUrl) {
       setError('URL del stream no válida')
+      return
+    }
+    // En escritorio los esquemas vlc:///mpv:// no existen: el proceso
+    // principal lanza el binario real (mpv reproduce mkv/AC3 nativamente).
+    if (window.octostream?.isElectron && window.octostream?.openExternalPlayer) {
+      if (player === 'system') {
+        window.open(safeStreamUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+      try {
+        const r = await window.octostream.openExternalPlayer({
+          player,
+          url: safeStreamUrl,
+          headers: stream.headers || {},
+          title: title || '',
+        })
+        if (!r?.ok) setError(r?.error || `No se pudo abrir ${player}`)
+      } catch (e) {
+        setError(`No se pudo abrir ${player}: ${e?.message || 'error'}`)
+      }
       return
     }
     let url = safeStreamUrl
@@ -2352,6 +2463,36 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         </div>
       )}
 
+      {/* Panel de zapping: lista de canales del player web */}
+      {mode === 'live' && showChannels && channels?.length > 1 && !useNativeExoPlayer && (
+        <div
+          className="absolute top-0 right-0 bottom-0 w-72 max-w-[70vw] z-30 bg-dark-900/95 backdrop-blur border-l border-dark-700 flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-dark-700">
+            <span className="text-white text-sm font-medium">Canales</span>
+            <button onClick={() => setShowChannels(false)} className="text-dark-300 hover:text-white p-1">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {channels.map((ch, i) => (
+              <button
+                key={ch.id || i}
+                tabIndex={0}
+                onClick={() => {
+                  setZapIndex(i)
+                  onZapChannel?.({ index: i, name: ch?.name })
+                }}
+                className={`w-full text-left px-4 py-2 text-sm transition-colors focus:bg-primary-600/30 focus:outline-none ${i === zapIndex ? 'bg-primary-600/25 text-primary-300' : 'text-dark-200 hover:bg-dark-700'}`}
+              >
+                {ch.name || `Canal ${i + 1}`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Barra inferior de controles */}
       {!isEmbed && !error && !useNativeExoPlayer && (
         <div className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent pb-3 pt-12 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
@@ -2413,6 +2554,37 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             >
               <SkipForward size={20} />
             </button>
+
+            {/* Zapping (modo live) */}
+            {mode === 'live' && channels?.length > 1 && (
+              <>
+                <div className="w-px h-6 bg-dark-600 mx-1" />
+                <button
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); zapByRef.current?.(-1) }}
+                  className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors focus:bg-primary-600/30 focus:outline-none"
+                  title="Canal anterior"
+                >
+                  <ChevronDown size={22} />
+                </button>
+                <button
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setShowChannels(v => !v) }}
+                  className={`p-2 rounded-lg transition-colors focus:bg-primary-600/30 focus:outline-none ${showChannels ? 'text-primary-400 bg-primary-600/20' : 'text-white hover:bg-white/10'}`}
+                  title="Lista de canales"
+                >
+                  <List size={22} />
+                </button>
+                <button
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); zapByRef.current?.(1) }}
+                  className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors focus:bg-primary-600/30 focus:outline-none"
+                  title="Canal siguiente"
+                >
+                  <ChevronUp size={22} />
+                </button>
+              </>
+            )}
 
             {/* Separador */}
             <div className="w-px h-6 bg-dark-600 mx-1" />

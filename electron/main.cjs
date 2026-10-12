@@ -77,7 +77,7 @@ const secureHttpsAgent = new https.Agent({ keepAlive: true })
 
 const PROXY_PORT = 19588
 const LOCAL_IP = getLocalIP()
-const PROXY_TOKEN = crypto.randomBytes(32).toString('hex')
+const PROXY_TOKEN = process.env.OCTOSTREAM_PROXY_TOKEN || crypto.randomBytes(32).toString('hex')
 // Proxy prefix for renderer (localhost) and for Chromecast (LAN IP)
 const PROXY_PREFIX_LOCAL = `http://127.0.0.1:${PROXY_PORT}/proxy?token=${PROXY_TOKEN}&url=`
 // Playlists (m3u8/mpd) se acumulan enteros para reescribir URLs — tope anti-DoS.
@@ -429,6 +429,213 @@ function proxyPost(targetUrl, postBody, postHeaders, res) {
   proxyReq.end()
 }
 
+// ─── ffmpeg remux ──────────────────────────────────────────────────────────
+// Chromium no reproduce contenedores .mkv/.avi/.ts… El endpoint /ffmpeg
+// remultiplexa a fMP4 en streaming: vídeo por copia (sin recodificar) y audio
+// a AAC (barato, cubre AC3/DTS/E-AC3 que Chromium tampoco decodifica).
+const { spawn, execSync } = require('child_process')
+
+function resolveFfmpeg() {
+  if (process.env.OCTOSTREAM_FFMPEG && fs.existsSync(process.env.OCTOSTREAM_FFMPEG)) {
+    return process.env.OCTOSTREAM_FFMPEG
+  }
+  const exe = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  // Binario estático empaquetado (scripts/fetch-ffmpeg.mjs → extraResources).
+  try {
+    const bundled = path.join(process.resourcesPath || '', 'ffmpeg',
+      `${process.platform}-${process.arch}`, exe)
+    if (app.isPackaged && fs.existsSync(bundled)) return bundled
+  } catch {}
+  // En desarrollo: build/ffmpeg/ dentro del repo, luego PATH del sistema.
+  try {
+    const devPath = path.resolve(__dirname, '..', 'build', 'ffmpeg',
+      `${process.platform}-${process.arch}`, exe)
+    if (fs.existsSync(devPath)) return devPath
+  } catch {}
+  return exe // PATH
+}
+
+// El fetch lo hace Node (TLS ya probado por el proxy, con redirects y los
+// headers del resolver); ffmpeg lee el stream de stdin. Así el binario
+// estático nunca toca TLS — los builds con gnutls crashean contra algunos
+// servidores (Cloudflare) durante el handshake.
+function remuxFetch(targetUrl, headers, depth, cb) {
+  if (depth > 5) return cb(new Error('too many redirects'))
+  const target = validProxyTarget(targetUrl)
+  if (!target) return cb(new Error('forbidden url'))
+  const isHttps = target.protocol === 'https:'
+  const lib = isHttps ? https : http
+  const req = lib.request({
+    hostname: target.hostname,
+    port: target.port || (isHttps ? 443 : 80),
+    path: target.pathname + target.search,
+    method: 'GET',
+    headers,
+    agent: isHttps ? secureHttpsAgent : undefined,
+    timeout: 30000,
+  }, (up) => {
+    if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
+      const loc = up.headers.location
+      const abs = loc.startsWith('http') ? loc : new URL(loc, targetUrl).href
+      up.resume()
+      return remuxFetch(abs, headers, depth + 1, cb)
+    }
+    cb(null, up)
+  })
+  req.on('timeout', () => { req.destroy(new Error('fetch timeout')) })
+  req.on('error', cb)
+  req.end()
+}
+
+function remuxStream(targetUrl, extraHeaders, res) {
+  const target = validProxyTarget(targetUrl)
+  if (!target) {
+    res.writeHead(400); res.end('Invalid or forbidden url')
+    return
+  }
+  const hdrs = { ...headersForHost(target.hostname), ...sanitizeProxyHeaders(extraHeaders) }
+  console.log('[ffmpeg] remux:', hostOf(targetUrl))
+  remuxFetch(targetUrl, hdrs, 0, (err, up) => {
+    if (err) {
+      console.error('[ffmpeg] fetch error:', err.message)
+      if (!res.headersSent) res.writeHead(502)
+      res.end()
+      return
+    }
+    if (up.statusCode !== 200 && up.statusCode !== 206) {
+      console.warn('[ffmpeg] upstream', up.statusCode)
+      up.resume()
+      if (!res.headersSent) res.writeHead(up.statusCode)
+      res.end()
+      return
+    }
+    const ffmpeg = resolveFfmpeg()
+    const args = [
+      '-v', 'warning',
+      '-fflags', '+genpts+igndts',
+      '-i', 'pipe:0',
+      '-map', '0:v:0', '-map', '0:a:0?',
+      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+      '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      'pipe:1',
+    ]
+    let child
+    try {
+      child = spawn(ffmpeg, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    } catch (e) {
+      up.destroy()
+      res.writeHead(503, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `ffmpeg no disponible: ${e.message}` }))
+      return
+    }
+    let stderr = ''
+    child.stderr.on('data', (c) => { stderr += c.toString(); if (stderr.length > 8192) stderr = stderr.slice(-8192) })
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache',
+    })
+    up.pipe(child.stdin)
+    child.stdout.pipe(res)
+    const kill = () => {
+      try { child.kill('SIGKILL') } catch {}
+      try { up.destroy() } catch {}
+    }
+    res.on('close', kill)
+    child.stdin.on('error', () => { try { up.destroy() } catch {} })
+    up.on('error', () => kill())
+    up.on('end', () => { try { child.stdin.end() } catch {} })
+    reqIdleKill(child, res)
+    child.on('error', (e) => {
+      console.error('[ffmpeg] spawn error:', e.message)
+      kill()
+      if (!res.headersSent) { res.writeHead(503) }
+      res.end()
+    })
+    child.on('exit', (code) => {
+      if (code !== 0 && code !== null) {
+        console.warn('[ffmpeg] exit', code, stderr.slice(-300))
+      }
+      res.end()
+    })
+  })
+}
+
+// Mata el ffmpeg si queda sin lector (cliente cerró) o si no produce datos.
+function reqIdleKill(child, res) {
+  let last = Date.now()
+  child.stdout.on('data', () => { last = Date.now() })
+  const iv = setInterval(() => {
+    if (res.destroyed || res.closed || Date.now() - last > 45000) {
+      clearInterval(iv)
+      try { child.kill('SIGKILL') } catch {}
+      try { res.end() } catch {}
+    }
+  }, 10000)
+  iv.unref()
+}
+
+// ─── Reproductores externos (mpv / VLC) ────────────────────────────────────
+// En desktop los esquemas vlc:// / mpv:// no existen — se lanza el binario
+// real con la URL del stream (que puede ser la del proxy local, con headers).
+function findExe(candidates) {
+  for (const c of candidates) {
+    if (c.includes(path.sep) || /^[A-Za-z]:[\\/]/.test(c)) {
+      if (fs.existsSync(c)) return c
+    } else {
+      try {
+        execSync(`${process.platform === 'win32' ? 'where' : 'command -v'} "${c}"`, { stdio: 'ignore' })
+        return c
+      } catch {}
+    }
+  }
+  return null
+}
+
+function openExternalPlayer({ player, url, headers, title }) {
+  if (!/^https?:\/\//.test(url || '')) return { ok: false, error: 'URL no válida' }
+  const progs = {
+    mpv: {
+      names: process.platform === 'win32'
+        ? ['mpv', 'C:\\Program Files\\mpv\\mpv.exe', path.join(process.env.LOCALAPPDATA || '', 'Programs', 'mpv', 'mpv.exe')]
+        : ['mpv', '/usr/bin/mpv', '/usr/local/bin/mpv', '/snap/bin/mpv', '/var/lib/flatpak/exports/bin/io.mpv.Mpv'],
+      args: (exe, u) => {
+        const a = [`--force-media-title=${title || 'OctoStream'}`, '--fs']
+        // mpv acepta headers HTTP arbitrarios (Referer exigido por muchos CDN).
+        const h = sanitizeProxyHeaders(headers)
+        for (const [k, v] of Object.entries(h)) a.push(`--http-header-fields-append=${k}: ${v}`)
+        a.push(u)
+        return a
+      },
+    },
+    vlc: {
+      names: process.platform === 'win32'
+        ? ['vlc', 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe', 'C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe']
+        : ['vlc', '/usr/bin/vlc', '/usr/local/bin/vlc', '/snap/bin/vlc', '/var/lib/flatpak/exports/bin/org.videolan.VLC'],
+      args: (exe, u) => {
+        const a = ['--play-and-exit', `--meta-title=${title || 'OctoStream'}`]
+        const h = sanitizeProxyHeaders(headers)
+        if (h['Referer'] || h['referer']) a.push(`--http-referrer=${h['Referer'] || h['referer']}`)
+        if (h['User-Agent'] || h['user-agent']) a.push(`--http-user-agent=${h['User-Agent'] || h['user-agent']}`)
+        a.push(u)
+        return a
+      },
+    },
+  }
+  const p = progs[player]
+  if (!p) return { ok: false, error: 'player desconocido' }
+  const exe = findExe(p.names)
+  if (!exe) return { ok: false, error: `${player} no está instalado` }
+  try {
+    const child = spawn(exe, p.args(exe, url), { detached: true, stdio: 'ignore' })
+    child.unref()
+    console.log('[External]', player, '→', hostOf(url))
+    return { ok: true, exe }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
+}
+
 function servePackagedApp(pathname, res) {
   const distDir = path.resolve(__dirname, '..', 'dist')
   const relativePath = pathname === '/app' || pathname === '/app/'
@@ -526,6 +733,24 @@ function startProxyServer() {
       return
     }
 
+    if (parsed.pathname === '/ffmpeg') {
+      // Remux ffmpeg → fMP4 para contenedores que Chromium no soporta
+      // (mkv/avi/ts…). Mismo esquema ?url=&headers= que /proxy.
+      const targetUrl = parsed.searchParams.get('url')
+      if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
+        res.writeHead(400)
+        res.end('Missing or invalid url param')
+        return
+      }
+      let ffHeaders = {}
+      const ffHeadersParam = parsed.searchParams.get('headers')
+      if (ffHeadersParam) {
+        try { ffHeaders = JSON.parse(ffHeadersParam) } catch {}
+      }
+      remuxStream(targetUrl, ffHeaders, res)
+      return
+    }
+
     if (req.url.startsWith('/raw/')) {
       // Raw proxy: everything after /raw/ is the target URL (preserves query params)
       const targetUrl = req.url.substring(5) // strip '/raw/'
@@ -608,7 +833,23 @@ ipcMain.on('get-proxy-config', (event) => {
     port: PROXY_PORT,
     url: PROXY_PREFIX_LOCAL,
     base: `http://127.0.0.1:${PROXY_PORT}`,
+    ffmpegUrl: `http://127.0.0.1:${PROXY_PORT}/ffmpeg?token=${PROXY_TOKEN}&url=`,
   }
+})
+
+// Abrir el stream en un reproductor externo instalado (mpv/VLC).
+ipcMain.handle('player:open-external', (_event, arg) => openExternalPlayer(arg || {}))
+
+// Pantalla completa de la ventana: la app Android reproduce siempre a
+// pantalla completa; en escritorio el player se comporta igual.
+ipcMain.handle('win:fullscreen', (event, on) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+  win.setFullScreen(!!on)
+  return win.isFullScreen()
+})
+ipcMain.handle('win:fullscreen-state', (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false
 })
 
 // IPC handler: log messages from renderer to terminal
@@ -702,6 +943,9 @@ function createWindow() {
       allowRunningInsecureContent: false,
     },
   })
+
+  win.on('enter-full-screen', () => win.webContents.send('win:fullscreen-changed', true))
+  win.on('leave-full-screen', () => win.webContents.send('win:fullscreen-changed', false))
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     const parsed = (() => { try { return new URL(url) } catch { return null } })()
