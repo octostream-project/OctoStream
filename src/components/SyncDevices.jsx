@@ -1,0 +1,426 @@
+import { useEffect, useState, useRef } from 'react'
+import { RefreshCw, Wifi, Check, AlertCircle, Download, Upload, X, MonitorSmartphone } from 'lucide-react'
+import { useStore } from '../store/useStore.js'
+import { httpGetJson } from '../utils/httpClient.js'
+import OctoLoader from './OctoLoader.jsx'
+import { getSyncServer, getDiscovered, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
+
+// Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
+// red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
+// Descargar (traer sus datos) o Enviar (mandar los nuestros). Embebido en el
+// tab "Sincronizar" de Ajustes y en la página /sync.
+export default function SyncDevices() {
+  const favorites = useStore(s => s.favorites)
+  const watchHistory = useStore(s => s.watchHistory)
+  const watchedEpisodes = useStore(s => s.watchedEpisodes)
+  const setFavorites = useStore(s => s.setFavorites)
+  const setWatchHistory = useStore(s => s.setWatchHistory)
+  const setWatchedEpisodes = useStore(s => s.setWatchedEpisodes)
+
+  const [serverUrl, setServerUrl] = useState('')
+  const [remoteIp, setRemoteIp] = useState('')
+  const [deviceInfo, setDeviceInfo] = useState(null) // {deviceId, alias, fingerprint}
+  // Dispositivo objetivo del diálogo de acción: {ip, url, deviceId, alias, fingerprint}
+  const [actionDevice, setActionDevice] = useState(null)
+  const [discovered, setDiscovered] = useState([])
+  const [status, setStatus] = useState('idle') // idle | connecting | syncing | done | error
+  const [message, setMessage] = useState('')
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
+  const [pairedDevices, setPairedDevices] = useState([])
+  const syncListenerRef = useRef(null)
+
+  const mergeData = (remoteData) => {
+    if (!remoteData) return
+    if (Array.isArray(remoteData.favorites)) {
+      const favMap = new Map()
+      for (const f of favorites) favMap.set(`${f.id}-${f.type}`, f)
+      for (const f of remoteData.favorites) {
+        const key = `${f.id}-${f.type}`
+        if (!favMap.has(key)) favMap.set(key, f)
+      }
+      setFavorites([...favMap.values()].slice(0, 500))
+    }
+    if (Array.isArray(remoteData.watchHistory)) {
+      const histMap = new Map()
+      for (const h of watchHistory) histMap.set(`${h.id}-${h.type}`, h)
+      for (const h of remoteData.watchHistory) {
+        const key = `${h.id}-${h.type}`
+        const existing = histMap.get(key)
+        if (!existing || (h.watchedAt || 0) > (existing.watchedAt || 0)) {
+          histMap.set(key, h)
+        }
+      }
+      setWatchHistory([...histMap.values()].sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0)).slice(0, 50))
+    }
+    // Sin keys de prototipo — un peer malicioso podría inyectar __proto__.
+    if (remoteData.watchedEpisodes && typeof remoteData.watchedEpisodes === 'object') {
+      const merged = { ...watchedEpisodes }
+      let count = Object.keys(merged).length
+      for (const [key, val] of Object.entries(remoteData.watchedEpisodes)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+        if (!merged[key] && count >= 5000) continue
+        if (!merged[key]) count++
+        if (!merged[key] || (val.watchedAt || 0) > (merged[key].watchedAt || 0)) {
+          merged[key] = val
+        }
+      }
+      setWatchedEpisodes(merged)
+    }
+  }
+
+  const handleReceivedData = (dataStr) => {
+    try {
+      const remoteData = JSON.parse(dataStr)
+      mergeData(remoteData)
+      setStatus('done')
+      setMessage('Datos recibidos del otro dispositivo')
+      const now = new Date().toLocaleString('es-ES')
+      localStorage.setItem('octostream_last_sync', now)
+      setLastSync(now)
+    } catch (e) {
+      console.error('[Sync] Parse error:', e.message)
+    }
+  }
+
+  const refreshPaired = async () => {
+    const SyncServer = await getSyncServer()
+    if (!SyncServer) return
+    try {
+      const res = await SyncServer.getPairedDevices()
+      setPairedDevices(res?.devices || [])
+    } catch { /* lista opcional */ }
+  }
+
+  const updateLocalData = async () => {
+    const SyncServer = await getSyncServer()
+    if (!SyncServer) return
+    const data = JSON.stringify({ favorites, watchHistory, watchedEpisodes })
+    try {
+      await SyncServer.setLocalData({ data })
+    } catch (e) {
+      console.warn('[Sync] setLocalData failed:', e.message)
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    let discIv = null
+    ;(async () => {
+      const SyncServer = await getSyncServer()
+      if (!SyncServer || !active) return
+      try {
+        const info = await SyncServer.start()
+        if (!active) return
+        setServerUrl(info.url)
+        setDeviceInfo({ deviceId: info.deviceId, alias: info.alias, fingerprint: info.fingerprint })
+        // Dispositivos anunciándose por UDP — lista viva.
+        getDiscovered().then(setDiscovered)
+        discIv = setInterval(() => getDiscovered().then(d => { if (active) setDiscovered(d) }), 4000)
+        updateLocalData()
+        syncListenerRef.current = await SyncServer.addListener('syncDataReceived', (event) => {
+          handleReceivedData(event.data)
+        })
+        refreshPaired()
+      } catch (e) {
+        console.error('[Sync] Server start failed:', e.message)
+        setStatus('error')
+        setMessage('No se pudo iniciar el servidor: ' + e.message)
+      }
+    })()
+    return () => {
+      active = false
+      if (discIv) clearInterval(discIv)
+      if (syncListenerRef.current) syncListenerRef.current.remove()
+    }
+  }, [])
+
+  useEffect(() => { updateLocalData() }, [favorites, watchHistory, watchedEpisodes])
+
+  // Push autorizado tras aceptar el diálogo de emparejamiento.
+  useEffect(() => {
+    const onSyncData = (e) => handleReceivedData(e.detail)
+    window.addEventListener('octostream:syncData', onSyncData)
+    return () => window.removeEventListener('octostream:syncData', onSyncData)
+  }, [favorites, watchHistory, watchedEpisodes])
+
+  // URL normalizada a partir de un dispositivo descubierto o una IP manual.
+  const deviceUrl = (d) => d?.url || (remoteIp.startsWith('http') ? remoteIp : `http://${remoteIp}:8765`)
+
+  // Abre el diálogo "Descargar o Enviar" para un dispositivo. Para IP manual
+  // se hace ping antes: /ping devuelve deviceId/alias/fingerprint → la
+  // conexión manual también puede emparejarse (antes no había identidad y el
+  // /sync caía siempre en 403).
+  const openDevice = async (d) => {
+    if (d?.deviceId) {
+      setActionDevice(d)
+      return
+    }
+    const url = deviceUrl(d)
+    setStatus('connecting')
+    setMessage('Comprobando dispositivo...')
+    try {
+      const pong = await httpGetJson(`${url}/ping`, {}, AbortSignal.timeout(5000))
+      if (pong?.ok) {
+        setActionDevice({
+          ip: d?.ip || remoteIp, url,
+          deviceId: pong.deviceId || null,
+          alias: pong.alias || pong.name || remoteIp,
+          fingerprint: pong.fingerprint || '',
+        })
+        setStatus('idle')
+        setMessage('')
+      } else {
+        throw new Error('sin respuesta')
+      }
+    } catch {
+      setStatus('error')
+      setMessage('No se pudo conectar con esa IP — comprueba que el otro OctoStream está abierto y en la misma red.')
+    }
+  }
+
+  const finishOk = (msg) => {
+    setStatus('done')
+    setMessage(msg)
+    const now = new Date().toLocaleString('es-ES')
+    localStorage.setItem('octostream_last_sync', now)
+    setLastSync(now)
+    refreshPaired()
+  }
+
+  const failWith = (e, verb) => {
+    setStatus('error')
+    setMessage(/403/.test(e?.message || '')
+      ? 'El otro dispositivo debe aceptar la conexión — pulsa "Aceptar" en su pantalla y reintenta.'
+      : `Error al ${verb}: ` + e.message)
+  }
+
+  // Pull: trae los datos del otro dispositivo y los fusiona.
+  const handlePull = async (dev) => {
+    const url = deviceUrl(dev)
+    setActionDevice(null)
+    setStatus('connecting')
+    setMessage(`Conectando con ${dev?.alias || 'el dispositivo'}...`)
+    setStatus('syncing')
+    setMessage('Descargando datos...')
+    try {
+      const remoteData = await pullSync(url, dev)
+      if (remoteData === 'denied') {
+        setStatus('error')
+        setMessage('El otro dispositivo rechazó el emparejamiento.')
+        return
+      }
+      mergeData(remoteData)
+      finishOk('Sincronización completada')
+    } catch (e) {
+      failWith(e, 'descargar')
+    }
+  }
+
+  // Push: manda nuestros datos al otro dispositivo.
+  const handlePush = async (dev) => {
+    const url = deviceUrl(dev)
+    setActionDevice(null)
+    setStatus('connecting')
+    setMessage(`Conectando con ${dev?.alias || 'el dispositivo'}...`)
+    setStatus('syncing')
+    setMessage('Enviando datos...')
+    try {
+      const r = await pushSync(url, dev, { favorites, watchHistory, watchedEpisodes })
+      if (r === 'denied') {
+        setStatus('error')
+        setMessage('El otro dispositivo rechazó el emparejamiento.')
+        return
+      }
+      finishOk('Datos enviados correctamente')
+    } catch (e) {
+      failWith(e, 'enviar')
+    }
+  }
+
+  const busy = status === 'connecting' || status === 'syncing'
+
+  return (
+    <div className="space-y-4">
+      {/* Este dispositivo */}
+      <div className="card p-4">
+        <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+          <Wifi size={18} className="text-primary-400" />
+          Este dispositivo
+        </h3>
+        {serverUrl ? (
+          <div>
+            <p className="text-white font-medium">{deviceInfo?.alias || 'OctoStream'}</p>
+            <p className="text-xs text-dark-400 font-mono mt-0.5">
+              {serverUrl}{deviceInfo?.fingerprint ? ` · ${deviceInfo.fingerprint}` : ''}
+            </p>
+            <p className="text-xs text-dark-500 mt-1">
+              Visible en la red como «{deviceInfo?.alias || 'OctoStream'}» — los demás te encuentran solos
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <OctoLoader size={18} />
+            <p className="text-dark-400 text-sm">Iniciando servidor...</p>
+          </div>
+        )}
+      </div>
+
+      {/* Dispositivos encontrados */}
+      <div className="card p-4">
+        <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+          <MonitorSmartphone size={18} className="text-primary-400" />
+          Dispositivos en tu red
+        </h3>
+        {discovered.length > 0 ? (
+          <div className="space-y-2">
+            {discovered.map(d => (
+              <button
+                key={d.deviceId || d.ip}
+                data-tv-card
+                tabIndex={0}
+                disabled={busy}
+                onClick={() => openDevice(d)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors bg-dark-800 hover:bg-dark-700 border border-dark-700 disabled:opacity-50"
+              >
+                <Wifi size={18} className="text-primary-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium truncate">{d.alias || d.name}</p>
+                  <p className="text-xs text-dark-400 font-mono">{d.ip}{d.fingerprint ? ` · ${d.fingerprint}` : ''}</p>
+                </div>
+                <RefreshCw size={16} className="text-dark-500 shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-dark-500 text-sm py-2">
+            <OctoLoader size={16} />
+            <p>Buscando OctoStream en la red…</p>
+          </div>
+        )}
+
+        {/* IP manual */}
+        <p className="text-xs text-dark-500 mt-4 mb-2">O por IP manual:</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={remoteIp}
+            onChange={e => setRemoteIp(e.target.value)}
+            placeholder="192.168.1.100:8765"
+            className="flex-1 bg-dark-800 text-white px-3 py-2.5 rounded-lg border border-dark-700 focus:border-primary-500 focus:outline-none text-sm"
+          />
+          <button
+            data-tv-card
+            tabIndex={0}
+            onClick={() => openDevice(null)}
+            disabled={!remoteIp || busy}
+            className="btn-primary px-4 py-2.5 text-sm disabled:opacity-50"
+          >
+            Conectar
+          </button>
+        </div>
+      </div>
+
+      {/* Estado */}
+      {busy && (
+        <div className="flex items-center gap-3 text-primary-400">
+          <OctoLoader size={20} />
+          <p className="text-sm">{message}</p>
+        </div>
+      )}
+      {status === 'done' && (
+        <div className="flex items-center gap-3 text-green-400 bg-green-900/20 border border-green-700/30 rounded-lg p-3">
+          <Check size={18} />
+          <p className="text-sm text-green-300">{message}</p>
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="flex items-center gap-3 text-red-400 bg-red-900/20 border border-red-700/30 rounded-lg p-3">
+          <AlertCircle size={18} />
+          <p className="text-sm text-red-300">{message}</p>
+        </div>
+      )}
+      {lastSync && (
+        <p className="text-xs text-dark-500 text-center">Última sincronización: {lastSync}</p>
+      )}
+
+      {/* Autorizados */}
+      {pairedDevices.length > 0 && (
+        <div className="card p-4">
+          <h3 className="text-white font-semibold mb-1 text-sm">Dispositivos autorizados</h3>
+          <p className="text-xs text-dark-500 mb-2">Pueden enviarte contenido sin pedir permiso.</p>
+          <ul className="space-y-1 mb-3">
+            {pairedDevices.map((d, i) => (
+              <li key={d.deviceId || d.ip || i} className="text-sm bg-dark-800 px-3 py-1.5 rounded-lg flex items-center justify-between gap-2">
+                <span className="text-primary-300">{d.alias || d.ip || d.deviceId}</span>
+                <span className="font-mono text-xs text-dark-500">{d.fingerprint || ''}{d.alias && d.ip ? ` · ${d.ip}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            data-tv-card
+            tabIndex={0}
+            onClick={async () => {
+              const SyncServer = await getSyncServer()
+              if (!SyncServer) return
+              await SyncServer.forgetDevices()
+              forgetTokens()
+              setPairedDevices([])
+            }}
+            className="btn-secondary px-3 py-1.5 text-xs"
+          >
+            Olvidar todos
+          </button>
+        </div>
+      )}
+
+      {/* Diálogo de acción: Descargar o Enviar */}
+      {actionDevice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setActionDevice(null)}>
+          <div className="bg-dark-900 border border-dark-700 rounded-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="text-white font-bold text-lg">{actionDevice.alias || actionDevice.ip}</p>
+                <p className="text-xs text-dark-400 font-mono mt-0.5">
+                  {actionDevice.ip || actionDevice.url}{actionDevice.fingerprint ? ` · ${actionDevice.fingerprint}` : ''}
+                </p>
+              </div>
+              <button onClick={() => setActionDevice(null)} className="btn-ghost p-1.5" data-tv-card tabIndex={0}>
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-dark-400 mb-4">Qué quieres hacer con este dispositivo?</p>
+            <div className="space-y-2">
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => handlePull(actionDevice)}
+                className="w-full btn-primary px-4 py-3 flex items-center gap-3 justify-center"
+              >
+                <Download size={18} />
+                <span className="text-left">
+                  <span className="block font-medium">Descargar</span>
+                  <span className="block text-xs opacity-70">Traer su historial y favoritos aquí</span>
+                </span>
+              </button>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => handlePush(actionDevice)}
+                className="w-full btn-secondary px-4 py-3 flex items-center gap-3 justify-center"
+              >
+                <Upload size={18} />
+                <span className="text-left">
+                  <span className="block font-medium">Enviar</span>
+                  <span className="block text-xs opacity-70">Mandar tus datos a «{actionDevice.alias || actionDevice.ip}»</span>
+                </span>
+              </button>
+            </div>
+            <p className="text-xs text-dark-500 mt-4 text-center">
+              La primera vez, el otro dispositivo pedirá aceptar la conexión en su pantalla.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

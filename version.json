@@ -1,19 +1,18 @@
 {
-  "versionCode": 160,
-  "versionName": "1.60",
+  "versionCode": 161,
+  "versionName": "1.61",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.60/octostream-1.60-arm64-v8a.apk",
-  "sha256": "beca67584907b8e080b708750cfd3bb77bdfaad085bde592b2f2641f546f67b6",
-  "notes": "Ya no se reproduce la pelicula equivocada: se verifica el ano en la ficha de cada candidato y se descartan homonimos de otro ano. Descubrimiento LAN por multicast ademas de broadcast (mas fiable, estilo LocalSend). Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-arm64-v8a.apk",
+  "sha256": "310cab12130870e8bc29d05762dd3c9b15b31b48b93c112ab76b4932a9653fbc",
+  "notes": "Sincronizacion estilo LocalSend en Ajustes: los dispositivos OctoStream se descubren solos y al pulsarlos eliges Descargar o Enviar. Arreglada la sincronizacion por IP y desde PC (CORS). YouTube en escritorio via yt-dlp con fallback Invidious. Splash de carga con logo. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.60/octostream-1.60-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.60/octostream-1.60-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.60/octostream-1.60-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.61/octostream-1.61-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "beca67584907b8e080b708750cfd3bb77bdfaad085bde592b2f2641f546f67b6",
-    "armeabi-v7a": "a916da0e43b445f2d274892ee6fd5f0a461bccbc878ad91142b06db87a5c4312",
-    "x86_64": "c92be3084e7c7bd527c8f4e2a36e21ca1712017af66d9b116cee7cf1a2bd993d"
-  },
-  "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4"
+    "arm64-v8a": "310cab12130870e8bc29d05762dd3c9b15b31b48b93c112ab76b4932a9653fbc",
+    "armeabi-v7a": "8bfa4224a9d8b0568e4d29c27d762bd444b411210579b1b742fdb3da4ab46056",
+    "x86_64": "bf2c7a64d2da5b98701f84bc293dca56555e24f1b1008a311aa27d261e87b73d"
+  }
 }

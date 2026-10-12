@@ -446,7 +446,10 @@ public class SyncServerPlugin extends Plugin {
                 res.addHeader("Vary", "Origin");
             }
             res.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            res.addHeader("Access-Control-Allow-Headers", "Content-Type");
+            // Los headers de auth también deben estar permitidos o el
+            // preflight de un cliente Electron/navegador (/sync con
+            // X-Device-Id + X-Pair-Token) se rechaza antes de llegar.
+            res.addHeader("Access-Control-Allow-Headers", "Content-Type, X-Device-Id, X-Pair-Token");
             return res;
         }
     }

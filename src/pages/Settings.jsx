@@ -5,6 +5,8 @@ import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
+import SyncDevices from '../components/SyncDevices.jsx'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
@@ -1397,29 +1399,25 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab: Sincronizar */}
+      {/* Tab: Sincronizar — los OctoStream de la red se descubren solos
+          (estilo LocalSend); pulsar uno da a elegir Descargar o Enviar. */}
       {activeTab === 'sync' && (
         <div className="space-y-6">
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <RefreshCw className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">Sincronizar dispositivos</h3>
-                <p className="text-sm text-dark-400">Sincroniza historial, favoritos y progreso entre dispositivos en la misma red WiFi</p>
+          {(isAndroidNative() || isElectron()) ? (
+            <SyncDevices />
+          ) : (
+            <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                  <RefreshCw className="text-primary-400" size={22} />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold">Sincronizar dispositivos</h3>
+                  <p className="text-sm text-dark-400">Disponible en la app de Android y de escritorio (Windows/Linux)</p>
+                </div>
               </div>
             </div>
-            <button
-              data-tv-card
-              tabIndex={0}
-              onClick={() => navigate('/sync')}
-              className="btn-primary px-4 py-3 flex items-center gap-2"
-            >
-              <RefreshCw size={18} />
-              Abrir sincronización
-            </button>
-          </div>
+          )}
         </div>
       )}
 
