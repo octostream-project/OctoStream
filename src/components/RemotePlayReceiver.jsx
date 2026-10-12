@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { getSyncServer } from '../utils/remotePlay.js'
 import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
 
@@ -8,7 +8,7 @@ const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown'
 const VideoPlayer = lazy(() => import('./VideoPlayer.jsx'))
 
 // Receptor global de "Enviar a OctoStream": arranca el SyncServer al iniciar
-// la app (Android) para que otros dispositivos puedan encontrarla por la LAN
+// la app para que otros dispositivos puedan encontrarla por la LAN
 // y abre el reproductor cuando llega un POST /play.
 // Seguridad: /play, /stop y /sync solo aceptan IPs emparejadas. Una IP
 // desconocida genera 'pairRequest' → diálogo de aceptación aquí.
@@ -17,7 +17,9 @@ export default function RemotePlayReceiver() {
   const [pairReq, setPairReq] = useState(null) // { ip, endpoint, data }
 
   useEffect(() => {
-    if (!isAndroidNative()) return undefined
+    // Android: plugin nativo. Electron: servidor Node en el proceso
+    // principal — el mismo protocolo, así que móvil y PC se ven entre sí.
+    if (!isAndroidNative() && !isElectron()) return undefined
     let playHandle = null
     let stopHandle = null
     let pairHandle = null

@@ -11,6 +11,12 @@ export function isAndroidNative() {
   }
 }
 
+// App de escritorio (Electron Windows/Linux/macOS): el preload expone
+// window.octostream con el bridge IPC del proceso principal.
+export function isElectron() {
+  return typeof window !== 'undefined' && window.octostream?.isElectron === true
+}
+
 // Android TV / box leanback: MainActivity añade "OctoTV" al User-Agent del
 // WebView solo cuando el dispositivo es TV (UI_MODE_TYPE_TELEVISION/leanback).
 // Fallback: boxes con ROM de tablet (sin feature leanback pero sin pantalla

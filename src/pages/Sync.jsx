@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Wifi, QrCode, ArrowLeft, Check, AlertCircle, Download, Upload } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 
@@ -245,7 +245,7 @@ export default function Sync() {
     }
   }
 
-  if (!isAndroidNative()) {
+  if (!isAndroidNative() && !isElectron()) {
     return (
       <div className="p-4 lg:p-6">
         <div className="flex items-center gap-3 mb-6">
@@ -256,8 +256,8 @@ export default function Sync() {
         </div>
         <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
           <Wifi className="text-dark-600" size={64} />
-          <p className="text-dark-400 text-lg">Sincronización solo disponible en Android</p>
-          <p className="text-dark-500 text-sm">Instala la app en Android para sincronizar entre dispositivos</p>
+          <p className="text-dark-400 text-lg">Sincronización disponible en la app de Android y de escritorio</p>
+          <p className="text-dark-500 text-sm">Instala la app en Android o en tu PC para sincronizar entre dispositivos</p>
         </div>
       </div>
     )

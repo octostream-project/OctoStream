@@ -7,10 +7,35 @@ import { httpGetJson, httpPostJson } from './httpClient.js'
 
 let syncServerPromise = null
 
-// Carga perezosa del plugin nativo (solo existe en Android).
+// Carga perezosa del backend de sync: plugin nativo en Android, servidor
+// Node en el proceso principal en Electron (mismo contrato de métodos).
 // OJO: registerPlugin devuelve un Proxy y await sobre él intenta llamar a un
 // método nativo "then" → se devuelve una fachada plana con los métodos.
 export function getSyncServer() {
+  if (typeof window !== 'undefined' && window.octostream?.isElectron && window.octostream?.sync) {
+    if (!syncServerPromise) {
+      const s = window.octostream.sync
+      syncServerPromise = Promise.resolve({
+        start: () => s.start(),
+        stop: () => s.stop(),
+        getIpAddress: () => s.getDeviceInfo(),
+        setLocalData: (o) => s.setLocalData(o),
+        getReceivedData: () => s.getReceivedData(),
+        clearReceivedData: () => s.clearReceivedData(),
+        allowDevice: (o) => s.allowDevice(o),
+        getPairedDevices: () => s.getPairedDevices(),
+        forgetDevices: () => s.forgetDevices(),
+        getDeviceInfo: () => s.getDeviceInfo(),
+        getDiscoveredDevices: () => s.getDiscoveredDevices(),
+        answerPair: (o) => s.answerPair(o),
+        addListener: (n, cb) => {
+          const off = s.on((ev) => { if (ev?.name === n) cb(ev.data ?? {}) })
+          return Promise.resolve({ remove: off })
+        },
+      })
+    }
+    return syncServerPromise
+  }
   if (!isAndroidNative()) return Promise.resolve(null)
   if (!syncServerPromise) {
     syncServerPromise = import('@optopus/sync-server')

@@ -73,7 +73,6 @@
     "directories": {
       "output": "dist-electron"
     },
-    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "electron/**/*"
@@ -83,6 +82,7 @@
         "AppImage",
         "pacman"
       ],
+      "icon": "public/logo.png",
       "category": "Video",
       "maintainer": "OctoStream",
       "desktop": {

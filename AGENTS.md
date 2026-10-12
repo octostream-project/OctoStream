@@ -101,6 +101,15 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 
 - Se usa `electron` desde npm (`^33.0.0`). El fork `castlabs/electron-releases` se
   recomienda únicamente si se necesita reproducción Widevine certificada en desktop.
+- `electron/sync-server.cjs` es el port a Node del plugin Android
+  `@optopus/sync-server`: mismo protocolo HTTP :8765 (`/ping`, `/pair`, `/sync`,
+  `/play`, `/stop`), mismo auth por `X-Device-Id` + `X-Pair-Token` y el mismo
+  descubrimiento UDP :8766 (multicast `239.255.60.60` + broadcast). El renderer
+  lo usa vía `window.octostream.sync` (preload) igual que en Android usa el
+  plugin Capacitor — `remotePlay.js` elige el backend por plataforma.
+- No fijar `build.electronDist` a `node_modules/electron/dist`: ese dist es
+  solo Linux y rompe el cross-build a Windows (`electron.exe` ausente).
+  Sin él, electron-builder descarga el dist correcto por plataforma.
 
 - Seguridad LAN (SyncServer :8765, estilo LocalSend):
   - Cada dispositivo tiene identidad persistente: `deviceId` (UUID), alias

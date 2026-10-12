@@ -9,7 +9,7 @@ import Screensaver from './components/Screensaver.jsx'
 import RemotePlayReceiver from './components/RemotePlayReceiver.jsx'
 import UpdateChecker from './components/UpdateChecker.jsx'
 import { useStore } from './store/useStore.js'
-import { isAndroidNative } from './utils/platform.js'
+import { isAndroidNative, isElectron } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
 import { CloudProxy } from '@octostream/cloud-proxy'
 import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
@@ -104,7 +104,9 @@ export default function App() {
 
   useEffect(() => {
     initPlugins()
-    if (isAndroidNative()) {
+    // Navegación tipo TV (D-pad): en Android con mando y en escritorio con
+    // las flechas del teclado — mismo comportamiento en ambas plataformas.
+    if (isAndroidNative() || isElectron()) {
       initTvNavigation()
     }
     // Auto-connect WARP by default on first launch.
@@ -350,7 +352,7 @@ export default function App() {
 
   // Refocus on page change (TV navigation)
   useEffect(() => {
-    if (isAndroidNative()) {
+    if (isAndroidNative() || isElectron()) {
       refocusAfterPageChange()
     }
   }, [location.pathname])
@@ -449,7 +451,7 @@ export default function App() {
         </div>
 
         {screensaverActive && <Screensaver onDismiss={dismissScreensaver} />}
-        {android && <RemotePlayReceiver />}
+        {(android || isElectron()) && <RemotePlayReceiver />}
         {android && <UpdateChecker />}
       </div>
     </ErrorBoundary>

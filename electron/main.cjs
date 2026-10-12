@@ -9,6 +9,7 @@ const https = require('https')
 const os = require('os')
 const crypto = require('crypto')
 const { URL } = require('url')
+const { SyncServer } = require('./sync-server.cjs')
 
 // ─── Aether / WARP local proxy detection ─────────────────────────────────────
 // On this dev machine Aether (Cloudflare WARP userspace client) listens as a
@@ -615,6 +616,43 @@ ipcMain.on('renderer-log', (_event, msg) => {
   console.log('[Renderer]', msg)
 })
 
+// ─── Sync server LAN ───────────────────────────────────────────────────────
+// Mismo servicio que el plugin Android (@optopus/sync-server) corriendo en el
+// proceso principal: HTTP :8765, descubrimiento UDP :8766 (multicast
+// 239.255.60.60 + broadcast). El renderer habla con él por IPC igual que en
+// Android habla con el plugin Capacitor — la UI es idéntica en ambos.
+let syncServer = null
+function getSync() {
+  if (!syncServer) {
+    syncServer = new SyncServer({
+      dataDir: app.getPath('userData'),
+      sendEvent: (name, data) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          try { w.webContents.send('sync-event', { name, data }) } catch {}
+        }
+      },
+    })
+  }
+  return syncServer
+}
+
+const SYNC_IPC = {
+  'sync:start': (s) => s.start(),
+  'sync:stop': (s) => s.stop(),
+  'sync:device-info': (s) => s.getDeviceInfo(),
+  'sync:set-local-data': (s, a) => s.setLocalData(a || {}),
+  'sync:received-data': (s) => s.getReceivedData(),
+  'sync:clear-received': (s) => s.clearReceivedData(),
+  'sync:allow-device': (s, a) => s.allowDevice(a || {}),
+  'sync:answer-pair': (s, a) => s.answerPair(a || {}),
+  'sync:paired-devices': (s) => s.getPairedDevices(),
+  'sync:forget-devices': (s) => s.forgetDevices(),
+  'sync:discovered': (s) => s.getDiscoveredDevices(),
+}
+for (const [channel, fn] of Object.entries(SYNC_IPC)) {
+  ipcMain.handle(channel, (_event, arg) => Promise.resolve(fn(getSync(), arg)))
+}
+
 app.whenReady().then(async () => {
   if (components?.whenReady) {
     try {
@@ -773,6 +811,10 @@ app.on('window-all-closed', () => {
   if (proxyServer) {
     proxyServer.close()
     proxyServer = null
+  }
+  if (syncServer) {
+    syncServer.stop().catch(() => {})
+    syncServer = null
   }
   if (process.platform !== 'darwin') {
     app.quit()
