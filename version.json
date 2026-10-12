@@ -1,19 +1,19 @@
 {
-  "versionCode": 157,
-  "versionName": "1.57",
+  "versionCode": 158,
+  "versionName": "1.58",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.57/octostream-1.57-arm64-v8a.apk",
-  "sha256": "8c7c4320e5f2b151924dc114a9d17cfcf761cc5e092cd4dff2ed7ca6721702bf",
-  "notes": "YouTube: favoritos de videos y canales con vista de canal. Incluye el fix de paginacion de v1.56. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-arm64-v8a.apk",
+  "sha256": "cf2a843333700ac593c3828ac65727c727c2a45631d9858340eb016eeda486e8",
+  "notes": "Torrents reparados (DonTorrent, peliculas y series). Fix pantalla negra permanente tras errores de reproduccion. Lista de enlaces instantanea con AllDebrid. Usuarios en v1.51 o anterior: desinstalar primero (cambio de firma).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.57/octostream-1.57-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.57/octostream-1.57-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.57/octostream-1.57-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.58/octostream-1.58-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "8c7c4320e5f2b151924dc114a9d17cfcf761cc5e092cd4dff2ed7ca6721702bf",
-    "armeabi-v7a": "a6ec54242408cf4f1878043c2f7837869b45df6fb471dacefccaa5097ababf84",
-    "x86_64": "c1df0ddad6606594661a2eee7f39aa3a281b8f095ecaf5f1037d0745b61ed0a0"
+    "arm64-v8a": "cf2a843333700ac593c3828ac65727c727c2a45631d9858340eb016eeda486e8",
+    "armeabi-v7a": "73c65d5c675b01d103a4c393ed8407711185ac94fff87256f1fec81f3f00491e",
+    "x86_64": "9283d990110fc83a95792a81a468cb53356b818310821098c5f44e367c41f92d"
   },
   "certSha256": "80649ff3b7d7375badd1437ec3cab065b6b49385bfa21493e2d6c5435d479cf4"
 }
