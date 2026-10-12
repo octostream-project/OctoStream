@@ -31,6 +31,16 @@ contextBridge.exposeInMainWorld('octostream', {
     ipcRenderer.on('win:fullscreen-changed', wrapped)
     return () => ipcRenderer.removeListener('win:fullscreen-changed', wrapped)
   },
+  // YouTube — equivalente del plugin Youtube Android (NewPipeExtractor),
+  // implementado con yt-dlp en el proceso principal.
+  youtube: {
+    resolve: (arg) => ipcRenderer.invoke('youtube:resolve', arg),
+    search: (arg) => ipcRenderer.invoke('youtube:search', arg),
+    searchMore: (arg) => ipcRenderer.invoke('youtube:search-more', arg),
+    suggest: (arg) => ipcRenderer.invoke('youtube:suggest', arg),
+    getChannel: (arg) => ipcRenderer.invoke('youtube:get-channel', arg),
+    getChannelInfo: (arg) => ipcRenderer.invoke('youtube:get-channel-info', arg),
+  },
   log: (...args) => ipcRenderer.send('renderer-log', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
   // Sync LAN (equivalente del plugin Android @optopus/sync-server): los
   // métodos devuelven promesas con la misma forma que el plugin Capacitor;

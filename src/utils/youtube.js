@@ -1,4 +1,4 @@
-import { isAndroidNative } from './platform.js'
+import { isAndroidNative, isElectron } from './platform.js'
 
 let youtubePlugin = null
 
@@ -25,16 +25,23 @@ export function dedupeYouTubeItems(items) {
 }
 
 async function getPlugin() {
-  if (!isAndroidNative()) return null
+  if (!isAndroidNative() && !isElectron()) return null
   if (!youtubePlugin) {
-    try {
-      const mod = await import('@octostream/youtube')
-      // Wrap in a plain object to prevent JS from calling .then() on the
-      // Capacitor proxy (which would trigger "not implemented on android")
-      youtubePlugin = { impl: mod.Youtube }
-    } catch (e) {
-      console.warn('[YouTube] Plugin not available:', e?.message)
-      return null
+    if (isAndroidNative()) {
+      try {
+        const mod = await import('@octostream/youtube')
+        // Wrap in a plain object to prevent JS from calling .then() on the
+        // Capacitor proxy (which would trigger "not implemented on android")
+        youtubePlugin = { impl: mod.Youtube }
+      } catch (e) {
+        console.warn('[YouTube] Plugin not available:', e?.message)
+        return null
+      }
+    } else {
+      // Electron: el main lanza yt-dlp por IPC con la misma superficie que
+      // el plugin Android (resolve/search/searchMore/suggest/getChannel).
+      if (!window.octostream?.youtube) return null
+      youtubePlugin = { impl: window.octostream.youtube }
     }
   }
   return youtubePlugin

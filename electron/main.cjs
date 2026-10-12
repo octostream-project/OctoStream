@@ -10,6 +10,7 @@ const os = require('os')
 const crypto = require('crypto')
 const { URL } = require('url')
 const { SyncServer } = require('./sync-server.cjs')
+const Youtube = require('./youtube.cjs')
 
 // ─── Aether / WARP local proxy ──────────────────────────────────────────────
 // El mismo cliente WARP userspace que en Android (CluvexStudio/Aether):
@@ -27,12 +28,13 @@ const AETHER_HTTP_PORT = 1820
 // Hosts que nunca van por el túnel — espejo de nonProxyHosts/bypass del
 // plugin Android (TDT/RTVE/Mediaset/Google DAI dan errores bajo WARP, y la
 // LAN debe ir directa para la sincronización OctoStream).
-const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|doubleclick\.net)$/i
+const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|doubleclick\.net|googlevideo\.com)$/i
 const AETHER_BYPASS_CHROMIUM = [
   '<local>', 'localhost', '127.0.0.1', '*.local',
   '192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '169.254.0.0/16',
   '*.tdtspain.com', '*.tdtchannels.com', '*.rtve.es', '*.mediaset.net',
   '*.mediasetinfinity.es', 'dai.google.com', '*.doubleclick.net',
+  '*.googlevideo.com',
 ].join(';')
 function isAetherBypassHost(host) {
   return AETHER_BYPASS_SUFFIX.test(host || '') || /^dai\.google\.com$/i.test(host || '')
@@ -303,6 +305,39 @@ function getLocalIP() {
 }
 
 const secureHttpsAgent = new https.Agent({ keepAlive: true })
+
+// ─── YouTube (yt-dlp) ──────────────────────────────────────────────────────
+// Equivalente desktop de NewPipeExtractor (Android). El binario se empaqueta
+// en resources/ytdlp (scripts/fetch-ytdlp.mjs).
+function resolveYtdlp() {
+  if (process.env.OCTOSTREAM_YTDLP && fs.existsSync(process.env.OCTOSTREAM_YTDLP)) {
+    return process.env.OCTOSTREAM_YTDLP
+  }
+  const exe = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+  try {
+    const bundled = path.join(process.resourcesPath || '', 'ytdlp',
+      `${process.platform}-${process.arch}`, exe)
+    if (app.isPackaged && fs.existsSync(bundled)) return bundled
+  } catch { /* sin resourcesPath en dev */ }
+  try {
+    const devPath = path.resolve(__dirname, '..', 'build', 'ytdlp',
+      `${process.platform}-${process.arch}`, exe)
+    if (fs.existsSync(devPath)) return devPath
+  } catch { /* sin build/ytdlp */ }
+  return exe // PATH
+}
+
+Youtube.init({
+  resolver: resolveYtdlp,
+  agentFor: (url) => {
+    try {
+      const u = new URL(url)
+      return agentFor(u, u.protocol === 'https:')
+    } catch { return undefined }
+  },
+  getWarpProxyUrl: () => aetherState.connected
+    ? `socks5h://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}` : null,
+})
 
 // ─── Local stream proxy ────────────────────────────────────────────────────
 // Solves CORS + SSL issues: fetches streams server-side (Node) and serves
@@ -1091,6 +1126,18 @@ ipcMain.handle('cloud:status', async () => {
     error: aetherState.error,
   }
 })
+
+// YouTube — misma superficie que el plugin Youtube de Android.
+for (const [method, fn] of Object.entries({
+  'youtube:resolve': 'resolve',
+  'youtube:search': 'search',
+  'youtube:search-more': 'searchMore',
+  'youtube:suggest': 'suggest',
+  'youtube:get-channel': 'getChannel',
+  'youtube:get-channel-info': 'getChannelInfo',
+})) {
+  ipcMain.handle(method, (_event, arg) => Youtube[fn](arg || {}))
+}
 
 // Pantalla completa de la ventana: la app Android reproduce siempre a
 // pantalla completa; en escritorio el player se comporta igual.

@@ -195,6 +195,22 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   quedaron firmadas por error con una debug key (`e006f031...`) — desde 1.52
   los usuarios que actualicen desde ≤1.51 deben reinstalar (conflicto de firma).
 
+## YouTube en desktop (Electron)
+
+- Android usa NewPipeExtractor vía el plugin `@octostream/youtube`; en
+  Linux/Windows el equivalente es **yt-dlp** empaquetado
+  (`electron/youtube.cjs` + IPC `youtube:*` + `window.octostream.youtube`).
+- Binarios: `scripts/fetch-ytdlp.mjs` → `build/ytdlp/<platform>-<arch>/`
+  (verifica SHA2-256SUMS de la release) → `extraResources` →
+  `resources/ytdlp/...`.
+- El plugin **yt-dlp-invidious** va junto al ejecutable en
+  `yt-dlp-plugins/invidious/` (yt-dlp lo autodescarga): fallback automático
+  a instancias Invidious cuando YouTube devuelve bot-check ("Sign in to
+  confirm you're not a bot"). Commit fijado + sha256 de los .py verificados.
+- `googlevideo.com` está en el bypass de WARP (como `direct:true` en
+  Android): por el túnel devuelve 429.
+- Con WARP activo, yt-dlp sale por `--proxy socks5h://127.0.0.1:1819`.
+
 ## Posibles próximos pasos
 
 - Configurar CI para compilar APK de Android (requiere aceptar licencias SDK y Java).
