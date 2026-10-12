@@ -232,7 +232,7 @@ export default function SearchPage() {
           onKeyDown={handleKeyDown}
           onFocus={() => setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-          placeholder="Buscar películas, series, canales, programas U7D..."
+          placeholder="Buscar películas, series, canales o categorías (terror, anime)..."
           className="input w-full pl-10 pr-10 text-lg"
           autoFocus
         />

@@ -484,6 +484,113 @@ export async function searchMulti(query, signal) {
       : mapSeries(item, { includeRaw: false }))
 }
 
+// Búsqueda por categoría: si la query es un género ("terror", "comedia") o
+// un keyword de TMDB ("j-horror", "gore", "slasher", "found footage"),
+// devuelve lo más popular de esa categoría vía /discover. La búsqueda por
+// título sola no basta: "terror" solo devuelve títulos con esa palabra.
+const CATEGORY_GENRES = {
+  'accion': { movie: 28, tv: 10759 }, 'action': { movie: 28, tv: 10759 },
+  'aventura': { movie: 12, tv: 10759 }, 'adventure': { movie: 12, tv: 10759 },
+  'animacion': { movie: 16, tv: 16 }, 'animation': { movie: 16, tv: 16 },
+  'anime': { movie: 16, tv: 16, origin: 'JP' },
+  'comedia': { movie: 35, tv: 35 }, 'comedy': { movie: 35, tv: 35 },
+  'crimen': { movie: 80, tv: 80 }, 'crime': { movie: 80, tv: 80 },
+  'documental': { movie: 99, tv: 99 }, 'documentary': { movie: 99, tv: 99 },
+  'drama': { movie: 18, tv: 18 },
+  'familia': { movie: 10751, tv: 10751 }, 'family': { movie: 10751, tv: 10751 },
+  'infantil': { movie: 10751, tv: 10762 }, 'kids': { movie: 10751, tv: 10762 },
+  'fantasia': { movie: 14, tv: 10765 }, 'fantasy': { movie: 14, tv: 10765 },
+  'historia': { movie: 36, tv: null }, 'history': { movie: 36, tv: null },
+  'terror': { movie: 27, tv: null }, 'horror': { movie: 27, tv: null },
+  'miedo': { movie: 27, tv: null },
+  'musica': { movie: 10402, tv: null }, 'music': { movie: 10402, tv: null },
+  'misterio': { movie: 9648, tv: 9648 }, 'mystery': { movie: 9648, tv: 9648 },
+  'romance': { movie: 10749, tv: null }, 'romantica': { movie: 10749, tv: null },
+  'ciencia ficcion': { movie: 878, tv: 10765 }, 'scifi': { movie: 878, tv: 10765 },
+  'sci-fi': { movie: 878, tv: 10765 },
+  'thriller': { movie: 53, tv: null }, 'suspense': { movie: 53, tv: 9648 },
+  'belica': { movie: 10752, tv: 10768 }, 'guerra': { movie: 10752, tv: 10768 },
+  'war': { movie: 10752, tv: 10768 },
+  'western': { movie: 37, tv: 37 },
+  'reality': { movie: null, tv: 10764 },
+  'telenovela': { movie: null, tv: 10766 },
+  'dorama': { movie: null, tv: 18, origin: 'KR|JP|CN|TW|TH' },
+  'kdrama': { movie: null, tv: 18, origin: 'KR' },
+  'jdrama': { movie: null, tv: 18, origin: 'JP' },
+}
+
+const normCategory = s => (s || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ').trim()
+
+// Cache keyword nombre→id (los keywords de TMDB son estables)
+const keywordIdCache = new Map()
+
+// Resuelve un keyword exacto de TMDB ("j-horror", "found footage") a su id.
+// Solo se acepta cuando el nombre coincide con la query — keywords de un
+// solo match aproximado meterían ruido en búsquedas de título normales.
+async function tmdbKeywordId(query, apiKey, signal) {
+  const key = normCategory(query)
+  if (keywordIdCache.has(key)) return keywordIdCache.get(key)
+  const data = await tmdbFetch('/search/keyword', apiKey, { query }, signal)
+  const hit = (data.results || []).find(k =>
+    normCategory(k.name) === key || normCategory(k.name) === key.replace(/\s+/g, '-'))
+  const id = hit?.id ?? null
+  if (keywordIdCache.size > 100) keywordIdCache.delete(keywordIdCache.keys().next().value)
+  keywordIdCache.set(key, id)
+  return id
+}
+
+export async function searchCategory(query, signal) {
+  const apiKey = getApiKey()
+  if (!apiKey) return []
+  const q = normCategory(query)
+  if (q.length < 3 || q.length > 40) return []
+
+  const genre = CATEGORY_GENRES[q]
+  const tasks = []
+  if (genre) {
+    const origin = genre.origin ? { with_origin_country: genre.origin } : {}
+    if (genre.movie) {
+      tasks.push(tmdbFetch('/discover/movie', apiKey,
+        { with_genres: genre.movie, sort_by: 'popularity.desc', ...origin }, signal)
+        .then(d => (d.results || []).map(r => mapMovie(r))))
+    }
+    if (genre.tv) {
+      tasks.push(tmdbFetch('/discover/tv', apiKey,
+        { with_genres: genre.tv, sort_by: 'popularity.desc', ...origin }, signal)
+        .then(d => (d.results || []).map(r => mapSeries(r))))
+    } else {
+      // TMDB TV no tiene género Terror/Suspense/etc.: intentar el keyword
+      // homónimo para traer también series de esa categoría.
+      const kwId = await tmdbKeywordId(q, apiKey, signal).catch(() => null)
+      if (kwId) {
+        tasks.push(tmdbFetch('/discover/tv', apiKey,
+          { with_keywords: kwId, sort_by: 'popularity.desc', ...origin }, signal)
+          .then(d => (d.results || []).map(r => mapSeries(r))))
+      }
+    }
+  } else if (q.split(/[\s-]+/).length <= 3) {
+    // No es un género: intentar keyword TMDB ("j-horror", "gore", …).
+    // Limitado a queries cortas para no lanzar una request extra por cada
+    // título largo que se busque.
+    const kwId = await tmdbKeywordId(q, apiKey, signal)
+    if (!kwId) return []
+    tasks.push(
+      tmdbFetch('/discover/movie', apiKey, { with_keywords: kwId, sort_by: 'popularity.desc' }, signal)
+        .then(d => (d.results || []).map(r => mapMovie(r))),
+      tmdbFetch('/discover/tv', apiKey, { with_keywords: kwId, sort_by: 'popularity.desc' }, signal)
+        .then(d => (d.results || []).map(r => mapSeries(r))),
+    )
+  }
+  if (!tasks.length) return []
+  const groups = await Promise.all(tasks.map(p => p.catch(e => {
+    if (e?.name === 'AbortError') throw e
+    return []
+  })))
+  return groups.flat()
+}
+
 export async function searchSpanishInfo(query, signal) {
   const apiKey = getApiKey()
   const data = await tmdbFetch('/search/multi', apiKey, { query, page: 1 }, signal)

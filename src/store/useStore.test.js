@@ -24,6 +24,7 @@ vi.mock('../utils/warpStatus.js', () => ({
 // Search is TMDB-only (+ local TDT channel cache) — mock both.
 vi.mock('../plugins/builtIn/tmdb.js', () => ({
   searchMulti: vi.fn().mockResolvedValue([]),
+  searchCategory: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('../plugins/bundled/tdtSpain/cache.js', () => ({
   getSharedCache: vi.fn().mockReturnValue({ channels: [], epg: {} }),

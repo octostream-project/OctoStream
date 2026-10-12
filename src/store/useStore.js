@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { pluginManager } from '../plugins/manager.js'
-import { searchMulti } from '../plugins/builtIn/tmdb.js'
+import { searchMulti, searchCategory } from '../plugins/builtIn/tmdb.js'
 import { getSharedCache } from '../plugins/bundled/tdtSpain/cache.js'
 import { normalizeChannel } from '../plugins/bundled/tdtSpain/normalize.js'
 import { getJsonSync, setJsonSync } from '../utils/storage.js'
@@ -161,14 +161,28 @@ export const useStore = create((set, get) => ({
       // Solo TMDB (exacto, una petición cacheada) + canales TDT locales.
       // Los scrapers de plugins devolvían ruido que aparecía y desaparecía
       // por lotes — la búsqueda queda instantánea y estable.
-      const tmdbResults = await searchMulti(query, signal)
+      const [tmdbResults, categoryResults] = await Promise.all([
+        searchMulti(query, signal),
+        // Categoría ("terror", "j-horror", "anime"): va por discover/keyword
+        // de TMDB — tolerante a fallos, nunca bloquea la búsqueda por título.
+        searchCategory(query, signal).catch(() => []),
+      ])
       if (signal?.aborted || gen !== searchGeneration) {
         // Abort sin búsqueda posterior: limpiar loading para no dejar el
         // spinner colgado en el store global.
         if (gen === searchGeneration) set({ loading: false })
         return
       }
-      set({ searchResults: [...tmdbResults, ...searchLocalChannels(query)], loading: false })
+      // Si la query era una categoría, sus resultados van primero (el usuario
+      // pidió el género, no un título que se llame igual); dedup por id.
+      const seen = new Set()
+      const merged = []
+      for (const item of [...categoryResults, ...tmdbResults]) {
+        if (seen.has(item.id)) continue
+        seen.add(item.id)
+        merged.push(item)
+      }
+      set({ searchResults: [...merged, ...searchLocalChannels(query)], loading: false })
     } catch (e) {
       if (gen === searchGeneration) set({ loading: false })
     }
