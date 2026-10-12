@@ -15,6 +15,7 @@ const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' 
 
 import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
+import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isAlldebridEnabled, isAlldebridSupported, unlockLink, resolveMagnet } from '../alldebrid.js'
 import { inferStreamType } from '../../../utils/streamType.js'
@@ -359,6 +360,47 @@ function softYearFilter(items, wantedYear) {
     return y == null || Math.abs(y - wantedYear) <= 1
   })
   return ok.length > 0 ? ok : items
+}
+
+// Año publicado en la ficha de una página de canal. Los sitios indexan
+// varias pelis homónimas ("Hansel y Gretel" existe de 2002, 2007, 2013 y
+// 2020) sin año en el listado de búsqueda — la página de cada entrada sí
+// lo declara ("Año: 2020", releaseDate JSON-LD, "(2007)" en el <title>).
+export function extractPageYear(html) {
+  if (!html || typeof html !== 'string') return null
+  const raw = html.length > 600000 ? html.slice(0, 600000) : html
+  // Ojo: datePublished NO se usa — en schema.org de páginas de noticias es
+  // la fecha de publicación del artículo, no la del estreno de la película.
+  let m = raw.match(/"(?:releaseDate|first_air_date|release_date)"\s*:\s*"?\s*(19\d{2}|20\d{2})/i)
+       || raw.match(/<title>[^<]*\((19\d{2}|20\d{2})\)[^<]*<\/title>/i)
+       || raw.match(/<[^>]+class="[^"]*\byear\b[^"]*"[^>]*>\s*(?:<[^>]+>\s*)*(19\d{2}|20\d{2})/i)
+  if (m) return parseInt(m[1], 10)
+  const plain = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+  m = plain.match(/(?:año|estreno|year|año de estreno)\s*[:\-–]?\s*(19\d{2}|20\d{2})/i)
+    || plain.match(/(?:released|premiere|estrenada?)[^0-9]{0,30}(19\d{2}|20\d{2})/i)
+  return m ? parseInt(m[1], 10) : null
+}
+
+// Caché del año leído de cada página (los episodios de una misma serie
+// comparten ficha — sin caché se repetiría la descarga por capítulo).
+const pageYearCache = new Map()
+const PAGE_YEAR_TTL = 30 * 60 * 1000
+async function pageYearOf(url) {
+  if (!url) return null
+  const cached = pageYearCache.get(url)
+  if (cached && Date.now() - cached.ts < PAGE_YEAR_TTL) return cached.year
+  let year = null
+  try {
+    year = extractPageYear(await fetchHtml(url))
+  } catch {
+    // Página inalcanzable: sin dato de año, se conserva el match.
+  }
+  if (pageYearCache.size > 300) pageYearCache.delete(pageYearCache.keys().next().value)
+  pageYearCache.set(url, { year, ts: Date.now() })
+  return year
 }
 
 // Find the channel that owns a given catalog id.
@@ -1111,6 +1153,11 @@ export const plurtaskoFactory = (config) => {
             // 4. Fallback: usar el primer resultado si la búsqueda fue específica
             let match = null
 
+            // Items descartados por la validación por ID: no pueden volver a
+            // ganar por título ni por el fallback (serían otra película).
+            const idRejected = new Set()
+            let matchVerifiedById = false
+
             // Intentar validación por ID para cada resultado.
             // imdbId solo existe si hay tmdbId, así que basta chequear tmdbId.
             if (!match && tmdbId) {
@@ -1120,10 +1167,12 @@ export const plurtaskoFactory = (config) => {
                 if (idCheck === true) {
                   console.log(`[Plurtasko] Channel ${ch.id}: ID match for "${it.name}" (validated by TMDB/IMDb ID)`)
                   match = it
+                  matchVerifiedById = true
                   break
                 }
                 if (idCheck === false) {
                   console.log(`[Plurtasko] Channel ${ch.id}: ID mismatch for "${it.name}" (rejected by TMDB/IMDb ID)`)
+                  idRejected.add(it)
                 }
               }
             }
@@ -1153,7 +1202,7 @@ export const plurtaskoFactory = (config) => {
 
             // Fallback a title matching si no hay validación por ID
             if (!match) {
-              let titleMatches = items.filter(it =>
+              let titleMatches = items.filter(it => !idRejected.has(it) &&
                 (isTitleMatch(it.name, name) || isTitleMatch(it.title, name) ||
                 (originalName && (isTitleMatch(it.name, originalName) || isTitleMatch(it.title, originalName))) ||
                 (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))) &&
@@ -1195,6 +1244,7 @@ export const plurtaskoFactory = (config) => {
               const origSlug = normalize(originalName)
               const enSlug = normalize(englishName)
               match = softYearFilter(items.filter(it => {
+                if (idRejected.has(it)) return false
                 const slug = normalize((it.url || '').split('/').pop())
                 return slug === querySlug || slug === origSlug || slug === enSlug
               }), wantedYear)[0] || null
@@ -1208,7 +1258,7 @@ export const plurtaskoFactory = (config) => {
             // "season"/"2nd" don't count, so "Ao no Hako 2nd Season" can't
             // accept "Edens Zero 2nd Season" — and it must carry the same
             // season marker so a franchise/old-season page can't win).
-            const markerItems = softYearFilter(items.filter(markerOk), wantedYear)
+            const markerItems = softYearFilter(items.filter(it => !idRejected.has(it) && markerOk(it)), wantedYear)
             if (!match && markerItems.length > 0) {
               const first = markerItems[0]
               const nameWords = significantWords(first.name || first.title)
@@ -1228,6 +1278,49 @@ export const plurtaskoFactory = (config) => {
             }
 
             if (!match || !match.url) return
+
+            // Verificación por año en la página del resultado: los sitios
+            // indexan pelis homónimas ("Hansel y Gretel" existe de 2002,
+            // 2007, 2013 y 2020) sin año en el listado — el match por
+            // título elegía cualquiera y reproducía otra película. Si la
+            // ficha TMDB trae año y el resultado no lo confirma, se
+            // descarga la página del candidato (y de los rivales
+            // plausibles) y se descartan los que declaran un año distinto.
+            // Solo se rechaza cuando la página declara año: sin dato se
+            // conserva el match como antes (beneficio de la duda).
+            const declaredYear = yearOfItem(match)
+            if (!matchVerifiedById && wantedYear != null && (declaredYear == null || Math.abs(declaredYear - wantedYear) > 1)) {
+              const rivals = items.filter(it => it !== match && !idRejected.has(it) &&
+                (isTitleMatch(it.name, name) || isTitleMatch(it.title, name) ||
+                 (originalName && (isTitleMatch(it.name, originalName) || isTitleMatch(it.title, originalName))) ||
+                 (englishName && (isTitleMatch(it.name, englishName) || isTitleMatch(it.title, englishName)))) &&
+                markerOk(it))
+                .map(it => ({
+                  it,
+                  score: Math.max(
+                    titleRelevance(name, it.name), titleRelevance(name, it.title),
+                    originalName && Math.max(titleRelevance(originalName, it.name), titleRelevance(originalName, it.title)),
+                    englishName && Math.max(titleRelevance(englishName, it.name), titleRelevance(englishName, it.title)),
+                  ),
+                }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 3)
+                .map(x => x.it)
+              const pool = [match, ...rivals].filter(it => it?.url)
+              const checked = await Promise.all(pool.map(async it => ({ it, y: await pageYearOf(it.url) })))
+              const verified = checked.filter(c => c.y != null && Math.abs(c.y - wantedYear) <= 1)
+              if (verified.length) {
+                if (verified[0].it !== match) {
+                  console.log(`[Plurtasko] Channel ${ch.id}: year check "${match.name}" → "${verified[0].it.name}" (page year ${verified[0].y} ≈ ${wantedYear})`)
+                  match = verified[0].it
+                }
+              } else if (checked.find(c => c.it === match)?.y != null) {
+                // La página declara otro año: es una peli homónima —
+                // mejor sin streams de este canal que la película equivocada.
+                console.log(`[Plurtasko] Channel ${ch.id}: rejecting "${match.name}" — page year ${checked.find(c => c.it === match).y} ≠ ${wantedYear}`)
+                return
+              }
+            }
 
             // Para series: si se pasa season/episode, obtener los episodios del canal
             // y buscar el episodio concreto

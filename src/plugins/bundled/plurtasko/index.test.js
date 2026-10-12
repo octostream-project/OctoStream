@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CONTENT_TYPES } from '../../base.js'
-import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults, titleSeasonMarker } from './index.js'
+import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults, titleSeasonMarker, extractPageYear } from './index.js'
+
+// fetchHtml se mockea a nivel de módulo: la verificación por año descarga
+// la página del resultado y los tests no deben tocar la red. Por defecto
+// devuelve '' (sin año) → el match se conserva por beneficio de la duda.
+vi.mock('./http.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, fetchHtml: vi.fn(async () => '') }
+})
+import { fetchHtml } from './http.js'
 
 const channel = CHANNELS.find(item => item.id === 'animeflvone')
 const originalGetMeta = channel.getMeta
@@ -329,6 +338,120 @@ describe('titleSeasonMarker (marcador de temporada en el título)', () => {
       expect(streams).toEqual([])
       expect(channel.getStreams).not.toHaveBeenCalled()
     } finally {
+      searchStub.restore()
+    }
+  })
+})
+
+describe('verificación por año de la página del resultado', () => {
+  it('extractPageYear lee los formatos habituales', () => {
+    // DonTorrent: "Año 2002" en <title>/meta
+    expect(extractPageYear('<title>Año 2002 Torrent Gratis - DonTorrent</title>')).toBe(2002)
+    // GranTorrent: Año:</span><span>2020
+    expect(extractPageYear('<span>Año:</span>\n<span class="x">2020</span>')).toBe(2020)
+    // Pelispedia: <span class="year fa-calendar far">2013</span>
+    expect(extractPageYear('<span class="year fa-calendar far">2013</span>')).toBe(2013)
+    // JSON-LD releaseDate
+    expect(extractPageYear('{"releaseDate":"2007-12-27"}')).toBe(2007)
+    // "(2013)" en el <title>
+    expect(extractPageYear('<title>Ver Peli (2013) Online</title>')).toBe(2013)
+    // datePublished NO es el año de la peli (fecha del artículo)
+    expect(extractPageYear('{"datePublished":"2021"}')).toBeNull()
+    expect(extractPageYear('<p>sin año por ningún lado</p>')).toBeNull()
+    expect(extractPageYear('')).toBeNull()
+    expect(extractPageYear(null)).toBeNull()
+  })
+
+  it('rechaza el match cuando la página declara otro año (peli homónima)', async () => {
+    // Regresión: buscar "Hansel y Gretel" (2007, coreana) devolvía
+    // "Hansel y Gretel: Cazadores de brujas" (2013) y la reproducía.
+    const movieChannel = CHANNELS.find(ch => ch.id === 'repelishd')
+    const origGetStreams = movieChannel.getStreams
+    const searchStub = stubAllSearches({
+      repelishd: [
+        { id: 'r:hg2013', url: 'https://t.example/peli/hansel-cazadores', name: 'Hansel y Gretel: Cazadores de brujas' },
+      ],
+    })
+    vi.mocked(fetchHtml).mockImplementation(async (url) =>
+      url === 'https://t.example/peli/hansel-cazadores'
+        ? '<span class="year fa-calendar far">2013</span>' : '')
+    movieChannel.getStreams = vi.fn()
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'tmdb-movie-15185',
+        name: 'Hansel y Gretel',
+        year: 2007,
+      })
+      expect(streams).toEqual([])
+      expect(movieChannel.getStreams).not.toHaveBeenCalled()
+    } finally {
+      movieChannel.getStreams = origGetStreams
+      searchStub.restore()
+      vi.mocked(fetchHtml).mockReset().mockResolvedValue('')
+    }
+  })
+
+  it('prefiere al rival cuyo año coincide cuando el favorito declara otro', async () => {
+    // Dos candidatos homónimos: el de mejor título declara 2013 pero el
+    // segundo declara 2007 → debe ganar el segundo.
+    const movieChannel = CHANNELS.find(ch => ch.id === 'repelishd')
+    const origGetStreams = movieChannel.getStreams
+    const searchStub = stubAllSearches({
+      repelishd: [
+        { id: 'r:hg2013', url: 'https://t2.example/peli/hg-2013', name: 'Hansel y Gretel: Cazadores de brujas' },
+        { id: 'r:hg2007', url: 'https://t2.example/peli/hg-2007', name: 'Hansel y Gretel: El cuento' },
+      ],
+    })
+    vi.mocked(fetchHtml).mockImplementation(async (url) => ({
+      'https://t2.example/peli/hg-2013': '<span class="year">2013</span>',
+      'https://t2.example/peli/hg-2007': '<span class="year">2007</span>',
+    })[url] || '')
+    movieChannel.getStreams = vi.fn().mockResolvedValue([
+      { url: 'https://cdn.x/hg-coreana.mp4', streamType: 'mp4', server: 'Directo' },
+    ])
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'tmdb-movie-15185',
+        name: 'Hansel y Gretel',
+        year: 2007,
+      })
+      expect(movieChannel.getStreams).toHaveBeenCalledWith(expect.objectContaining({ id: 'r:hg2007' }))
+      expect(streams).toEqual([expect.objectContaining({ url: 'https://cdn.x/hg-coreana.mp4' })])
+    } finally {
+      movieChannel.getStreams = origGetStreams
+      searchStub.restore()
+      vi.mocked(fetchHtml).mockReset().mockResolvedValue('')
+    }
+  })
+
+  it('conserva el match cuando la página no declara año (beneficio de la duda)', async () => {
+    const movieChannel = CHANNELS.find(ch => ch.id === 'repelishd')
+    const origGetStreams = movieChannel.getStreams
+    const searchStub = stubAllSearches({
+      repelishd: [
+        { id: 'r:hg', url: 'https://t3.example/peli/hg', name: 'La Peli Sin Año' },
+      ],
+    })
+    // fetchHtml ya devuelve '' por defecto → sin año en la página
+    movieChannel.getStreams = vi.fn().mockResolvedValue([
+      { url: 'https://cdn.x/hg.mp4', streamType: 'mp4', server: 'Directo' },
+    ])
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'tmdb-movie-99991',
+        name: 'La Peli Sin Año',
+        year: 2007,
+      })
+      expect(movieChannel.getStreams).toHaveBeenCalledWith(expect.objectContaining({ id: 'r:hg' }))
+      expect(streams).toEqual([expect.objectContaining({ url: 'https://cdn.x/hg.mp4' })])
+    } finally {
+      movieChannel.getStreams = origGetStreams
       searchStub.restore()
     }
   })
