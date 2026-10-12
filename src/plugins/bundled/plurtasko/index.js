@@ -697,10 +697,13 @@ async function resolveStreams(streams, onBatch, context = {}) {
 
     expanded.push(s.quality ? s : { ...s, quality: urlQuality })
   }
-  for (const entries of await Promise.all(debridTasks)) expanded.push(...entries)
-
-  // Emit direct streams immediately (they're already playable)
+  // Emit direct streams immediately (they're already playable) — ANTES de
+  // esperar a debrid: cada magnet puede tardar ~30s de poll y retenerlos
+  // dejaba la lista entera vacía ~1 min con AllDebrid activado.
   if (onBatch && expanded.length > 0) onBatch(expanded)
+  for (const entries of await Promise.all(debridTasks)) expanded.push(...entries)
+  // Los resultados debrid (o el fallback P2P) llegan tarde: re-emitir.
+  if (onBatch && debridTasks.length > 0) onBatch(expanded)
 
   // Los torrent nunca pasan por resolución embed: habilitados van por la vía
   // directa (debrid/magnet); deshabilitados se descartan aquí.

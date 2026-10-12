@@ -601,12 +601,18 @@ export default function Details() {
     }
     // If the stream has an originalUrl (embed page), always resolve fresh
     // because tokens from CDNs like fastream expire quickly
-    const isDirectUrl = /\.(m3u8|mp4|mkv)(\?|$)/i.test(stream.url) || /videoplayback/.test(stream.url)
+    // (.avi y los CDN de debrid también son URLs directas: sin ellos un
+    // .avi desbloqueado disparaba un resolveEmbed sobre la URL .torrent).
+    const isDirectUrl = /\.(m3u8|mp4|mkv|avi|ts|mov|m4v|webm|wmv)(\?|$)/i.test(stream.url)
+      || /videoplayback/.test(stream.url)
+      || /download\.alldebrid\.com|alldebrid\.com\/d\/|\.debrid\.(it|al|com|cx|ee|is)\//i.test(stream.url)
     // Re-resolve if: has originalUrl, is not an embed, and either:
     // - URL is not direct (still an embed page), OR
     // - URL is direct but from a CDN with expiring tokens (fastream, streamwish, etc.)
     // Also re-resolve embed-type servers that have a dedicated JS resolver (waaw, etc.)
-    const needsFreshResolve = stream.originalUrl && (
+    // Streams debrid/torrent se re-resuelven por _refreshUrl (magnet) u
+    // originalDebridUrl (unlock) — nunca por el resolver de embeds.
+    const needsFreshResolve = stream.originalUrl && !stream.viaDebrid && !stream._refreshUrl && !stream.originalDebridUrl && (
       stream.streamType !== 'embed' ||
       /waaw|wolfstream/i.test(stream.server || '') ||
       /waaw\.(tv|to)/i.test(stream.originalUrl)

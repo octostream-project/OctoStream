@@ -482,10 +482,23 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       } catch {}
       if (window.gc) { try { window.gc() } catch {} }
 
+      // La app queda oculta (root display:none) mientras ExoPlayer está al
+      // frente. Cualquier fallo después de ocultarla dejaba el error
+      // renderizado en un DOM invisible → pantalla negra permanente.
+      // Restaurar siempre que se vaya a mostrar un error en React.
+      const restoreAppDom = () => {
+        try {
+          const root = document.getElementById('root')
+          if (root) root.style.display = ''
+        } catch {}
+      }
+
       const proxyUrl = window.octostream?.proxyUrl
       const isElectron = !!window.octostream?.isElectron
       let streamUrl = sanitizeUrl(stream.url)
       if (!streamUrl) {
+        restoreAppDom()
+        setPlayerOpen(false)
         setError('URL del stream no válida')
         setLoading(false)
         return
@@ -536,6 +549,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
           if (cancelled) return
           console.warn('[Player] torrent engine failed:', e?.message)
           setTorrentProgress(null)
+          restoreAppDom()
+          setPlayerOpen(false)
           setError(e?.message || 'No se pudo iniciar el motor torrent')
           setLoading(false)
           return
@@ -686,6 +701,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                     console.warn('[Player] ExoPlayer retry after re-resolve failed:', e?.message)
                     if (!cancelled && !closedRef.current) {
                       setExoFailed(true)
+                      restoreAppDom()
+                      setPlayerOpen(false)
                       setError(`No se pudo reproducir el stream: ${e?.message || 'error desconocido'}`)
                       stopPlayback().catch(() => {})
                     }
@@ -693,6 +710,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                 } else {
                   console.log('[Player] Re-resolve gave no new URL')
                   setExoFailed(true)
+                  restoreAppDom()
+                  setPlayerOpen(false)
                   setError('No se pudo renovar el enlace — prueba con otro')
                   stopPlayback().catch(() => {})
                 }
@@ -701,6 +720,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
                 if (cancelled || closedRef.current) return
                 setResolvingEmbed(false)
                 setExoFailed(true)
+                restoreAppDom()
+                setPlayerOpen(false)
                 setError(`No se pudo renovar el enlace: ${e?.message || 'error'}`)
                 stopPlayback().catch(() => {})
               })
@@ -712,12 +733,16 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
             // no desmonte el componente y el error se vea.
             console.log('[Player] ExoPlayer HTTP error:', msg, 'code:', state.errorCode)
             setExoFailed(true)
+            restoreAppDom()
+            setPlayerOpen(false)
             setError(`No se pudo reproducir el stream (HTTP ${state.errorCode || msg})`)
             stopPlayback().catch(() => {})
           } else {
             // Error no-HTTP (decode, parsing…): el diálogo nativo sigue abierto
             // con el player muerto encima del error — cerrar para que se vea.
             setExoFailed(true)
+            restoreAppDom()
+            setPlayerOpen(false)
             setError(`Error ExoPlayer: ${msg}`)
             stopPlayback().catch(() => {})
           }
@@ -793,6 +818,8 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       }
       playStream(playArgs, onPlaybackState).catch(e => {
         console.error('[Player] ExoPlayer error:', e?.message)
+        restoreAppDom()
+        setPlayerOpen(false)
         setError(`Error al iniciar ExoPlayer: ${e?.message || 'unknown'}`)
       })
 
