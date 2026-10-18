@@ -34,4 +34,17 @@ export interface CloudProxyPlugin {
    * system's OpenVPN client (RiseupVPN alternative VPN layer).
    */
   exportOvpn(options: { config: string; name?: string }): Promise<{ opened: boolean; name: string }>;
+
+  /**
+   * Connect the RiseupVPN tunnel via the OpenVPN for Android remote API
+   * (de.blinkt.openvpn must be installed). Status: connected | consent |
+   * need-vpn-permission. Rejects 'no-openvpn-app' when the app is missing.
+   */
+  riseupConnect(options: { config: string }): Promise<{ status: string }>;
+
+  /** Disconnect the RiseupVPN tunnel (remote API). */
+  riseupDisconnect(): Promise<{ status: string }>;
+
+  /** RiseupVPN remote-API status. */
+  riseupTunnelStatus(): Promise<{ installed: boolean; connected: boolean; hasEngine: boolean }>;
 }

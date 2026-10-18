@@ -21,6 +21,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        // AIDL de la API remota de OpenVPN for Android (de.blinkt.openvpn)
+        aidl = true
+    }
+
     lint {
         abortOnError = false
     }

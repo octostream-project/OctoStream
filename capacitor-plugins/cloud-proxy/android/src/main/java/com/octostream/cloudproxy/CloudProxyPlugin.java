@@ -17,6 +17,9 @@ import java.io.InputStreamReader;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
+import de.blinkt.openvpn.api.IOpenVPNAPIService;
+import de.blinkt.openvpn.api.IOpenVPNStatusCallback;
+
 /**
  * Capacitor plugin that runs the Aether binary to create a local proxy
  * for Cloudflare WARP. No VpnService needed — the proxy runs on loopback
@@ -49,6 +52,138 @@ public class CloudProxyPlugin extends Plugin {
     private static final Executor DIRECT_EXECUTOR = Runnable::run;
     private boolean antiLeakScriptInstalled = false;
     private androidx.webkit.ScriptHandler antiLeakScriptHandler = null;
+
+    // ─── RiseupVPN vía API remota de OpenVPN for Android ────────────────────
+    // La app oficial (de.blinkt.openvpn) expone IOpenVPNAPIService por bind:
+    // podemos importar el .ovpn generado y arrancar/parar el túnel real —
+    // VPN sistema-completo gestionada desde OctoStream sin engine propio.
+    // aether/WARP y el resto del tráfico enrutan por la VPN (VpnService
+    // intercepta todo el tráfico de las apps).
+    private static final String OVPN_PKG = "de.blinkt.openvpn";
+    private volatile IOpenVPNAPIService mOvpnApi = null;
+    private volatile boolean mOvpnConnected = false;
+    private volatile String mPendingOvpnConf = null;
+    private android.content.ServiceConnection mOvpnConn = null;
+
+    private boolean isOvpnAppInstalled() {
+        try {
+            getContext().getPackageManager().getPackageInfo(OVPN_PKG, 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private final IOpenVPNStatusCallback mOvpnStatusCb = new IOpenVPNStatusCallback.Stub() {
+        @Override
+        public void newStatus(String uuid, String state, String message, String level) {
+            mOvpnConnected = "CONNECTED".equals(state);
+        }
+    };
+
+    private void bindOvpnApi(Runnable onReady) {
+        if (mOvpnApi != null) { onReady.run(); return; }
+        android.content.Context ctx = getContext();
+        final android.content.Context appCtx = ctx.getApplicationContext();
+        mOvpnConn = new android.content.ServiceConnection() {
+            @Override public void onServiceConnected(android.content.ComponentName n, android.os.IBinder b) {
+                mOvpnApi = IOpenVPNAPIService.Stub.asInterface(b);
+                try { mOvpnApi.registerStatusCallback(mOvpnStatusCb); } catch (Exception ignored) {}
+                onReady.run();
+            }
+            @Override public void onServiceDisconnected(android.content.ComponentName n) {
+                mOvpnApi = null;
+            }
+        };
+        try {
+            android.content.Intent intent = new android.content.Intent(IOpenVPNAPIService.class.getName());
+            intent.setPackage(OVPN_PKG);
+            if (!appCtx.bindService(intent, mOvpnConn, android.content.Context.BIND_AUTO_CREATE)) {
+                mOvpnApi = null;
+                throw new IllegalStateException("bind rechazado");
+            }
+        } catch (Exception e) {
+            mOvpnApi = null;
+            try { appCtx.unbindService(mOvpnConn); } catch (Exception ignored) {}
+            throw e;
+        }
+    }
+
+    /**
+     * Conecta el túnel RiseupVPN con el .ovpn generado en JS.
+     * @param call {config: string} — contenido .ovpn con PEMs inline.
+     *   status: connected | consent (autoriza la app en el diálogo y reintenta)
+     *   | need-vpn-permission (acepta el permiso VPN del sistema y reintenta)
+     */
+    @PluginMethod
+    public void riseupConnect(PluginCall call) {
+        final String conf = call.getString("config");
+        if (conf == null || conf.isEmpty()) {
+            call.reject("config required");
+            return;
+        }
+        if (!isOvpnAppInstalled()) {
+            call.reject("no-openvpn-app");
+            return;
+        }
+        mPendingOvpnConf = conf;
+        new Thread(() -> {
+            try {
+                bindOvpnApi(() -> doOvpnConnect(call));
+            } catch (Exception e) {
+                call.reject("bind a OpenVPN falló: " + e.getMessage());
+            }
+        }, "ovpn-bind").start();
+    }
+
+    private void doOvpnConnect(PluginCall call) {
+        try {
+            // Consentimiento de API remota (una sola vez por app): prepare()
+            // devuelve un Intent de confirmación del lado de OpenVPN.
+            android.content.Intent perm = mOvpnApi.prepare(getContext().getPackageName());
+            if (perm != null) {
+                perm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(perm);
+                call.resolve(new JSObject().put("status", "consent"));
+                return;
+            }
+            // Permiso VPN del sistema (una sola vez).
+            android.content.Intent vpnPerm = mOvpnApi.prepareVPNService();
+            if (vpnPerm != null) {
+                vpnPerm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(vpnPerm);
+                call.resolve(new JSObject().put("status", "need-vpn-permission"));
+                return;
+            }
+            // startVPN con el config inline — no guarda perfil en la app.
+            mOvpnApi.startVPN(mPendingOvpnConf);
+            mOvpnConnected = true;
+            call.resolve(new JSObject().put("status", "connected"));
+        } catch (Exception e) {
+            Log.e(TAG, "riseupConnect failed", e);
+            call.reject("riseupConnect: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void riseupDisconnect(PluginCall call) {
+        try {
+            if (mOvpnApi != null) mOvpnApi.disconnect();
+            mOvpnConnected = false;
+            call.resolve(new JSObject().put("status", "disconnected"));
+        } catch (Exception e) {
+            call.reject("riseupDisconnect: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void riseupTunnelStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("installed", isOvpnAppInstalled());
+        ret.put("connected", mOvpnConnected);
+        ret.put("hasEngine", mOvpnApi != null);
+        call.resolve(ret);
+    }
 
     @Override
     public void load() {

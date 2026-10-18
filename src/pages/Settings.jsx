@@ -157,17 +157,27 @@ export default function Settings() {
       if (r.status === 'connected') {
         setRiseupState('connected')
         setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
-      } else if (r.error === 'no-openvpn') {
+      } else if (r.status === 'consent') {
         setRiseupState('disconnected')
-        setRiseupHasBin(false)
-        setRiseupMsg('OpenVPN no está instalado — instálalo para usar el túnel embebido.')
+        setRiseupMsg('Autoriza OctoStream en el diálogo de OpenVPN y pulsa de nuevo.')
+      } else if (r.status === 'need-vpn-permission') {
+        setRiseupState('disconnected')
+        setRiseupMsg('Acepta el permiso VPN del sistema y pulsa de nuevo.')
       } else {
         setRiseupState('disconnected')
         setRiseupMsg('No se pudo conectar: ' + (r.error || r.status || 'desconocido'))
       }
     } catch (e) {
       setRiseupState('disconnected')
-      setRiseupMsg('Error: ' + (e.message || e))
+      if ((e.message || '').includes('no-openvpn-app')) {
+        setRiseupHasBin(false)
+        setRiseupMsg('Necesitas OpenVPN for Android instalado para el túnel embebido.')
+      } else if ((e.message || '').includes('no-openvpn')) {
+        setRiseupHasBin(false)
+        setRiseupMsg('OpenVPN no está instalado — instálalo para usar el túnel embebido.')
+      } else {
+        setRiseupMsg('Error: ' + (e.message || e))
+      }
     } finally {
       setRiseupBusy(false)
     }
@@ -1493,7 +1503,7 @@ export default function Settings() {
                 </p>
               </div>
             </div>
-            {isElectron() && (
+            {(isElectron() || isAndroidNative()) && (
               <label className="flex items-center justify-between cursor-pointer mb-4">
                 <span className="text-sm text-dark-300">
                   {riseupState === 'connecting' ? 'Conectando…' : riseupState === 'connected' ? 'Túnel activo (WARP va por aquí)' : 'Túnel apagado'}
@@ -1522,6 +1532,18 @@ export default function Settings() {
                 className="px-4 py-2 mb-3 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
               >
                 Instalar OpenVPN
+              </button>
+            )}
+            {!riseupHasBin && isAndroidNative() && (
+              <button
+                onClick={() => {
+                  const url = 'https://f-droid.org/packages/de.blinkt.openvpn/'
+                  if (window.octostream?.openExternal) window.octostream.openExternal(url)
+                  else window.open(url, '_blank')
+                }}
+                className="px-4 py-2 mb-3 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
+              >
+                Instalar OpenVPN for Android (F-Droid)
               </button>
             )}
             <div className="flex flex-wrap gap-3">
