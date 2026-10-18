@@ -258,9 +258,13 @@ function formatKickoff(ms) {
   const now = new Date()
   const sameDay = d.toDateString() === now.toDateString()
   const time = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-  if (sameDay) return time
+  if (sameDay) return `Hoy ${time}`
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${time}`
 }
+
+// Ventana "próximo a empezar": los partidos que arrancan en los próximos
+// 15 min se muestran como EN DIRECTO aunque el proveedor aún no los marque.
+const LIVE_EARLY_MS = 15 * 60 * 1000
 
 // Icono del deporte cuando no hay escudo/foto (como hace la propia FCTV):
 // por sportType numérico (FCTV) o slug de Sofascore (DLive). Marca es fútbol.
@@ -310,7 +314,11 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
   const score = item._score
   const hasScore = score?.home != null && score?.away != null
   const kickoff = formatKickoff(item._matchDate)
+  // EN DIRECTO también si el saque es en ≤15 min (el proveedor suele
+  // marcarlo live unos minutos tarde).
   const live = item._isLive
+    || (item._matchDate && item._matchDate - Date.now() <= LIVE_EARLY_MS
+        && item._matchDate - Date.now() > -LIVE_EARLY_MS)
   const SportIcon = sportIconFor(item)
   // Un finalizado con kickoff en el futuro es un falso positivo (el proveedor
   // lo marcó live antes del saque): mostrar la hora, no FINALIZADO.
@@ -346,8 +354,15 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
             <span className="text-lg font-semibold text-dark-300">vs</span>
           )}
           {live ? (
-            <span className="text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full">
-              {liveLabel}
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full">
+                {liveLabel}
+              </span>
+              {kickoff && (
+                <span className="text-xs text-dark-300 bg-dark-700/60 px-2 py-0.5 rounded-full tabular-nums">
+                  {kickoff}
+                </span>
+              )}
             </span>
           ) : finished ? (
             <span className="text-xs font-bold text-dark-300 bg-dark-700/80 border border-dark-600 px-2 py-0.5 rounded-full">
