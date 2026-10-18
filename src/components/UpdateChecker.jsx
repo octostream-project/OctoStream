@@ -13,6 +13,7 @@ export default function UpdateChecker() {
   const [error, setError] = useState('')
   const [reinstallApk, setReinstallApk] = useState(null) // {saved, name}
   const apkPath = useRef(null)
+  const desktopFile = useRef(null) // path del instalador descargado (Electron)
 
   useEffect(() => {
     if (isAndroidNative()) {
@@ -44,33 +45,114 @@ export default function UpdateChecker() {
     return () => { sub.then((h) => h.remove()).catch(() => {}) }
   }, [])
 
-  // Diálogo de actualización de escritorio — descarga manual desde la release.
+  // Descarga in-app del instalador de escritorio (paridad con Android):
+  // update:download → progreso → update:install lanza Setup/AppImage y sale.
+  // Sin asset descargable (pacman, dev) se abre la release en el navegador.
+  const startDesktopDownload = async () => {
+    if (!desktopUpdate?.downloadUrl) {
+      window.octostream?.update?.open?.(desktopUpdate?.url)
+      setDesktopUpdate(null)
+      return
+    }
+    setPhase('downloading')
+    setPercent(0)
+    const off = window.octostream?.update?.onProgress?.((p) => {
+      if (p.percent >= 0) setPercent(p.percent)
+    })
+    try {
+      const r = await window.octostream.update.download({ url: desktopUpdate.downloadUrl })
+      if (r?.ok && r.path) {
+        desktopFile.current = r.path
+        setPhase('install')
+      } else {
+        setError(r?.error || 'La descarga falló')
+        setPhase('error')
+      }
+    } catch (e) {
+      setError(String(e?.message || e))
+      setPhase('error')
+    } finally {
+      off?.()
+    }
+  }
+
+  const startDesktopInstall = async () => {
+    const r = await window.octostream.update.install({ path: desktopFile.current })
+    if (!r?.ok) {
+      // Sin auto-install posible (pacman/dev): abrir la release.
+      if (r?.manual) window.octostream?.update?.open?.(desktopUpdate.url)
+      else { setError(r?.error || 'No se pudo instalar'); setPhase('error'); return }
+    }
+    setDesktopUpdate(null)
+  }
+
+  // Diálogo de actualización de escritorio — descarga in-app como Android.
   if (desktopUpdate) {
+    const db = 'rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none'
     return (
       <div data-tv-modal className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
         <div className="w-[min(90vw,480px)] rounded-2xl bg-slate-900 p-6 shadow-2xl">
-          <h2 className="text-xl font-bold text-white">Nueva versión {desktopUpdate.version}</h2>
-          {desktopUpdate.notes ? (
-            <p className="mt-3 whitespace-pre-line text-sm text-slate-300 max-h-40 overflow-y-auto">{desktopUpdate.notes}</p>
-          ) : null}
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              className="rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none"
-              onClick={() => setDesktopUpdate(null)}
-              autoFocus
-            >
-              Ahora no
-            </button>
-            <button
-              className="rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none"
-              onClick={() => {
-                window.octostream?.update?.open?.(desktopUpdate.url)
-                setDesktopUpdate(null)
-              }}
-            >
-              Descargar
-            </button>
-          </div>
+          <h2 className="text-xl font-bold text-white">
+            {phase === 'error' ? 'Error al actualizar' : `Nueva versión ${desktopUpdate.version}`}
+          </h2>
+          {phase === 'prompt' && (
+            <>
+              {desktopUpdate.notes ? (
+                <p className="mt-3 whitespace-pre-line text-sm text-slate-300 max-h-40 overflow-y-auto">{desktopUpdate.notes}</p>
+              ) : null}
+              {desktopUpdate.downloadSize ? (
+                <p className="mt-2 text-xs text-slate-400">
+                  {desktopUpdate.downloadName} · {Math.round(desktopUpdate.downloadSize / 1048576)} MB
+                </p>
+              ) : null}
+              <div className="mt-6 flex justify-end gap-3">
+                <button className={db} onClick={() => setDesktopUpdate(null)}>
+                  Ahora no
+                </button>
+                <button className={db} onClick={startDesktopDownload} autoFocus>
+                  {desktopUpdate.downloadUrl ? 'Descargar' : 'Abrir descarga'}
+                </button>
+              </div>
+            </>
+          )}
+          {phase === 'downloading' && (
+            <div className="mt-5">
+              <div className="h-3 w-full overflow-hidden rounded-full bg-slate-700">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(percent, 3)}%` }} />
+              </div>
+              <p className="mt-2 text-center text-sm text-slate-400">
+                Descargando… {percent > 0 ? `${percent}%` : ''}
+              </p>
+            </div>
+          )}
+          {phase === 'install' && (
+            <>
+              <p className="mt-3 text-sm text-slate-300">
+                Descarga completada. La app se cerrará y se iniciará la instalación de la nueva versión.
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
+                  Más tarde
+                </button>
+                <button className={db} onClick={startDesktopInstall} autoFocus>
+                  Instalar y reiniciar
+                </button>
+              </div>
+            </>
+          )}
+          {phase === 'error' && (
+            <>
+              <p className="mt-3 text-sm text-red-400">{error}</p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
+                  Cerrar
+                </button>
+                <button className={db} onClick={startDesktopDownload} autoFocus>
+                  Reintentar
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     )

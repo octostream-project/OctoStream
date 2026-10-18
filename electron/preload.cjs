@@ -126,9 +126,17 @@ contextBridge.exposeInMainWorld('octostream', {
     dlna: (arg) => ipcRenderer.invoke('cast:dlna', arg),
     dlnaScan: (arg) => ipcRenderer.invoke('cast:dlna-scan', arg),
   },
-  // Update check de escritorio — paridad con appUpdater (abre la release).
+  // Update de escritorio — paridad con appUpdater: check → download
+  // (progreso por octo:update:progress) → install lanza el instalador.
   update: {
     check: () => ipcRenderer.invoke('update:check'),
     open: (arg) => ipcRenderer.invoke('update:open', arg),
+    download: (arg) => ipcRenderer.invoke('update:download', arg),
+    install: (arg) => ipcRenderer.invoke('update:install', arg),
+    onProgress: (cb) => {
+      const f = (_e, p) => cb(p)
+      ipcRenderer.on('octo:update:progress', f)
+      return () => ipcRenderer.removeListener('octo:update:progress', f)
+    },
   },
 })

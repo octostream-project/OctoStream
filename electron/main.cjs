@@ -1307,9 +1307,21 @@ ipcMain.handle('player:add-sub', async (_e, arg = {}) => {
   } catch { return { ok: false } }
 })
 
-// ─── Update check escritorio (paridad con appUpdater de Android) ─────────────
-// Mismo manifiesto version.json del repo; el diálogo abre la release en el
-// navegador (no hay auto-update firmado sin electron-updater).
+// ─── Update escritorio (paridad con appUpdater de Android) ───────────────────
+// Mismo aviso + descarga in-app con progreso: Windows descarga y lanza el
+// Setup NSIS; Linux AppImage se reemplaza a sí mismo (rename atómico — un
+// binario en ejecución puede renombrarse, no sobrescribirse) y se relanza.
+// Instalaciones pacman/dev (sin APPIMAGE) siguen abriendo la release en el
+// navegador — pacman -U requiere root.
+function pickUpdateAsset(assets) {
+  const list = Array.isArray(assets) ? assets : []
+  const find = (re) => list.find(a => re.test(a.name || '') && a.browser_download_url)
+  if (process.platform === 'win32') return find(/Setup.*\.exe$/i) || find(/\.exe$/i)
+  // AppImage solo puede auto-actualizarse cuando la app corre dentro de uno
+  if (process.platform === 'linux' && process.env.APPIMAGE) return find(/\.AppImage$/i)
+  return null
+}
+
 ipcMain.handle('update:check', async () => {
   try {
     const resp = await fetch('https://api.github.com/repos/octostream-project/OctoStream/releases/latest', {
@@ -1328,11 +1340,15 @@ ipcMain.handle('update:check', async () => {
       if (a > b) { isNewer = true; break }
       if (a < b) break
     }
+    const asset = pickUpdateAsset(rel.assets)
     return {
       available: isNewer,
       version: rel.tag_name || tag,
       notes: String(rel.body || '').slice(0, 2000),
       url: rel.html_url || 'https://github.com/octostream-project/OctoStream/releases/latest',
+      downloadUrl: asset ? asset.browser_download_url : null,
+      downloadSize: asset ? asset.size || 0 : 0,
+      downloadName: asset ? asset.name : '',
     }
   } catch {
     return { available: false }
@@ -1343,6 +1359,88 @@ ipcMain.handle('update:open', (_e, arg) => {
   if (url && /^https:\/\//i.test(url)) return shell.openExternal(url)
   return Promise.resolve()
 })
+
+// Descarga el asset de la release al directorio de destino (mismo filesystem
+// que el AppImage para permitir rename atómico). Progreso → octo:update:progress.
+ipcMain.handle('update:download', async (e, arg) => {
+  const url = typeof arg === 'string' ? arg : arg?.url
+  if (!url || !/^https:\/\/github\.com\//i.test(url)) return { ok: false, error: 'url no permitida' }
+  try {
+    const name = path.basename(new URL(url).pathname) || 'octostream-update.bin'
+    // Linux AppImage: descargar junto al binario actual (mismo fs → rename).
+    // Windows/dev: tempdir del sistema.
+    const dir = process.platform === 'linux' && process.env.APPIMAGE
+      ? path.dirname(process.env.APPIMAGE)
+      : app.getPath('temp')
+    const dest = path.join(dir, name + '.part')
+    const resp = await fetch(url, { headers: { 'User-Agent': 'OctoStream' } })
+    if (!resp.ok || !resp.body) return { ok: false, error: 'HTTP ' + resp.status }
+    const total = Number(resp.headers.get('content-length')) || 0
+    const file = fs.createWriteStream(dest)
+    let done = 0
+    let lastSent = -1
+    try {
+      for await (const chunk of resp.body) {
+        file.write(chunk)
+        done += chunk.length
+        const pct = total ? Math.round(done * 100 / total) : 0
+        if (pct !== lastSent) {
+          lastSent = pct
+          try { e.sender.send('octo:update:progress', { percent: pct }) } catch { /* ventana cerrada */ }
+        }
+      }
+    } catch (err) {
+      file.destroy()
+      try { fs.unlinkSync(dest) } catch { /* noop */ }
+      return { ok: false, error: String(err.message || err) }
+    }
+    await new Promise((res, rej) => { file.end(res); file.on('error', rej) })
+    return { ok: true, path: dest, size: done }
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) }
+  }
+})
+
+// Lanza el instalador/nuevo binario y cierra la app:
+// - Windows: Setup NSIS detached → quit (el asistente instala encima).
+// - Linux AppImage: rename atómico sobre el AppImage actual → relanzar.
+ipcMain.handle('update:install', async (_e, arg) => {
+  const file = typeof arg === 'string' ? arg : arg?.path
+  const allowDir = process.platform === 'linux' && process.env.APPIMAGE
+    ? path.dirname(process.env.APPIMAGE)
+    : app.getPath('temp')
+  if (!file || !file.startsWith(allowDir + path.sep) || !file.endsWith('.part')) {
+    return { ok: false, error: 'path no permitido' }
+  }
+  try {
+    if (!fs.existsSync(file)) return { ok: false, error: 'descarga no encontrada' }
+    if (process.platform === 'win32') {
+      const exe = file.replace(/\.part$/, '')
+      fs.renameSync(file, exe)
+      spawn(exe, [], { detached: true, stdio: 'ignore' }).unref()
+      setTimeout(() => app.quit(), 800)
+      return { ok: true }
+    }
+    if (process.platform === 'linux' && process.env.APPIMAGE) {
+      const appImage = process.env.APPIMAGE
+      fs.chmodSync(file, 0o755)
+      // Un binario en ejecución puede renombrarse pero no sobrescribirse.
+      try { fs.renameSync(appImage, appImage + '.old') } catch { /* noop */ }
+      fs.renameSync(file, appImage)
+      spawn(appImage, [], { detached: true, stdio: 'ignore' }).unref()
+      setTimeout(() => app.quit(), 800)
+      return { ok: true }
+    }
+    return { ok: false, manual: true }
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) }
+  }
+})
+
+// Limpieza del AppImage viejo tras una auto-actualización (rename → .old).
+if (process.env.APPIMAGE) {
+  try { fs.unlinkSync(process.env.APPIMAGE + '.old') } catch { /* no existe */ }
+}
 
 app.whenReady().then(async () => {
   if (components?.whenReady) {
