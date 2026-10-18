@@ -197,8 +197,16 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   automático al player web en cualquier error (`exoFailed`). mpv reproduce
   mkv/AC3/DTS/HEVC **sin remux** y soporta `sub-add` para los subtítulos de
   OpenSubtitles (el VTT va por IPC `player:add-sub` a un temporal). Binario:
-  `resources/mpv/` empaquetado → `OCTOSTREAM_MPV` → sistema (PATH/rutas
-  habituales); sin mpv instalado el player web cubre todo salvo ese caso.
+  `scripts/fetch-mpv.mjs` lo descarga a `build/mpv/<plat>-<arch>/`
+  (gitignored, sha256 verificado) → `extraResources` →
+  `resources/mpv/<plat>-<arch>/` — el usuario **no instala nada**.
+  Linux: pkgforge mpv-AppImage extraída con `--appimage-extract` (el árbol
+  squashfs, `AppRun` = sharun estático — no requiere FUSE). Windows:
+  shinchiro/mpv-winbuild-cmake `.7z` (mpv.exe auto-contenido +
+  d3dcompiler_43.dll). Fallbacks: `OCTOSTREAM_MPV` → sistema (PATH/rutas
+  habituales); sin ningún mpv el player web cubre todo salvo ese caso.
+  `paused-for-cache` se mapea a `buffering`; `core-idle` se ignora a
+  propósito (salta en seeks y marcaba stalls falsos en el watchdog).
 - URLs loopback (`127.0.0.1`/`localhost`) **nunca** van por el proxy WARP — el
   proxy las resolvería en su extremo remoto (`isLoopbackUrl` en el plugin).
 - Embeds con CDN ligado al documento del proveedor (DLive → tiestep): el m3u8

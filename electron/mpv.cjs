@@ -28,9 +28,14 @@ const POSITION_EVENT_MS = 5000 // mismo intervalo que el 'position' de ExoPlayer
 function hostOf(u) { try { return new URL(u).host } catch { return '?' } }
 
 function mpvCandidates() {
-  const bundled = process.resourcesPath
-    ? [path.join(process.resourcesPath, 'mpv', process.platform === 'win32' ? 'mpv.exe' : 'mpv')]
-    : []
+  // Empaquetado por scripts/fetch-mpv.mjs → resources/mpv/<plat>-<arch>/:
+  // en Linux es el árbol squashfs extraído (AppRun = sharun estático, sin
+  // FUSE); en Windows mpv.exe auto-contenido. El path build/mpv cubre dev.
+  const platDir = `${process.platform}-${process.arch}` // linux-x64, win32-x64
+  const exeName = process.platform === 'win32' ? 'mpv.exe' : 'AppRun'
+  const bundled = []
+  if (process.resourcesPath) bundled.push(path.join(process.resourcesPath, 'mpv', platDir, exeName))
+  bundled.push(path.join(__dirname, '..', 'build', 'mpv', platDir, exeName))
   if (process.env.OCTOSTREAM_MPV) bundled.unshift(process.env.OCTOSTREAM_MPV)
   if (process.platform === 'win32') {
     return [...bundled, 'mpv', 'mpv.exe',
@@ -103,6 +108,11 @@ class MpvSession {
       '--term-status-msg=',
       ...extraArgs,
     ]
+    // extraResources conserva el modo de archivo, pero por si el paquete
+    // pierde el bit +x (zip manual, filesystem raro) se fuerza aquí.
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(this.exe, 0o755) } catch {}
+    }
     const proc = spawn(this.exe, args, { stdio: ['ignore', 'ignore', 'ignore'] })
     this.proc = proc
     proc.on('error', () => this._die('error'))
@@ -169,11 +179,13 @@ class MpvSession {
       } else if (msg.name === 'pause') {
         if (msg.data === true) this._emit({ state: 'paused', position: this.lastPos * 1000, duration: this.duration * 1000 })
         else this._emit({ state: 'playing', position: this.lastPos * 1000, duration: this.duration * 1000 })
-      } else if (msg.name === 'paused-for-cache' || msg.name === 'core-idle') {
-        // buffering = esperando datos (cache o inicio) — el watchdog de
-        // torrents de VideoPlayer usa este estado igual que en Android.
+      } else if (msg.name === 'paused-for-cache') {
+        // buffering = esperando datos de red — el watchdog de torrents de
+        // VideoPlayer usa este estado igual que en Android. core-idle se
+        // omite a propósito: salta en seeks y micro-lecturas y marcaba
+        // stalls falsos.
         if (msg.data === true) this._emit({ state: 'buffering' })
-        else if (msg.name === 'paused-for-cache') this._emit({ state: 'ready' })
+        else this._emit({ state: 'ready' })
       }
       return
     }
@@ -245,7 +257,6 @@ class MpvSession {
     await this._cmd('observe_property', 2, 'duration').catch(() => {})
     await this._cmd('observe_property', 3, 'pause').catch(() => {})
     await this._cmd('observe_property', 4, 'paused-for-cache').catch(() => {})
-    await this._cmd('observe_property', 5, 'core-idle').catch(() => {})
     // Posición para la reanudación, en el intervalo del 'position' de Android.
     this.posTimer = setInterval(() => {
       if (this.lastPos > 0) {

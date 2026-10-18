@@ -11,7 +11,7 @@
     "build": "vite build && node scripts/compat-css.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
-    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && node scripts/fetch-aether.mjs && node scripts/fetch-ytdlp.mjs && node scripts/bundle-torrent.mjs && electron-builder",
+    "electron:build": "vite build && node scripts/fetch-ffmpeg.mjs && node scripts/fetch-aether.mjs && node scripts/fetch-ytdlp.mjs && node scripts/fetch-mpv.mjs && node scripts/bundle-torrent.mjs && electron-builder",
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
@@ -103,6 +103,10 @@
         {
           "from": "build/ytdlp/linux-arm64",
           "to": "ytdlp/linux-arm64"
+        },
+        {
+          "from": "build/mpv/linux-x64",
+          "to": "mpv/linux-x64"
         }
       ],
       "target": [
@@ -134,6 +138,10 @@
         {
           "from": "build/ytdlp/win32-x64",
           "to": "ytdlp/win32-x64"
+        },
+        {
+          "from": "build/mpv/win32-x64",
+          "to": "mpv/win32-x64"
         }
       ],
       "target": [
