@@ -1,14 +1,14 @@
 {
-  "versionCode": 174,
-  "versionName": "1.74",
+  "versionCode": 175,
+  "versionName": "1.75",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-arm64-v8a.apk",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-arm64-v8a.apk",
   "sha256": "482764d59195e7225843d50e90366c2a4f092ef190ceceda1386953d773427ce",
-  "notes": "ExoPlayer estilo Stremio: chips de temporada en el player, fila de iconos simplificada",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-x86_64.apk"
   },
   "sha256s": {
     "arm64-v8a": "482764d59195e7225843d50e90366c2a4f092ef190ceceda1386953d773427ce",

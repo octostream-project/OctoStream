@@ -1528,6 +1528,12 @@ function createWindow() {
     const url = details.url || ''
     const headers = { ...details.requestHeaders }
     rememberOrigin(details.id, headers)
+    // Referer prohibido en fetch(): los plugins lo envían como X-Octo-Referer
+    // y aquí se materializa como Referer real (Android lo reenvía nativo).
+    if (headers['X-Octo-Referer']) {
+      headers['Referer'] = headers['X-Octo-Referer']
+      delete headers['X-Octo-Referer']
+    }
     // Inject correct Origin/Referer for known providers
     if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
       headers['Origin'] = 'https://www.atresplayer.com'

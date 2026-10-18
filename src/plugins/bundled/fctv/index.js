@@ -49,6 +49,7 @@ const API_HOST_CANDIDATES = [
 
 // Web-domain fallbacks if both params and hub page fail
 const WEB_DOMAIN_FALLBACKS = [
+  'https://www.fctv33hd.host',
   'https://www.fctv33hd.digital',
   'https://www.fctv33hd.icu',
 ]
@@ -79,8 +80,16 @@ const fixLogoCdn = (u) =>
     ? u.replace(/^https?:\/\/[^/]+/i, LOGO_CDN_HOST)
     : u
 
+// UA de navegador para la API: Cloudflare devuelve 403 con cualquier UA no
+// browser (OctoStream/1.0, okhttp, curl). El Referer lo tolera cualquiera.
+const API_UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+
 async function fetchParams(apiHost, signal) {
-  const raw = await httpGetText(`${apiHost}/api/common/params`, {}, signal)
+  const raw = await httpGetText(`${apiHost}/api/common/params`, {
+    'User-Agent': API_UA,
+    'Referer': WEB_DOMAIN_FALLBACKS[0] + '/',
+    'Accept': 'application/octet-stream, */*',
+  }, signal)
   if (!raw || raw.length > 2_000_000) throw new Error('params: bad response')
   return JSON.parse(rot47(raw))
 }
@@ -130,13 +139,26 @@ async function resolveConfig(signal) {
     // Todos los hosts fallaron → hubu.ru biolink como último recurso.
   }
 
-  // 2. hubu.ru/fctvlink biolink page → href to the current domain
+  // 2. hubu.ru biolink: el dominio rota casi cada semana y la página puede
+  // encadenar saltos internos (fctvlink → fclink → dominio real). Se siguen
+  // hasta 3 hops buscando el primer href de la familia fctv/rbtv/sokapicks.
   let webDomain = null
   try {
-    const html = await httpGetText('https://hubu.ru/fctvlink', {}, signal)
-    const m = html.match(/href="(https:\/\/(?:www\.)?(?:fctv|rbtv|sokapicks)[^"]*)"/i)
-      || html.match(/href="(https:\/\/[^"]+)"[^>]*data-track-biolink-block-id/i)
-    if (m) webDomain = new URL(m[1]).origin
+    let hopUrl = 'https://hubu.ru/fctvlink'
+    const seen = new Set()
+    for (let hop = 0; hop < 3 && !webDomain; hop++) {
+      if (seen.has(hopUrl)) break
+      seen.add(hopUrl)
+      const html = await httpGetText(hopUrl, {}, signal)
+      if (!html) break
+      const m = html.match(/href="(https:\/\/(?:www\.)?(?:fctv|rbtv|sokapicks|rblive)[^"]*)"/i)
+      if (m) { webDomain = new URL(m[1]).origin; break }
+      // Siguiente salto interno del biolink (hubu.ru/fclink, /fctv2link…)
+      const next = html.match(/href="(https:\/\/hubu\.ru\/[^"]+)"[^>]*data-track-biolink-block-id/i)
+        || html.match(/href="(https:\/\/hubu\.ru\/[^"]+)"/i)
+      if (!next) break
+      hopUrl = next[1]
+    }
   } catch { /* fall through */ }
 
   cache = {
@@ -193,7 +215,11 @@ async function apiGet(cfg, path, params, signal) {
   const qs = new URLSearchParams(params).toString()
   return apiCall(cfg, async (c) => {
     const data = await httpGetBlob(`${c.apiHost}${path}?${qs}`, {
+      'User-Agent': API_UA,
       'Referer': c.webDomain + '/',
+      // fetch() descarta Referer (prohibido): en Electron lo re-inyecta
+      // onBeforeSendHeaders leyendo este header puente.
+      'X-Octo-Referer': c.webDomain + '/',
       'Accept': 'application/octet-stream, */*',
     }, signal)
     return blobToBuffer(data)
@@ -205,6 +231,7 @@ async function apiGetRaw(cfg, path, params, signal) {
   const qs = new URLSearchParams(params).toString()
   return apiCall(cfg, async (c) => {
     const { data, headers } = await httpGetBlobWithHeaders(`${c.apiHost}${path}?${qs}`, {
+      'User-Agent': API_UA,
       'Referer': c.webDomain + '/',
       'Accept': 'application/octet-stream, */*',
     }, signal)
@@ -380,7 +407,26 @@ async function loadSitemapIndex(signal) {
       }
     }
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, picked.length) }, worker))
+    // Precálculo por entrada: canon/skel/tokens/flags de cada equipo una
+    // sola vez. fctvLookupItem los comparaba por llamada y por entrada —
+    // ~300 tarjetas × ~5000 entradas × regex de canonTeam = renderer
+    // congelado al entrar en Deportes.
+    for (const e of entries) {
+      const ch = canonTeam(e.home), ca = canonTeam(e.away)
+      e._ch = ch
+      e._ca = ca
+      e._sh = ch.replace(/[aeiou]/g, '')
+      e._sa = ca.replace(/[aeiou]/g, '')
+      e._th = ch.split(' ').filter(Boolean)
+      e._ta = ca.split(' ').filter(Boolean)
+      e._ths = new Set(e._th)
+      e._tas = new Set(e._ta)
+      const f = smFlags(e.home, e.away, e.leagueSlug)
+      e._w = f.w
+      e._b = f.b
+    }
     sitemapIdx = { ts: Date.now(), entries }
+    lookupCache.clear()
     return entries
   })().finally(() => { sitemapPromise = null })
   return sitemapPromise
@@ -401,18 +447,20 @@ const smFlags = (home, away, league) => {
   const t = `${home || ''} ${away || ''} ${league || ''}`
   return { w: SM_WOMEN_RE.test(t), b: SM_BTEAM_RE.test(t) }
 }
-const smSkel = (s) => canonTeam(s).replace(/[aeiou]/g, '')
-const smTokens = (s) => canonTeam(s).split(' ').filter(Boolean)
-
-function smTeamish(a, b) {
-  if (teamsMatch(a, b)) return true
-  const ka = smSkel(a)
-  if (ka && ka === smSkel(b)) return true
-  const ta = smTokens(a), tb = smTokens(b)
-  if (ta.length < 2 || tb.length < 2) return false
-  const sa = new Set(ta), sb = new Set(tb)
-  return ta.every(t => sb.has(t)) || tb.every(t => sa.has(t))
+// Comparación sobre datos precalculados: la entrada trae _c(canon)/_s(skel)/
+// _t(tokens array)/_ts(tokens Set); el query se calcula una vez por llamada.
+const smAllIn = (arr, set) => arr.every(t => set.has(t))
+function smTeamishPre(qc, qs, qt, qts, ec, es, et, ets) {
+  if (qc && ec && (qc === ec || qc.includes(ec) || ec.includes(qc))) return true
+  if (qs && qs === es) return true
+  if (qt.length < 2 || et.length < 2) return false
+  return smAllIn(qt, ets) || smAllIn(et, qts)
 }
+
+// Caché de resultados por tarjeta: la misma pareja equipo-equipo aparece en
+// muchas jornadas; el índice es inmutable entre recargas, así que el
+// resultado se puede reutilizar hasta que el sitemap se regenere.
+const lookupCache = new Map()
 
 // Busca el partido FCTV equivalente a una tarjeta ({_home,_away,_matchDate,
 // _league}) en el índice del sitemap. Devuelve un item sintético con el
@@ -423,23 +471,34 @@ export function fctvLookupItem(item) {
   if (!home || !away || !sitemapIdx) return null
   const qf = smFlags(home, away, item._league?.name)
   const qd = item._matchDate || 0
+  // El mismo equipo sale en ~30 jornadas: cachear por par home/away/fecha.
+  const cacheKey = `${home}|${away}|${item._league?.name || ''}|${qf.w}|${qf.b}|${qd}`
+  if (lookupCache.has(cacheKey)) return lookupCache.get(cacheKey)
+  // Precalcular UNA vez la consulta (antes: canonTeam/skel/tokens de ambos
+  // equipos por cada una de las ~5000 entradas → renderer congelado).
+  const qch = canonTeam(home), qca = canonTeam(away)
+  const qsh = qch.replace(/[aeiou]/g, ''), qsa = qca.replace(/[aeiou]/g, '')
+  const qth = qch.split(' ').filter(Boolean), qta = qca.split(' ').filter(Boolean)
+  const qths = new Set(qth), qtas = new Set(qta)
   let best = null
   for (const e of sitemapIdx.entries) {
     if (qd && e.dateMs && Math.abs(e.dateMs - qd) > 48 * 3600e3) continue
     if (!qd && e.dateMs && Math.abs(e.dateMs - Date.now()) > 72 * 3600e3) continue
-    const ef = smFlags(e.home, e.away, e.leagueSlug)
-    if (ef.w !== qf.w || ef.b !== qf.b) continue
-    const direct = smTeamish(e.home, home) && smTeamish(e.away, away)
-    const swapped = smTeamish(e.home, away) && smTeamish(e.away, home)
+    if (e._w !== qf.w || e._b !== qf.b) continue
+    const direct = smTeamishPre(qch, qsh, qth, qths, e._ch, e._sh, e._th, e._ths)
+      && smTeamishPre(qca, qsa, qta, qtas, e._ca, e._sa, e._ta, e._tas)
+    const swapped = !direct
+      && smTeamishPre(qch, qsh, qth, qths, e._ca, e._sa, e._ta, e._tas)
+      && smTeamishPre(qca, qsa, qta, qtas, e._ch, e._sh, e._th, e._ths)
     if (!direct && !swapped) continue
     if (!best || Math.abs(e.dateMs - (qd || Date.now())) < Math.abs(best.dateMs - (qd || Date.now()))) best = e
   }
-  if (!best) return null
+  if (!best) { lookupCache.set(cacheKey, null); return null }
   const matchDate = best.dateMs || qd || Date.now()
   const m = { matchId: best.matchId, sportType: best.sportType, leagueSlug: best.leagueSlug, slug: best.slug, matchDate }
   const webDomain = cache?.webDomain || OFFLINE_CFG.webDomain
   const name = `${home} vs ${away}`
-  return {
+  const result = {
     id: `fctv:${best.matchId}:${best.sportType}:${best.leagueSlug}:${best.slug}:${matchDate}`,
     type: CONTENT_TYPES.CHANNEL,
     name,
@@ -456,6 +515,8 @@ export function fctvLookupItem(item) {
     _league: { name: best.leagueSlug.replace(/-/g, ' '), logo: null },
     _sportName: SPORT_NAMES[best.sportType] || 'Deporte',
   }
+  lookupCache.set(cacheKey, result)
+  return result
 }
 
 function matchToItem(m, cfg, streamEntry) {
