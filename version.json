@@ -1,18 +1,18 @@
 {
-  "versionCode": 169,
-  "versionName": "1.69",
+  "versionCode": 170,
+  "versionName": "1.70",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.69/octostream-1.69-arm64-v8a.apk",
-  "sha256": "5d2b8ed7e09f1808e474e88b68b9e6148f59534676bcf61e5c9657a663b3537e",
-  "notes": "Sync LAN reparada (cleartext, broadcast dirigido, barrido /24 multi-interfaz, canal BlogHorror de terror)",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.70/octostream-1.70-arm64-v8a.apk",
+  "sha256": "663b108cd243434a3e4c4d88905c3d85f94b1b664a781450b9efca3cd2f09bb3",
+  "notes": "Busqueda torrent Torrentio ES (MejorTorrent, Wolfmax4k, Cinecalidad) por IMDb ID en todas las fichas",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.69/octostream-1.69-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.69/octostream-1.69-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.69/octostream-1.69-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.70/octostream-1.70-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.70/octostream-1.70-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.70/octostream-1.70-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "5d2b8ed7e09f1808e474e88b68b9e6148f59534676bcf61e5c9657a663b3537e",
-    "armeabi-v7a": "62e791f6b352fdc34f96ad3293c33e3b3defaf7d77cdd72ce8d076082290bc37",
-    "x86_64": "28ccb72db8c4d6e5063c2d54b89d5faa6eb06e9287faab32ecf7b70169f479aa"
+    "arm64-v8a": "663b108cd243434a3e4c4d88905c3d85f94b1b664a781450b9efca3cd2f09bb3",
+    "armeabi-v7a": "04f1b077df3ddea2e932be77c199dc36eb22ed404e10b34fd1a15f540e581523",
+    "x86_64": "4a565e34a7e02163a6b8e8e97ad6b1bf301cb2edabba3363f8254f29117577fe"
   }
 }

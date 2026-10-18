@@ -82,6 +82,11 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - Modularización del plugin `tdtSpain.js` (~900 líneas) en módulos bajo
   `src/plugins/bundled/tdtSpain/`: `constants.js`, `cache.js`, `http.js`, `data.js`,
   `resolve.js`, `normalize.js`, `search.js` e `index.js`.
+- Canal Torrentio ES (`plurtasko/channels/torrentio.js`): agregador por
+  **IMDb ID** (`torrentio.strem.fun`) con los providers en español del
+  addon (MejorTorrent, Wolfmax4k, Cinecalidad). Sin catálogo ni búsqueda
+  por nombre — `index.js` lo consulta en paralelo a los canales cuando el
+  item trae TMDB→IMDb y `octostream_torrent_search` está activo.
 - Refuerzo de `src/utils/storage.js` con helpers JSON (`getJson`/`setJson`/`getJsonSync`/
   `setJsonSync`) y lista centralizada `SYNCED_KEYS` (incluye claves `optopus_*`).
 - `PluginManager` ahora usa `storage.js` en vez de `localStorage` directo, evitando

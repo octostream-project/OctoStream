@@ -41,6 +41,7 @@ import { dontorrent } from './channels/dontorrent.js'
 import { grantorrent } from './channels/grantorrent.js'
 import { subtorrents } from './channels/subtorrents.js'
 import { bloghorror } from './channels/bloghorror.js'
+import { torrentio } from './channels/torrentio.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
@@ -1446,7 +1447,37 @@ export const plurtaskoFactory = (config) => {
           }
         })
 
-        await Promise.all(channelPromises)
+        // Torrentio ES: providers españoles (MejorTorrent, Wolfmax4k,
+        // Cinecalidad) por IMDb ID — la API no busca por nombre, así que
+        // solo corre cuando el item viene de TMDB y hay fetchImdbId. Misma
+        // maquinaria de merge que un canal normal (resolve, dedupe, onBatch).
+        const torrentioPromise = (async () => {
+          if (!tmdbId || !torrentSearchEnabled()) return
+          try {
+            if (imdbId === null) imdbId = await imdbIdPromise
+            if (!imdbId) return
+            const rawStreams = await torrentio.getStreamsByImdb({ imdbId, type, season, episode })
+            if (!rawStreams.length) return
+            const tagTio = (s) => ({ ...s, _channelId: 'torrentio' })
+            const tioOnBatch = onBatch ? (batch) => {
+              allStreams = allStreams.filter(s => s._channelId !== 'torrentio')
+              allStreams = allStreams.concat(batch.map(tagTio))
+              allStreams = dedupeTorrentStreams(allStreams)
+              onBatch(sortHdfull(allStreams))
+            } : null
+            const resolved = await resolveStreams(rawStreams, tioOnBatch, { season, episode, defaultLang: 'Esp' })
+            if (resolved && resolved.length > 0) {
+              allStreams = allStreams.filter(s => s._channelId !== 'torrentio')
+              allStreams = allStreams.concat(resolved.map(tagTio))
+              allStreams = dedupeTorrentStreams(allStreams)
+              if (onBatch) onBatch(sortHdfull(allStreams))
+            }
+          } catch (e) {
+            logWarn('[Plurtasko] Torrentio failed:', String(e?.message || e))
+          }
+        })()
+
+        await Promise.all([...channelPromises, torrentioPromise])
 
         // Limpiar el marcador interno _channelId antes de devolver
         allStreams = sortHdfull(dedupeTorrentStreams(allStreams))
