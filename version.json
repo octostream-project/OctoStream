@@ -3,16 +3,16 @@
   "versionName": "1.76",
   "minCode": 0,
   "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.76/octostream-1.76-arm64-v8a.apk",
-  "sha256": "7266485a9f2504b05074130c9d9d92f78193223833c637e510e9113026b6e6ba",
-  "notes": "",
+  "sha256": "468c631e0e514c531bbd3c532cd8ec0266163944145b478b2c9150f8128bb80c",
+  "notes": "WARP: validación del túnel antes de adoptar aether (zombie detectado)",
   "apkUrls": {
     "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.76/octostream-1.76-arm64-v8a.apk",
     "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.76/octostream-1.76-armeabi-v7a.apk",
     "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.76/octostream-1.76-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "7266485a9f2504b05074130c9d9d92f78193223833c637e510e9113026b6e6ba",
-    "armeabi-v7a": "36b77772afc39293a3ca5e70b5cbab3633d739d034b45ff899e51fcdd6ae8617",
-    "x86_64": "c55733cdf20436fa0035d4d205a6a5e70f3e055192d5a72520da7595d105232b"
+    "arm64-v8a": "468c631e0e514c531bbd3c532cd8ec0266163944145b478b2c9150f8128bb80c",
+    "armeabi-v7a": "a906e9f8579d3e7672909d24e2d966a911fec174e52d03fb25bc9d7e80c17acb",
+    "x86_64": "0304caa2c31a0fa3a17e776d71b9884d7238e21577559b5660d63589e5788096"
   }
 }
