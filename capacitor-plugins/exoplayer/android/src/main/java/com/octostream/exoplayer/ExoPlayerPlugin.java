@@ -2900,6 +2900,23 @@ public class ExoPlayerPlugin extends Plugin {
                 || url.startsWith("http://localhost") || url.startsWith("https://localhost");
     }
 
+    // Stream servido desde la LAN (otro OctoStream/SyncServer, DLNA local):
+    // por el túnel WARP fallaría — el proxy lo resolvería en su extremo
+    // remoto. Misma lista que http.nonProxyHosts del plugin CloudProxy.
+    private static boolean isLanUrl(String url) {
+        if (url == null) return false;
+        try {
+            String host = Uri.parse(url).getHost();
+            if (host == null) return false;
+            host = host.toLowerCase(java.util.Locale.ROOT);
+            return host.startsWith("192.168.") || host.startsWith("10.")
+                    || host.startsWith("169.254.")
+                    || host.matches("^172\\.(1[6-9]|2[0-9]|3[01])\\..*");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // Modo playback: expandir el iframe del player a pantalla completa y
     // sacar a pantalla completa cualquier <video> del documento principal.
     // El player embebido queda dentro de un iframe cross-origin — no se puede
@@ -6061,7 +6078,7 @@ public class ExoPlayerPlugin extends Plugin {
     // una URL debe salir por el proxy HTTP local de CloudProxy.
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
-        if (isTdtSpainDomain(url) || isLoopbackUrl(url)) return false;
+        if (isTdtSpainDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
         String httpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
         if (httpProxy == null || httpProxy.isEmpty()) return false;
         // 'connected' tiene histéresis (~30s) para no caer por misses sueltos,
@@ -6133,7 +6150,7 @@ public class ExoPlayerPlugin extends Plugin {
 
     private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
         String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
-        boolean loopback = isLoopbackUrl(url);
+        boolean loopback = isLoopbackUrl(url) || isLanUrl(url);
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
         if (!direct && !loopback && warpProxy != null && !warpProxy.isEmpty()) {
             String[] parts = warpProxy.split(":", 2);

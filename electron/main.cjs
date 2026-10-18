@@ -45,6 +45,13 @@ function isAetherBypassHost(host) {
   return AETHER_BYPASS_SUFFIX.test(host || '') || /^dai\.google\.com$/i.test(host || '')
 }
 
+// Loopback y LAN privada — las fetches Node a hosts locales (remux del
+// servidor torrent, otro OctoStream en la LAN) por el túnel harían CONNECT
+// a una IP privada que el extremo remoto no puede alcanzar → fallo total.
+// Misma lista que el bypass de Chromium/Android.
+const LAN_HOST = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|192\.168\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i
+function isLanHost(host) { return LAN_HOST.test(host || '') }
+
 const aetherState = { proc: null, connected: false, connecting: false, error: '' }
 
 function probePort(port) {
@@ -210,6 +217,10 @@ async function aetherDisconnect(keepProxy) {
   if (proc) {
     try { proc.kill('SIGKILL') } catch {}
   }
+  // Frontera de generación: vaciar los pools keep-alive para que ningún
+  // socket del túnel viejo sobreviva ni se reutilice tras un reconnect.
+  try { warpHttpAgent.destroy() } catch {}
+  try { warpHttpsAgent.destroy() } catch {}
   if (keepProxy) {
     // Desconexión en background: el proxy queda apuntando al puerto muerto →
     // las requests fallan en vez de filtrar la IP real durante el repose.
@@ -236,6 +247,7 @@ function socksHandshake(host, port, cb) {
   const succeed = () => {
     if (done) return
     done = true
+    sock.setTimeout(0) // desarmar el timer del handshake — ahora es del agente
     sock.removeAllListeners('error')
     sock.removeAllListeners('timeout')
     sock.removeAllListeners('data')
@@ -290,7 +302,7 @@ warpHttpsAgent.createConnection = (opts, cb) => {
 
 // Agente para fetches Node: WARP cuando está conectado salvo hosts bypass.
 function agentFor(target, isHttps) {
-  if (!aetherState.connected || isAetherBypassHost(target.hostname)) {
+  if (!aetherState.connected || isLanHost(target.hostname) || isAetherBypassHost(target.hostname)) {
     return isHttps ? secureHttpsAgent : undefined
   }
   return isHttps ? warpHttpsAgent : warpHttpAgent
@@ -1419,6 +1431,7 @@ app.on('window-all-closed', () => {
   if (aetherState.proc) {
     try { aetherState.proc.kill('SIGKILL') } catch {}
     aetherState.proc = null
+    aetherState.connected = false
   }
   if (proxyServer) {
     proxyServer.close()

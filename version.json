@@ -1,18 +1,18 @@
 {
-  "versionCode": 167,
-  "versionName": "1.67",
+  "versionCode": 168,
+  "versionName": "1.68",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-arm64-v8a.apk",
-  "sha256": "3c5b332e1b8db61aed55a8d5368f8e03b54026fc33c509559c856fba0825b5b4",
-  "notes": "Botón de relación de aspecto en el reproductor: Ajustar, Zoom, Llenar, Ancho fijo y Alto fijo — con persistencia entre sesiones y acceso también desde el menú de ajustes.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.68/octostream-1.68-arm64-v8a.apk",
+  "sha256": "e73f769490232f6049f690b5320ebd10dae75ee591f0d5d9e0a6edb1fb1311ab",
+  "notes": "Auditoria CloudProxy: sin fugas de proceso/IP, LAN bypass y fixes de concurrencia",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.68/octostream-1.68-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.68/octostream-1.68-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.68/octostream-1.68-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "3c5b332e1b8db61aed55a8d5368f8e03b54026fc33c509559c856fba0825b5b4",
-    "armeabi-v7a": "5320a92d27846dd25f85aca070d15caf529b0c4ce91ff277abec2fbe33b25615",
-    "x86_64": "c16d96f83db8f3f060f32d5321cc9a097a0698c44462da02d0e990a4c9eeb91b"
+    "arm64-v8a": "e73f769490232f6049f690b5320ebd10dae75ee591f0d5d9e0a6edb1fb1311ab",
+    "armeabi-v7a": "8a2262e8ecc9e4529e8d9b3d93a9c8a835ae5b3fd19f7b99f7da6f5969717e95",
+    "x86_64": "f5e8c188e9e7d90e799f3c39386791c761b5c8bb6281b6d30ff696be7f042106"
   }
 }

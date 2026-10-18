@@ -34,7 +34,7 @@ public class CloudProxyPlugin extends Plugin {
     private static final String HTTP_PROXY_ADDR = "127.0.0.1:1820";
     private static final int HTTP_PROXY_PORT = 1820;
 
-    private static Process aetherProcess = null;
+    private static volatile Process aetherProcess = null;
     private static volatile boolean connected = false;
     private static volatile boolean connecting = false;
     private static volatile long connectingSince = 0;
@@ -44,6 +44,7 @@ public class CloudProxyPlugin extends Plugin {
     private static final Object PROCESS_LOCK = new Object();
     private static final Executor DIRECT_EXECUTOR = Runnable::run;
     private boolean antiLeakScriptInstalled = false;
+    private androidx.webkit.ScriptHandler antiLeakScriptHandler = null;
 
     @Override
     public void load() {
@@ -76,14 +77,20 @@ public class CloudProxyPlugin extends Plugin {
 
         final long generation;
         final boolean needsStop;
+        // La sonda de sockets (hasta ~1s) NO puede ir dentro del lock —
+        // bloquearía a getStatus/getHttpProxy y al propio wait-path.
+        boolean fastAlive;
         synchronized (PROCESS_LOCK) {
-            // Fast-path: no basta con que el proceso viva — verifica que el
-            // túnel responde, si no un túnel medio muerto devolvería
-            // "connected" sin reconectar nada.
-            if (connected && aetherProcess != null && aetherProcess.isAlive() && isSocksProxyUp()) {
-                call.resolve(new JSObject().put("status", "connected"));
-                return;
-            }
+            fastAlive = connected && aetherProcess != null && aetherProcess.isAlive();
+        }
+        // Fast-path: no basta con que el proceso viva — verifica que el
+        // túnel responde, si no un túnel medio muerto devolvería
+        // "connected" sin reconectar nada.
+        if (fastAlive && isSocksProxyUp()) {
+            call.resolve(new JSObject().put("status", "connected"));
+            return;
+        }
+        synchronized (PROCESS_LOCK) {
             if (connecting) {
                 // A connect is already in progress. Don't reject — wait for it
                 // to finish so concurrent callers (e.g. App.jsx retry loop +
@@ -123,12 +130,30 @@ public class CloudProxyPlugin extends Plugin {
                 if (needsStop) stopAether();
                 startAether();
                 Process startedProcess = aetherProcess;
+                boolean cancelled;
                 synchronized (PROCESS_LOCK) {
-                    if (generation != connectionGeneration) {
-                        if (aetherProcess == startedProcess) stopAether();
-                        call.reject("WARP connection cancelled");
-                        return;
+                    cancelled = generation != connectionGeneration;
+                }
+                if (cancelled) {
+                    // Esta conexión fue reemplazada — matar NUESTRO proceso
+                    // (waitFor fuera del lock, como en el resto de rutas).
+                    synchronized (PROCESS_LOCK) {
+                        if (aetherProcess == startedProcess) aetherProcess = null;
                     }
+                    if (startedProcess != null) {
+                        try {
+                            startedProcess.destroy();
+                            if (!startedProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+                                    && startedProcess.isAlive()) {
+                                startedProcess.destroyForcibly();
+                            }
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            startedProcess.destroyForcibly();
+                        }
+                    }
+                    call.reject("WARP connection cancelled");
+                    return;
                 }
                 // Route all app traffic through WARP (change IP). Resolve only
                 // after the WebView proxy and anti-leak hooks are installed.
@@ -153,14 +178,21 @@ public class CloudProxyPlugin extends Plugin {
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start Aether: " + e.getMessage(), e);
+                boolean own;
                 synchronized (PROCESS_LOCK) {
-                    if (generation == connectionGeneration) {
+                    own = generation == connectionGeneration;
+                    if (own) {
                         lastError = e.getMessage();
-                        stopAether();
                         connected = false;
                         connecting = false;
-                        clearAppProxy();
                     }
+                }
+                // stopAether (waitFor 5s) y clearAppProxy FUERA del lock —
+                // retener PROCESS_LOCK segundos congela el fast-path de
+                // connect() y las sondas de ExoPlayer.
+                if (own) {
+                    stopAether();
+                    clearAppProxy();
                 }
                 call.reject("Failed to start WARP proxy: " + e.getMessage());
             }
@@ -375,12 +407,13 @@ public class CloudProxyPlugin extends Plugin {
                 } else {
                     lastError = "WebView proxy override is not supported on this device";
                     Log.e(TAG, lastError);
-                    stopAether();
+                    // waitFor(5s) en main thread = ANR — teardown en background.
+                    new Thread(this::stopAether, "aether-stop").start();
                 }
             } catch (Exception e) {
                 lastError = "Failed to set WebView proxy: " + e.getMessage();
                 Log.e(TAG, lastError);
-                stopAether();
+                new Thread(this::stopAether, "aether-stop").start();
             }
 
             // 3. Anti-leak: Disable WebRTC in WebView (prevents IP leak via STUN/TURN)
@@ -388,7 +421,13 @@ public class CloudProxyPlugin extends Plugin {
             try {
                 android.webkit.WebView webView = getBridge().getWebView();
                 if (webView != null) {
-                    applyAntiLeak(webView, !antiLeakScriptInstalled);
+                    webView.evaluateJavascript(ANTI_LEAK_SCRIPT, null);
+                    if (!antiLeakScriptInstalled
+                            && androidx.webkit.WebViewFeature.isFeatureSupported(
+                                androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                        antiLeakScriptHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
+                            webView, ANTI_LEAK_SCRIPT, java.util.Collections.singleton("*"));
+                    }
                     antiLeakScriptInstalled = true;
                     Log.i(TAG, "WebRTC disabled in WebView (anti-leak)");
                 }
@@ -461,20 +500,18 @@ public class CloudProxyPlugin extends Plugin {
                 Log.e(TAG, "Failed to clear WebView proxy: " + e.getMessage());
             }
 
-            // 3. Re-enable WebRTC (restore normal behavior when WARP is off)
+            // 3. Quitar el script anti-leak inyectado al inicio de cada
+            // documento — si no se retira, el ScriptHandler sigue deshabilitando
+            // WebRTC en TODAS las navegaciones futuras aunque WARP esté apagado
+            // (rompía embeds con WebRTC hasta reiniciar la app).
             try {
-                android.webkit.WebView webView = getBridge().getWebView();
-                if (webView != null) {
-                    String restoreScript =
-                        "try {" +
-                        "  // Re-enable WebRTC by restoring native APIs\n" +
-                        "  // (they can't be truly restored, but page reload will fix it)\n" +
-                        "  console.log('[AntiLeak] WebRTC restrictions removed');" +
-                        "} catch(e) {}";
-                    webView.evaluateJavascript(restoreScript, null);
+                if (antiLeakScriptHandler != null) {
+                    antiLeakScriptHandler.remove();
+                    antiLeakScriptHandler = null;
                 }
+                antiLeakScriptInstalled = false;
             } catch (Exception e) {
-                Log.e(TAG, "Failed to restore WebRTC: " + e.getMessage());
+                Log.e(TAG, "Failed to remove anti-leak script: " + e.getMessage());
             }
         });
     }
@@ -538,11 +575,28 @@ public class CloudProxyPlugin extends Plugin {
         // Route sniff: read SNI from first bytes for smarter routing
         env.put("AETHER_ROUTE_SNIFF", "1");
 
-        aetherProcess = builder.start();
+        final Process spawned = builder.start();
         Log.i(TAG, "Aether process started");
 
-        // Read logs in a background thread
-        new Thread(() -> readAetherLogs(aetherProcess)).start();
+        // Registrar el proceso y comprobar cancelación ATÓMICAMENTE: si
+        // disconnect() corre entre el builder.start() y la asignación, su
+        // stopAether() ya leyó aetherProcess (viejo/nulo) y NADIE mataría al
+        // proceso recién creado → aether huérfano con los puertos ocupados
+        // y el túnel vivo aunque la app crea que WARP está apagado.
+        synchronized (PROCESS_LOCK) {
+            if (!connecting) {
+                spawned.destroy();
+                aetherProcess = null;
+                throw new InterruptedException("connect cancelled");
+            }
+            aetherProcess = spawned;
+        }
+
+        // Read logs in a background thread. OJO: capturar el proceso local,
+        // no el campo — si un connect posterior lo reemplaza, este hilo debe
+        // seguir drenando ESTE proceso; si nadie drena su stdout el pipe de
+        // 64KB se llena y el hijo se congela escribiendo (zombie colgado).
+        new Thread(() -> readAetherLogs(spawned), "aether-logs").start();
 
         // Wait for the SOCKS5 proxy to come up (check every 500ms for up to 60s)
         // Reduced from 150s to 60s for faster feedback (and battery savings).

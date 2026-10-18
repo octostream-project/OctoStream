@@ -7,6 +7,7 @@
 // - Desktop/Electron dev: Aether SOCKS5 on 127.0.0.1:1819 acts as WARP
 
 import { isAndroidNative } from './platform.js'
+import { CloudProxy } from './cloudProxy.js'
 
 let _connected = false
 let _connecting = false
@@ -77,8 +78,10 @@ async function refresh() {
       .finally(() => { _refreshing = null })
     return _refreshing
   }
-  _refreshing = import('@octostream/cloud-proxy')
-    .then(({ CloudProxy }) => CloudProxy.getStatus())
+  // Fachada estática (import dinámico en frío = regresión del "Conectando
+  // WARP" eterno de la 1.61 en WebViews de TV antiguos).
+  _refreshing = Promise.resolve()
+    .then(() => CloudProxy.getStatus())
     .then(status => {
       _connecting = !!status.connecting
       setConnected(!!status.connected)
