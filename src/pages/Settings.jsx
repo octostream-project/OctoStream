@@ -8,6 +8,7 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
+import { openRiseupProfile, importRiseupToNetworkManager } from '../utils/riseupVpn.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
@@ -127,6 +128,32 @@ export default function Settings() {
   const [vpnStatus, setVpnStatus] = useState('disconnected') // disconnected | connecting | connected
   const [vpnError, setVpnError] = useState('')
   const [vpnAutoConnect, setVpnAutoConnect] = useState(localStorage.getItem('octostream_warp_autoconnect') !== 'false')
+  // RiseupVPN (OpenVPN) — capa VPN alternativa: genera un .ovpn con cert
+  // de cliente fresco y lo abre con el cliente OpenVPN del sistema.
+  const [riseupBusy, setRiseupBusy] = useState(false)
+  const [riseupMsg, setRiseupMsg] = useState('')
+
+  const handleRiseup = useCallback(async (importNm = false) => {
+    setRiseupBusy(true)
+    setRiseupMsg('')
+    try {
+      if (importNm) {
+        const r = await importRiseupToNetworkManager()
+        setRiseupMsg(r.imported
+          ? 'Perfil importado a NetworkManager — actívalo desde el menú de red del sistema.'
+          : 'No se pudo importar: ' + (r.error || 'desconocido'))
+      } else {
+        const r = await openRiseupProfile()
+        setRiseupMsg(r.opened
+          ? `Perfil generado (${r.gateways} servidores). Se abrió con el cliente OpenVPN del sistema.`
+          : 'No se pudo abrir: ' + (r.error || 'cancelado'))
+      }
+    } catch (e) {
+      setRiseupMsg('Error: ' + (e.message || e))
+    } finally {
+      setRiseupBusy(false)
+    }
+  }, [])
 
   const toggleVpn = useCallback(async () => {
     setVpnError('')
@@ -1395,6 +1422,52 @@ export default function Settings() {
                 </button>
               </label>
             </div>
+          </div>
+
+          {/* RiseupVPN — capa VPN alternativa (OpenVPN). Genera un perfil
+              .ovpn con certificado de cliente fresco y lo abre con el
+              cliente OpenVPN instalado: VPN real sistema-completo, gratis
+              y sin cuenta (https://riseup.net/en/vpn). */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center">
+                <Key className="text-green-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">RiseupVPN (OpenVPN)</h3>
+                <p className="text-dark-400 text-sm">
+                  VPN gratuita y sin logs como alternativa a WARP. Genera un perfil .ovpn
+                  y lo abre con OpenVPN Connect u otro cliente instalado (afecta a todo el dispositivo).
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => handleRiseup(false)}
+                disabled={riseupBusy}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {riseupBusy ? 'Generando perfil…' : 'Generar y abrir perfil .ovpn'}
+              </button>
+              {isElectron() && (
+                <button
+                  onClick={() => handleRiseup(true)}
+                  disabled={riseupBusy}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-dark-700 hover:bg-dark-600 text-dark-200'
+                  }`}
+                >
+                  Importar a NetworkManager
+                </button>
+              )}
+            </div>
+            {riseupMsg && (
+              <p className={`text-sm mt-3 ${riseupMsg.startsWith('Error') || riseupMsg.startsWith('No se pudo') ? 'text-red-400' : 'text-green-400'}`}>
+                {riseupMsg}
+              </p>
+            )}
           </div>
         </div>
       )}

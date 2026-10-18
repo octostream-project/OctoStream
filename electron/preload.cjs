@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('octostream', {
     disconnectBackground: () => ipcRenderer.invoke('cloud:disconnect-background'),
     getStatus: () => ipcRenderer.invoke('cloud:status'),
   },
+  // RiseupVPN — guardar el .ovpn generado / importarlo a NetworkManager.
+  riseup: {
+    save: (conf) => ipcRenderer.invoke('riseup:save', { conf }),
+    import: (conf) => ipcRenderer.invoke('riseup:import', { conf }),
+  },
   // Fullscreen de la ventana (mismo comportamiento que el player Android).
   setFullscreen: (on) => ipcRenderer.invoke('win:fullscreen', on),
   isFullscreen: () => ipcRenderer.invoke('win:fullscreen-state'),

@@ -28,4 +28,10 @@ export interface CloudProxyPlugin {
    * Get the current proxy connection status.
    */
   getStatus(): Promise<CloudProxyStatus>;
+
+  /**
+   * Write an OpenVPN profile to the app cache and open it with the
+   * system's OpenVPN client (RiseupVPN alternative VPN layer).
+   */
+  exportOvpn(options: { config: string; name?: string }): Promise<{ opened: boolean; name: string }>;
 }

@@ -39,6 +39,10 @@ public class CloudProxyPlugin extends Plugin {
     private static volatile boolean connecting = false;
     private static volatile long connectingSince = 0;
     private static volatile int statusMisses = 0;
+    // Protocolo que funcionó la última vez — se prueba primero en la
+    // siguiente conexión. "masque" es preferido (se disfraza de HTTPS/443);
+    // en redes que filtran el data-plane QUIC cae a "wg" automáticamente.
+    private static volatile String preferredProtocol = "masque";
     private static volatile String lastError = null;
     private static long connectionGeneration = 0;
     private static final Object PROCESS_LOCK = new Object();
@@ -128,7 +132,21 @@ public class CloudProxyPlugin extends Plugin {
                 // Parar el proceso viejo fuera del lock y del hilo del bridge:
                 // waitFor(5s) aquí es tolerable (hilo propio), no en el caller.
                 if (needsStop) stopAether();
-                startAether();
+                // Fallback de protocolo: el data-plane QUIC de MASQUE es
+                // filtrado por algunos ISP (handshake ok, tráfico descartado
+                // → scan de 120s sin gateway). Si el protocolo preferido no
+                // levanta los proxies a tiempo, se reintenta con el otro
+                // (WireGuard clásico valida en ~10s cuando UDP pasa).
+                String first = preferredProtocol;
+                String second = "masque".equals(first) ? "wg" : "masque";
+                try {
+                    startAether(first);
+                } catch (Exception firstErr) {
+                    Log.w(TAG, "Aether " + first + " failed (" + firstErr.getMessage() + ") — retrying with " + second);
+                    stopAether();
+                    startAether(second);
+                    preferredProtocol = second;
+                }
                 Process startedProcess = aetherProcess;
                 boolean cancelled;
                 synchronized (PROCESS_LOCK) {
@@ -197,6 +215,59 @@ public class CloudProxyPlugin extends Plugin {
                 call.reject("Failed to start WARP proxy: " + e.getMessage());
             }
         }, "aether-connect").start();
+    }
+
+    /**
+     * Escribe un perfil OpenVPN (.ovpn) en el cache interno y lo abre con
+     * el cliente OpenVPN del sistema (OpenVPN Connect / OpenVPN for Android
+     * registran la extensión .ovpn). RiseupVPN como capa VPN alternativa —
+     * el túnel corre sistema-completo en el cliente del usuario, no dentro
+     * de la app (sin motor OpenVPN propio).
+     * @param call {config: string (contenido .ovpn), name?: string}
+     */
+    @PluginMethod
+    public void exportOvpn(PluginCall call) {
+        String config = call.getString("config");
+        if (config == null || config.isEmpty()) {
+            call.reject("config required");
+            return;
+        }
+        String name = call.getString("name");
+        if (name == null || name.isEmpty()) name = "riseup-ovpn.conf";
+        if (!name.endsWith(".conf") && !name.endsWith(".ovpn")) name += ".ovpn";
+        try {
+            android.content.Context ctx = getContext();
+            File out = new File(ctx.getCacheDir(), name);
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+            fos.write(config.getBytes("UTF-8"));
+            fos.close();
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                    ctx, ctx.getPackageName() + ".fileprovider", out);
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/x-openvpn-profile");
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                ctx.startActivity(intent);
+            } catch (android.content.ActivityNotFoundException noView) {
+                // Sin app que entienda .ovpn → compartir genérico (el usuario
+                // puede guardarlo o mandarlo a su cliente OpenVPN).
+                android.content.Intent share = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                share.setType("application/x-openvpn-profile");
+                share.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+                share.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                ctx.startActivity(android.content.Intent.createChooser(share, null)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            }
+            JSObject ret = new JSObject();
+            ret.put("opened", true);
+            ret.put("name", name);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "exportOvpn failed", e);
+            call.reject("exportOvpn failed: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -526,7 +597,7 @@ public class CloudProxyPlugin extends Plugin {
      * Starts the Aether binary as a background process.
      * The binary is bundled as libaether.so in jniLibs.
      */
-    private void startAether() throws Exception {
+    private void startAether(String protocol) throws Exception {
         // Orphan cleanup: a previous libaether process can outlive the app
         // (Android doesn't always reap children on process death) and keep
         // ports 1819/1820 bound — every subsequent connect() would then time
@@ -559,7 +630,8 @@ public class CloudProxyPlugin extends Plugin {
 
         // Environment variables for Aether - optimized for battery
         Map<String, String> env = builder.environment();
-        env.put("AETHER_PROTOCOL", "masque");
+        env.put("AETHER_PROTOCOL", protocol);
+        boolean isMasque = "masque".equals(protocol);
         // ironclad: full tunnel + real HTTP request per candidate (most secure scan)
         env.put("AETHER_SCAN", "ironclad");
         env.put("AETHER_IP", "v4");
@@ -572,12 +644,15 @@ public class CloudProxyPlugin extends Plugin {
         env.put("TMPDIR", getContext().getCacheDir().getAbsolutePath());
         // Quick reconnect to reuse last known good endpoint
         env.put("AETHER_QUICK_RECONNECT", "1");
-        // Use a known good endpoint to skip the 120s scan
-        env.put("AETHER_PEER", "162.159.198.1:443");
+        if (isMasque) {
+            // Endpoint MASQUE fijado para saltarse el scan de 120s — solo vale
+            // para QUIC/443; en WG los endpoints son otros puertos (908…).
+            env.put("AETHER_PEER", "162.159.198.1:443");
+            // Enable QUIC v2 opener (helps on networks that block QUIC v1)
+            env.put("AETHER_QUIC_V2", "1");
+        }
         // Also start HTTP CONNECT proxy (better for OkHttp - does remote DNS)
         env.put("AETHER_HTTP_PROXY", HTTP_PROXY_ADDR);
-        // Enable QUIC v2 opener (helps on networks that block QUIC v1)
-        env.put("AETHER_QUIC_V2", "1");
         // Route sniff: read SNI from first bytes for smarter routing
         env.put("AETHER_ROUTE_SNIFF", "1");
 
@@ -604,13 +679,13 @@ public class CloudProxyPlugin extends Plugin {
         // 64KB se llena y el hijo se congela escribiendo (zombie colgado).
         new Thread(() -> readAetherLogs(spawned), "aether-logs").start();
 
-        // Wait for the SOCKS5 proxy to come up (check every 500ms for up to 60s)
-        // Reduced from 150s to 60s for faster feedback (and battery savings).
-        // Bail out early si esta conexión fue reemplazada/cancelada (un
-        // disconnect() incrementa connectionGeneration) o el proceso murió:
-        // seguir durmiendo 60s solo retrasa el rechazo y gasta batería.
+        // Wait for the SOCKS5 proxy to come up. MASQUE va rápido cuando su
+        // peer fijado valida (~5-10s); si en ~35s no hay proxies el protocolo
+        // está filtrado y no merece quemar los 120s del scan — se corta y el
+        // caller cae al otro protocolo. WG recibe más margen porque escanea
+        // endpoints propios (~10s típico, hasta ~60s).
         int attempts = 0;
-        int maxAttempts = 120; // 60 seconds
+        int maxAttempts = isMasque ? 70 : 120; // 35s masque / 60s wg
         while (!isSocksProxyUp() && attempts < maxAttempts) {
             synchronized (PROCESS_LOCK) {
                 if (!connecting) throw new InterruptedException("connect cancelled");

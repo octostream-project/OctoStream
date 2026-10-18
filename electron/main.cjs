@@ -57,7 +57,7 @@ function isAetherBypassHost(host) {
 const LAN_HOST = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|192\.168\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i
 function isLanHost(host) { return LAN_HOST.test(host || '') }
 
-const aetherState = { proc: null, connected: false, connecting: false, error: '' }
+const aetherState = { proc: null, connected: false, connecting: false, error: '', protocol: '' }
 let mainWindow = null
 
 function probePort(port) {
@@ -195,60 +195,83 @@ async function aetherConnect() {
     }
     const exe = resolveAether()
     if (!exe) throw new Error('binario aether no encontrado (build/aether o resources)')
-    // Matar un proceso viejo primero — aether puede quedar vivo con el
-    // túnel caído reintentando y dos instancias compiten por :1819/:1820.
-    if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
     const workDir = app.getPath('userData')
-    const env = {
-      ...process.env,
-      AETHER_PROTOCOL: 'masque',
-      AETHER_SCAN: 'ironclad',
-      AETHER_IP: 'v4',
-      AETHER_NOIZE: 'aggressive',
-      AETHER_LOG_LEVEL: 'warn',
-      AETHER_SOCKS: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
-      AETHER_HTTP_PROXY: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
-      AETHER_CONFIG: path.join(workDir, 'aether.toml'),
-      AETHER_QUICK_RECONNECT: '1',
-      AETHER_PEER: '162.159.198.1:443',
-      AETHER_QUIC_V2: '1',
-      AETHER_ROUTE_SNIFF: '1',
-      TMPDIR: os.tmpdir(),
-    }
-    const proc = spawn(exe, [], { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
-    aetherState.proc = proc
-    proc.on('exit', (code) => {
-      console.warn('[Aether] proceso salió code=', code)
-      if (aetherState.proc === proc) {
-        aetherState.proc = null
-        aetherState.connected = false
-        // El session proxy queda apuntando al puerto muerto → fail-closed,
-        // las requests fallan en vez de filtrar la IP real (como Android).
+    // Fallback de protocolo: el data-plane QUIC de MASQUE es filtrado por
+    // algunos ISP (handshake ok, tráfico descartado → scan de 120s sin
+    // gateway). Si el protocolo preferido no levanta los proxies a tiempo
+    // se reintenta con el otro — WireGuard clásico valida en ~10s cuando
+    // el UDP pasa. El que funcionó se recuerda para la próxima conexión.
+    const spawnAndWait = async (protocol, timeoutMs) => {
+      // Matar un proceso viejo primero — aether puede quedar vivo con el
+      // túnel caído reintentando y dos instancias compiten por :1819/:1820.
+      if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
+      const env = {
+        ...process.env,
+        AETHER_PROTOCOL: protocol,
+        AETHER_SCAN: 'ironclad',
+        AETHER_IP: 'v4',
+        AETHER_NOIZE: 'aggressive',
+        AETHER_LOG_LEVEL: 'warn',
+        AETHER_SOCKS: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+        AETHER_HTTP_PROXY: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
+        AETHER_CONFIG: path.join(workDir, 'aether.toml'),
+        AETHER_QUICK_RECONNECT: '1',
+        AETHER_ROUTE_SNIFF: '1',
+        TMPDIR: os.tmpdir(),
       }
-    })
-    let stderrTail = ''
-    const onLog = (c) => {
-      const s = c.toString()
-      stderrTail = (stderrTail + s).slice(-4096)
-      for (const line of s.split('\n')) {
-        if (/error|warn|listening|expos/i.test(line)) console.log('[Aether]', line.trim())
+      if (protocol === 'masque') {
+        // Peer fijado para saltarse el scan — solo vale para QUIC/443;
+        // en WG los endpoints son otros puertos (908…) y hay que escanear.
+        env.AETHER_PEER = '162.159.198.1:443'
+        env.AETHER_QUIC_V2 = '1'
       }
-    }
-    proc.stdout.on('data', onLog)
-    proc.stderr.on('data', onLog)
+      const proc = spawn(exe, [], { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      aetherState.proc = proc
+      proc.on('exit', (code) => {
+        console.warn('[Aether] proceso salió code=', code)
+        if (aetherState.proc === proc) {
+          aetherState.proc = null
+          aetherState.connected = false
+          // El session proxy queda apuntando al puerto muerto → fail-closed,
+          // las requests fallan en vez de filtrar la IP real (como Android).
+        }
+      })
+      let stderrTail = ''
+      const onLog = (c) => {
+        const s = c.toString()
+        stderrTail = (stderrTail + s).slice(-4096)
+        for (const line of s.split('\n')) {
+          if (/error|warn|listening|expos/i.test(line)) console.log('[Aether]', line.trim())
+        }
+      }
+      proc.stdout.on('data', onLog)
+      proc.stderr.on('data', onLog)
 
-    // Esperar a que suban ambos proxies (máx. 60s, igual que Android) con
-    // salida anticipada si el proceso muere.
-    const deadline = Date.now() + 60000
-    while (Date.now() < deadline) {
-      if (proc.exitCode !== null) break
-      if (await isAetherProxyUp()) {
-        await applyAetherRouting()
-        return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+      // Esperar a que suban ambos proxies con salida anticipada si el
+      // proceso muere.
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        if (proc.exitCode !== null) break
+        if (await isAetherProxyUp()) {
+          aetherState.protocol = protocol
+          await applyAetherRouting()
+          return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+        }
+        await new Promise(r => setTimeout(r, 500))
       }
-      await new Promise(r => setTimeout(r, 500))
+      return { error: `aether (${protocol}) no respondió en ${timeoutMs / 1000}s${stderrTail ? ': ' + stderrTail.slice(-200) : ''}` }
     }
-    throw new Error(`aether no respondió en 60s${stderrTail ? ': ' + stderrTail.slice(-200) : ''}`)
+
+    // MASQUE va rápido cuando su peer fijado valida (~5-10s); si en 35s no
+    // hay proxies el protocolo está filtrado — se corta y se prueba WG.
+    const first = aetherState.protocol || 'masque'
+    const second = first === 'masque' ? 'wg' : 'masque'
+    const r1 = await spawnAndWait(first, first === 'masque' ? 35000 : 60000)
+    if (r1.status === 'connected') return r1
+    console.warn(`[Aether] ${first} falló — probando ${second}`)
+    const r2 = await spawnAndWait(second, second === 'masque' ? 35000 : 60000)
+    if (r2.status === 'connected') return r2
+    throw new Error(r2.error || r1.error)
   } catch (e) {
     aetherState.error = e.message
     if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
@@ -1034,6 +1057,49 @@ ipcMain.on('get-proxy-config', (event) => {
 ipcMain.handle('player:open-external', (_event, arg) => openExternalPlayer(arg || {}))
 
 // Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
+// RiseupVPN (capa VPN alternativa): el renderer genera el .ovpn y aquí se
+// guarda/abre. En Linux se ofrece además importarlo a NetworkManager
+// (`nmcli connection import type openvpn` no requiere root para importar;
+// el sistema pide auth solo al activar la conexión).
+ipcMain.handle('riseup:save', async (_e, arg) => {
+  const conf = String(arg?.conf || '')
+  if (!conf) return { saved: false, error: 'conf vacía' }
+  const win = BrowserWindow.getAllWindows()[0]
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Guardar perfil RiseupVPN',
+    defaultPath: 'riseup-ovpn.conf',
+    filters: [{ name: 'OpenVPN profile', extensions: ['ovpn', 'conf'] }],
+  })
+  if (canceled || !filePath) return { saved: false }
+  try {
+    fs.writeFileSync(filePath, conf)
+    shell.showItemInFolder(filePath)
+    return { saved: true, path: filePath }
+  } catch (e) {
+    return { saved: false, error: e.message }
+  }
+})
+
+ipcMain.handle('riseup:import', async (_e, arg) => {
+  const conf = String(arg?.conf || '')
+  if (!conf) return { imported: false, error: 'conf vacía' }
+  if (process.platform !== 'linux') return { imported: false, error: 'import solo en Linux' }
+  try {
+    const tmp = path.join(os.tmpdir(), `octostream-riseup-${Date.now()}.conf`)
+    fs.writeFileSync(tmp, conf, { mode: 0o600 })
+    const { execFile } = require('child_process')
+    return await new Promise((resolve) => {
+      execFile('nmcli', ['connection', 'import', 'type', 'openvpn', 'file', tmp], { timeout: 15000 }, (err, stdout, stderr) => {
+        try { fs.unlinkSync(tmp) } catch {}
+        if (err) return resolve({ imported: false, error: (stderr || err.message || '').trim() })
+        resolve({ imported: true, output: (stdout || '').trim() })
+      })
+    })
+  } catch (e) {
+    return { imported: false, error: e.message }
+  }
+})
+
 ipcMain.handle('cloud:connect', () => aetherConnect())
 ipcMain.handle('cloud:disconnect', () => aetherDisconnect(false))
 ipcMain.handle('cloud:disconnect-background', () => aetherDisconnect(true))
