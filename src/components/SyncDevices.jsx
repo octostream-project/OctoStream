@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
-import { RefreshCw, Wifi, Check, AlertCircle, Download, Upload, X, MonitorSmartphone } from 'lucide-react'
+import { RefreshCw, Wifi, Check, AlertCircle, Download, X, MonitorSmartphone } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from './OctoLoader.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
+import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
 // red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
@@ -13,10 +14,6 @@ export default function SyncDevices() {
   const favorites = useStore(s => s.favorites)
   const watchHistory = useStore(s => s.watchHistory)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
-  const setFavorites = useStore(s => s.setFavorites)
-  const setWatchHistory = useStore(s => s.setWatchHistory)
-  const setWatchedEpisodes = useStore(s => s.setWatchedEpisodes)
-
   const [serverUrl, setServerUrl] = useState('')
   const [remoteIp, setRemoteIp] = useState('')
   const [deviceInfo, setDeviceInfo] = useState(null) // {deviceId, alias, fingerprint}
@@ -30,51 +27,18 @@ export default function SyncDevices() {
   const [pairedDevices, setPairedDevices] = useState([])
   const syncListenerRef = useRef(null)
 
-  const mergeData = (remoteData) => {
-    if (!remoteData) return
-    if (Array.isArray(remoteData.favorites)) {
-      const favMap = new Map()
-      for (const f of favorites) favMap.set(`${f.id}-${f.type}`, f)
-      for (const f of remoteData.favorites) {
-        const key = `${f.id}-${f.type}`
-        if (!favMap.has(key)) favMap.set(key, f)
-      }
-      setFavorites([...favMap.values()].slice(0, 500))
-    }
-    if (Array.isArray(remoteData.watchHistory)) {
-      const histMap = new Map()
-      for (const h of watchHistory) histMap.set(`${h.id}-${h.type}`, h)
-      for (const h of remoteData.watchHistory) {
-        const key = `${h.id}-${h.type}`
-        const existing = histMap.get(key)
-        if (!existing || (h.watchedAt || 0) > (existing.watchedAt || 0)) {
-          histMap.set(key, h)
-        }
-      }
-      setWatchHistory([...histMap.values()].sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0)).slice(0, 50))
-    }
-    // Sin keys de prototipo — un peer malicioso podría inyectar __proto__.
-    if (remoteData.watchedEpisodes && typeof remoteData.watchedEpisodes === 'object') {
-      const merged = { ...watchedEpisodes }
-      let count = Object.keys(merged).length
-      for (const [key, val] of Object.entries(remoteData.watchedEpisodes)) {
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue
-        if (!merged[key] && count >= 5000) continue
-        if (!merged[key]) count++
-        if (!merged[key] || (val.watchedAt || 0) > (merged[key].watchedAt || 0)) {
-          merged[key] = val
-        }
-      }
-      setWatchedEpisodes(merged)
-    }
-  }
+  // El merge es una UNIÓN por clave (lo remoto se junta con lo local, gana el
+  // watchedAt más reciente) — nunca sustitución. Vive en syncMerge.js para
+  // compartirlo con el receptor global (RemotePlayReceiver), que aplica los
+  // pushes aunque este panel esté cerrado.
+  const mergeData = (remoteData) => mergeRemoteData(remoteData)
 
   const handleReceivedData = (dataStr) => {
     try {
       const remoteData = JSON.parse(dataStr)
       mergeData(remoteData)
       setStatus('done')
-      setMessage('Datos recibidos del otro dispositivo')
+      setMessage('Datos recibidos y unidos a los tuyos')
       const now = new Date().toLocaleString('es-ES')
       localStorage.setItem('octostream_last_sync', now)
       setLastSync(now)
@@ -95,7 +59,7 @@ export default function SyncDevices() {
   const updateLocalData = async () => {
     const SyncServer = await getSyncServer()
     if (!SyncServer) return
-    const data = JSON.stringify({ favorites, watchHistory, watchedEpisodes })
+    const data = JSON.stringify(localSyncPayload())
     try {
       await SyncServer.setLocalData({ data })
     } catch (e) {
@@ -172,7 +136,7 @@ export default function SyncDevices() {
     const onSyncData = (e) => handleReceivedData(e.detail)
     window.addEventListener('octostream:syncData', onSyncData)
     return () => window.removeEventListener('octostream:syncData', onSyncData)
-  }, [favorites, watchHistory, watchedEpisodes])
+  }, [])
 
   // URL normalizada a partir de un dispositivo descubierto o una IP manual.
   const deviceUrl = (d) => d?.url || (remoteIp.startsWith('http') ? remoteIp : `http://${remoteIp}:8765`)
@@ -240,31 +204,42 @@ export default function SyncDevices() {
         setMessage('El otro dispositivo rechazó el emparejamiento.')
         return
       }
-      mergeData(remoteData)
-      finishOk('Sincronización completada')
+      const counts = mergeData(remoteData)
+      finishOk(`Descargado y unido (+${counts.favs} favoritos, ${counts.hist} historial, ${counts.eps} episodios nuevos)`)
     } catch (e) {
       failWith(e, 'descargar')
     }
   }
 
-  // Push: manda nuestros datos al otro dispositivo.
-  const handlePush = async (dev) => {
+  // Sincronizar: manda nuestros datos Y descarga los suyos — ambos dispositivos
+  // terminan con la unión (lo enviado + lo que ya tenía cada uno). El receptor
+  // une lo nuestro con lo suyo al recibir el push (RemotePlayReceiver, aunque
+  // su panel esté cerrado); nosotros unimos lo suyo al hacer pull.
+  const handleSync = async (dev) => {
     const url = deviceUrl(dev)
     setActionDevice(null)
     setStatus('connecting')
     setMessage(`Conectando con ${dev?.alias || 'el dispositivo'}...`)
-    setStatus('syncing')
-    setMessage('Enviando datos...')
     try {
-      const r = await pushSync(url, dev, { favorites, watchHistory, watchedEpisodes })
+      setStatus('syncing')
+      setMessage('Enviando tus datos...')
+      const r = await pushSync(url, dev, localSyncPayload())
       if (r === 'denied') {
         setStatus('error')
         setMessage('El otro dispositivo rechazó el emparejamiento.')
         return
       }
-      finishOk('Datos enviados correctamente')
+      setMessage('Descargando los datos del otro dispositivo...')
+      const remoteData = await pullSync(url, dev)
+      if (remoteData === 'denied') {
+        setStatus('error')
+        setMessage('Datos enviados, pero el otro dispositivo no compartió los suyos.')
+        return
+      }
+      const counts = mergeData(remoteData)
+      finishOk(`Sincronizado: enviado y recibido (+${counts.favs} favoritos, ${counts.hist} historial, ${counts.eps} episodios nuevos)`)
     } catch (e) {
-      failWith(e, 'enviar')
+      failWith(e, 'sincronizar')
     }
   }
 
@@ -435,25 +410,25 @@ export default function SyncDevices() {
               <button
                 data-tv-card
                 tabIndex={0}
-                onClick={() => handlePull(actionDevice)}
+                onClick={() => handleSync(actionDevice)}
                 className="w-full btn-primary px-4 py-3 flex items-center gap-3 justify-center"
               >
-                <Download size={18} />
+                <RefreshCw size={18} />
                 <span className="text-left">
-                  <span className="block font-medium">Descargar</span>
-                  <span className="block text-xs opacity-70">Traer su historial y favoritos aquí</span>
+                  <span className="block font-medium">Sincronizar</span>
+                  <span className="block text-xs opacity-70">Juntar los datos de los dos — nada se pierde</span>
                 </span>
               </button>
               <button
                 data-tv-card
                 tabIndex={0}
-                onClick={() => handlePush(actionDevice)}
+                onClick={() => handlePull(actionDevice)}
                 className="w-full btn-secondary px-4 py-3 flex items-center gap-3 justify-center"
               >
-                <Upload size={18} />
+                <Download size={18} />
                 <span className="text-left">
-                  <span className="block font-medium">Enviar</span>
-                  <span className="block text-xs opacity-70">Mandar tus datos a «{actionDevice.alias || actionDevice.ip}»</span>
+                  <span className="block font-medium">Solo descargar</span>
+                  <span className="block text-xs opacity-70">Traer sus datos aquí sin enviar los tuyos</span>
                 </span>
               </button>
             </div>

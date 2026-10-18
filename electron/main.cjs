@@ -7,6 +7,7 @@ const fs = require('fs')
 const http = require('http')
 const https = require('https')
 const os = require('os')
+const { spawn, execSync } = require('child_process')
 const crypto = require('crypto')
 const { URL } = require('url')
 const { SyncServer } = require('./sync-server.cjs')
@@ -36,12 +37,13 @@ const AETHER_HTTP_PORT = 1820
 // Hosts que nunca van por el túnel — espejo de nonProxyHosts/bypass del
 // plugin Android (TDT/RTVE/Mediaset/Google DAI dan errores bajo WARP, y la
 // LAN debe ir directa para la sincronización OctoStream).
-const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|doubleclick\.net|googlevideo\.com)$/i
+const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|doubleclick\.net|googlevideo\.com)$/i
 const AETHER_BYPASS_CHROMIUM = [
   '<local>', 'localhost', '127.0.0.1', '*.local',
   '192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '169.254.0.0/16',
   '*.tdtspain.com', '*.tdtchannels.com', '*.rtve.es', '*.mediaset.net',
-  '*.mediasetinfinity.es', 'dai.google.com', '*.doubleclick.net',
+  '*.mediasetinfinity.es', '*.atresplayer.com', '*.atresmedia.com',
+  'dai.google.com', '*.doubleclick.net',
   '*.googlevideo.com',
 ].join(';')
 function isAetherBypassHost(host) {
@@ -722,165 +724,6 @@ function proxyPost(targetUrl, postBody, postHeaders, res) {
   proxyReq.end()
 }
 
-// ─── ffmpeg remux ──────────────────────────────────────────────────────────
-// Chromium no reproduce contenedores .mkv/.avi/.ts… El endpoint /ffmpeg
-// remultiplexa a fMP4 en streaming: vídeo por copia (sin recodificar) y audio
-// a AAC (barato, cubre AC3/DTS/E-AC3 que Chromium tampoco decodifica).
-const { spawn, execSync } = require('child_process')
-
-function resolveFfmpeg() {
-  if (process.env.OCTOSTREAM_FFMPEG && fs.existsSync(process.env.OCTOSTREAM_FFMPEG)) {
-    return process.env.OCTOSTREAM_FFMPEG
-  }
-  const exe = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
-  // Binario estático empaquetado (scripts/fetch-ffmpeg.mjs → extraResources).
-  try {
-    const bundled = path.join(process.resourcesPath || '', 'ffmpeg',
-      `${process.platform}-${process.arch}`, exe)
-    if (app.isPackaged && fs.existsSync(bundled)) return bundled
-  } catch {}
-  // En desarrollo: build/ffmpeg/ dentro del repo, luego PATH del sistema.
-  try {
-    const devPath = path.resolve(__dirname, '..', 'build', 'ffmpeg',
-      `${process.platform}-${process.arch}`, exe)
-    if (fs.existsSync(devPath)) return devPath
-  } catch {}
-  return exe // PATH
-}
-
-// El fetch lo hace Node (TLS ya probado por el proxy, con redirects y los
-// headers del resolver); ffmpeg lee el stream de stdin. Así el binario
-// estático nunca toca TLS — los builds con gnutls crashean contra algunos
-// servidores (Cloudflare) durante el handshake.
-function remuxFetch(targetUrl, headers, depth, cb) {
-  if (depth > 5) return cb(new Error('too many redirects'))
-  // El target ya viene validado por remuxStream (incl. el caso loopback del
-  // servidor torrent); los redirects se re-validan aquí.
-  const target = depth === 0 ? new URL(targetUrl) : validProxyTarget(targetUrl)
-  if (!target) return cb(new Error('forbidden url'))
-  const isHttps = target.protocol === 'https:'
-  const lib = isHttps ? https : http
-  const req = lib.request({
-    hostname: target.hostname,
-    port: target.port || (isHttps ? 443 : 80),
-    path: target.pathname + target.search,
-    method: 'GET',
-    headers,
-    agent: agentFor(target, isHttps),
-    timeout: 30000,
-  }, (up) => {
-    if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
-      const loc = up.headers.location
-      const abs = loc.startsWith('http') ? loc : new URL(loc, targetUrl).href
-      up.resume()
-      return remuxFetch(abs, headers, depth + 1, cb)
-    }
-    cb(null, up)
-  })
-  req.on('timeout', () => { req.destroy(new Error('fetch timeout')) })
-  req.on('error', cb)
-  req.end()
-}
-
-function remuxStream(targetUrl, extraHeaders, res) {
-  // Loopback solo si es el servidor de streaming del torrent engine
-  // (remux de .mkv/.avi P2P); cualquier otra IP privada sigue bloqueada.
-  let target = validProxyTarget(targetUrl)
-  if (!target) {
-    try {
-      const u = new URL(targetUrl)
-      const tp = typeof torrentStreamPort === 'function' ? torrentStreamPort() : 0
-      if (tp && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && Number(u.port) === tp) {
-        target = u
-      }
-    } catch { /* URL inválida */ }
-  }
-  if (!target) {
-    res.writeHead(400); res.end('Invalid or forbidden url')
-    return
-  }
-  const hdrs = { ...headersForHost(target.hostname), ...sanitizeProxyHeaders(extraHeaders) }
-  console.log('[ffmpeg] remux:', hostOf(targetUrl))
-  remuxFetch(targetUrl, hdrs, 0, (err, up) => {
-    if (err) {
-      console.error('[ffmpeg] fetch error:', err.message)
-      if (!res.headersSent) res.writeHead(502)
-      res.end()
-      return
-    }
-    if (up.statusCode !== 200 && up.statusCode !== 206) {
-      console.warn('[ffmpeg] upstream', up.statusCode)
-      up.resume()
-      if (!res.headersSent) res.writeHead(up.statusCode)
-      res.end()
-      return
-    }
-    const ffmpeg = resolveFfmpeg()
-    const args = [
-      '-v', 'warning',
-      '-fflags', '+genpts+igndts',
-      '-i', 'pipe:0',
-      '-map', '0:v:0', '-map', '0:a:0?',
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
-      '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      'pipe:1',
-    ]
-    let child
-    try {
-      child = spawn(ffmpeg, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-    } catch (e) {
-      up.destroy()
-      res.writeHead(503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: `ffmpeg no disponible: ${e.message}` }))
-      return
-    }
-    let stderr = ''
-    child.stderr.on('data', (c) => { stderr += c.toString(); if (stderr.length > 8192) stderr = stderr.slice(-8192) })
-    res.writeHead(200, {
-      'Content-Type': 'video/mp4',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'no-cache',
-    })
-    up.pipe(child.stdin)
-    child.stdout.pipe(res)
-    const kill = () => {
-      try { child.kill('SIGKILL') } catch {}
-      try { up.destroy() } catch {}
-    }
-    res.on('close', kill)
-    child.stdin.on('error', () => { try { up.destroy() } catch {} })
-    up.on('error', () => kill())
-    up.on('end', () => { try { child.stdin.end() } catch {} })
-    reqIdleKill(child, res)
-    child.on('error', (e) => {
-      console.error('[ffmpeg] spawn error:', e.message)
-      kill()
-      if (!res.headersSent) { res.writeHead(503) }
-      res.end()
-    })
-    child.on('exit', (code) => {
-      if (code !== 0 && code !== null) {
-        console.warn('[ffmpeg] exit', code, stderr.slice(-300))
-      }
-      res.end()
-    })
-  })
-}
-
-// Mata el ffmpeg si queda sin lector (cliente cerró) o si no produce datos.
-function reqIdleKill(child, res) {
-  let last = Date.now()
-  child.stdout.on('data', () => { last = Date.now() })
-  const iv = setInterval(() => {
-    if (res.destroyed || res.closed || Date.now() - last > 45000) {
-      clearInterval(iv)
-      try { child.kill('SIGKILL') } catch {}
-      try { res.end() } catch {}
-    }
-  }, 10000)
-  iv.unref()
-}
-
 // ─── Reproductores externos (mpv / VLC) ────────────────────────────────────
 // En desktop los esquemas vlc:// / mpv:// no existen — se lanza el binario
 // real con la URL del stream (que puede ser la del proxy local, con headers).
@@ -1048,24 +891,6 @@ function startProxyServer() {
       return
     }
 
-    if (parsed.pathname === '/ffmpeg') {
-      // Remux ffmpeg → fMP4 para contenedores que Chromium no soporta
-      // (mkv/avi/ts…). Mismo esquema ?url=&headers= que /proxy.
-      const targetUrl = parsed.searchParams.get('url')
-      if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
-        res.writeHead(400)
-        res.end('Missing or invalid url param')
-        return
-      }
-      let ffHeaders = {}
-      const ffHeadersParam = parsed.searchParams.get('headers')
-      if (ffHeadersParam) {
-        try { ffHeaders = JSON.parse(ffHeadersParam) } catch {}
-      }
-      remuxStream(targetUrl, ffHeaders, res)
-      return
-    }
-
     if (parsed.pathname === '/embed-relay') {
       // Relay de origen para CDNs ligados al documento del embed
       // (DLive/tiestep): el fetch se hace con la sesión del BrowserWindow del
@@ -1163,7 +988,6 @@ ipcMain.on('get-proxy-config', (event) => {
     port: PROXY_PORT,
     url: PROXY_PREFIX_LOCAL,
     base: `http://127.0.0.1:${PROXY_PORT}`,
-    ffmpegUrl: `http://127.0.0.1:${PROXY_PORT}/ffmpeg?token=${PROXY_TOKEN}&url=`,
   }
 })
 
@@ -1234,11 +1058,6 @@ async function getTorrentEngine() {
     })
   }
   return torrentEngine
-}
-// Puerto del servidor de streaming del torrent (para dejar pasar loopback
-// en /ffmpeg cuando el archivo es mkv/avi y hay que remultiplexar).
-function torrentStreamPort() {
-  return torrentEngine?.server?.address()?.port || 0
 }
 ipcMain.handle('torrent:start', async (_e, arg) => (await getTorrentEngine()).start(arg || {}))
 ipcMain.handle('torrent:stop', async () => (await getTorrentEngine()).stop())
@@ -1336,24 +1155,54 @@ function getMpv() {
   return null
 }
 const MPV_URL_OK = (u) => /^https?:\/\//i.test(u || '')
+
+// mpv embebido en la ventana de la app (--wid): X11 y Windows. En Wayland
+// nativo --wid no existe → ventana flotante (misma UI vía nuestro OSC).
+function mpvEmbedWid(event) {
+  if (process.platform !== 'linux' && process.platform !== 'win32') return 0
+  if (process.platform === 'linux') {
+    const wayland = process.env.XDG_SESSION_TYPE === 'wayland' &&
+      (process.argv.includes('--ozone-platform=wayland') ||
+        process.env.ELECTRON_OZONE_PLATFORM_HINT === 'wayland')
+    if (wayland) return 0
+  }
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const h = win?.getNativeWindowHandle?.()
+    if (!h || !h.length) return 0
+    const id = h.length >= 8 ? Number(h.readBigUInt64LE(0)) : h.readUInt32LE(0)
+    return Number.isSafeInteger(id) && id > 0 ? id : 0
+  } catch { return 0 }
+}
+
 ipcMain.handle('player:status', () => ({
   available: !!Mpv.findMpv(),
   playing: !!mpvSession?.running,
   exe: Mpv.findMpv() || '',
 }))
-ipcMain.handle('player:open', async (_e, arg = {}) => {
+ipcMain.handle('player:open', async (e, arg = {}) => {
   if (!MPV_URL_OK(arg.url)) return { status: 'error', error: 'URL no válida' }
   const exe = Mpv.findMpv()
   if (!exe) return { status: 'unavailable', error: 'mpv no está instalado (instala el paquete mpv o vlc)' }
-  getMpv()
+  const wid = mpvEmbedWid(e)
+  console.log('[Mpv] IPC open', hostOf(arg.url), 'prevSession:', !!mpvSession, 'running:', !!mpvSession?.running, 'wid:', wid || 'no')
+  // Cerrar SIEMPRE la sesión anterior (viva o muriendo): un doble-open
+  // (StrictMode, re-resolve rápido) dejaba dos mpv pegados al mismo --wid.
+  if (mpvSession) { try { mpvSession.close() } catch {} mpvSession = null }
   const session = new Mpv.MpvSession(exe, mpvSendToRenderer, () => { mpvSession = null })
   mpvSession = session
-  return session.open(arg)
+  arg.wid = wid
+  const r = await session.open(arg)
+  return { ...r, embedded: !!wid }
 })
 ipcMain.handle('player:switch', async (_e, arg = {}) => {
   if (!MPV_URL_OK(arg.url)) return { status: 'error', error: 'URL no válida' }
   const s = getMpv()
-  return s ? s.switch(arg) : { status: 'error', error: 'no hay sesión' }
+  console.log('[Mpv] IPC switch', hostOf(arg.url), 'session:', !!s)
+  if (!s) return { status: 'error', error: 'no hay sesión' }
+  const r = await s.switch(arg)
+  if (r && r.embedded === undefined) r.embedded = !!s.embedWid
+  return r
 })
 ipcMain.handle('player:pause', () => { getMpv()?.pause() })
 ipcMain.handle('player:resume', () => { getMpv()?.resume() })
@@ -1365,15 +1214,72 @@ ipcMain.handle('player:text', (_e, arg = {}) => { getMpv()?.showText(arg.text) }
 ipcMain.handle('player:sub-delay', (_e, arg = {}) => { if (Number.isFinite(arg.sec)) getMpv()?.setSubDelay(arg.sec) })
 ipcMain.handle('player:sub-off', () => { getMpv()?.subOff() })
 ipcMain.handle('player:set-channels', (_e, arg = {}) => { getMpv()?.setChannels(arg.channels, arg.channelIndex) })
-ipcMain.handle('player:stop', () => { const s = getMpv(); if (s) { s.close(); mpvSession = null } })
-// Subtítulo descargado por la app (OpenSubtitles, VTT en texto): se escribe a
-// un temporal y se añade con sub-add — mpv no puede leer blob: URLs.
-ipcMain.handle('player:add-sub', (_e, arg = {}) => {
-  const s = getMpv()
-  if (!s || typeof arg.content !== 'string' || !arg.content) return { ok: false }
+// Input y estado para el OSC cuando mpv está embebido en la ventana.
+ipcMain.handle('player:mouse', (_e, arg = {}) => { getMpv()?.mouse(arg.x, arg.y) })
+ipcMain.handle('player:key', (_e, arg = {}) => { getMpv()?.key(arg.name) })
+ipcMain.handle('player:osc-state', (_e, arg = {}) => { getMpv()?.oscPush('state', arg) })
+ipcMain.handle('player:osc-menu', (_e, arg = {}) => { getMpv()?.oscPush('menu', arg) })
+ipcMain.handle('player:stop', () => { console.log('[Mpv] IPC stop, session:', !!mpvSession); const s = getMpv(); if (s) { s.close(); mpvSession = null } })
+// Búsqueda de subtítulos en el addon público de Stremio
+// (opensubtitles-v3.strem.io): sin API key ni login, indexa por IMDB id.
+// Película: /subtitles/movie/ttXXX.json — Serie: ttXXX:temp:epi. Se hace en
+// el proceso principal para esquivar CORS del renderer.
+ipcMain.handle('player:search-subs', async (_e, arg = {}) => {
+  const { imdbId } = arg
+  if (!imdbId) return { subs: [] }
+  const season = Number(arg.season) || 0
+  const episode = Number(arg.episode) || 0
+  const isSeries = season > 0 && episode > 0
+  const id = isSeries ? `${imdbId}:${season}:${episode}` : imdbId
   try {
-    const file = path.join(os.tmpdir(), `octo-sub-${Date.now()}.vtt`)
-    fs.writeFileSync(file, arg.content, 'utf8')
+    const res = await fetch(
+      `https://opensubtitles-v3.strem.io/subtitles/${isSeries ? 'series' : 'movie'}/${id}.json`,
+      { headers: { 'User-Agent': 'OctoStream' }, signal: AbortSignal.timeout(15000) })
+    if (!res.ok) return { subs: [] }
+    const data = await res.json()
+    const rank = (l) => (/^(spa|esp)/i.test(l) ? 0 : /^eng/i.test(l) ? 1 : 2)
+    const subs = (data.subtitles || [])
+      .map(s => ({
+        id: s.id,
+        lang: s.lang || '',
+        name: s.subtitleFileName || s.movieReleaseName || 'Subtítulo',
+        url: s.url || '',
+      }))
+      .filter(s => s.url && /^https?:/i.test(s.url))
+      .sort((a, b) => rank(a.lang) - rank(b.lang))
+      .slice(0, 60)
+    return { subs }
+  } catch { return { subs: [] } }
+})
+
+// Subtítulo externo (OpenSubtitles): la app pasa `url` (descarga en main,
+// sin CORS y con decodificación CP1252 de subs antiguos) o `content` en
+// texto. Se escribe a un temporal con la extensión real (srt/vtt) y se
+// añade con sub-add — mpv no puede leer blob: URLs.
+ipcMain.handle('player:add-sub', async (_e, arg = {}) => {
+  const s = getMpv()
+  if (!s) return { ok: false }
+  try {
+    let content = typeof arg.content === 'string' && arg.content ? arg.content : null
+    if (!content && typeof arg.url === 'string') {
+      const u = new URL(arg.url)
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return { ok: false }
+      const res = await fetch(u, {
+        headers: { 'User-Agent': 'OctoStream' }, signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) return { ok: false }
+      const buf = Buffer.from(await res.arrayBuffer())
+      content = buf.toString('utf8')
+      // Subs antiguos en CP1252: los caracteres rotos se detectan por el
+      // marcador de sustitución UTF-8 y se re-decodifica.
+      if (content.includes('�')) {
+        content = new TextDecoder('windows-1252').decode(buf)
+      }
+    }
+    if (!content) return { ok: false }
+    const ext = /^\s*WEBVTT/i.test(content) ? 'vtt' : 'srt'
+    const file = path.join(os.tmpdir(), `octo-sub-${Date.now()}.${ext}`)
+    fs.writeFileSync(file, content, 'utf8')
     s.addSubtitle(file, arg.label || 'Subtítulo', arg.lang || '')
     return { ok: true }
   } catch { return { ok: false } }

@@ -14,16 +14,26 @@ let episodeSelectListener = null
 // seek/stop + eventos 'position'/'ended'/'closed'/'zap' sobre los mismos
 // listeners — VideoPlayer no distingue Android de Electron-mpv.
 let mpvActive = false
+let mpvEmbedded = false // mpv incrustado con --wid dentro de la ventana
 let mpvEventSub = null
 function ensureMpvEvents() {
   if (mpvEventSub || !isElectron() || !window.octostream?.player?.onEvent) return
   mpvEventSub = window.octostream.player.onEvent((ev) => {
     if (ev?.state === 'zap') { zapListener?.(ev); return }
-    if (ev?.state === 'closed') mpvActive = false
+    if (ev?.state === 'closed') { mpvActive = false; mpvEmbedded = false }
     if (stateListener) stateListener(ev)
   })
 }
 const mpvApi = () => (isElectron() && mpvActive ? window.octostream?.player : null)
+
+/** mpv embebido en la ventana de la app (controles OSC + input reenviado). */
+export function isMpvEmbedded() { return mpvActive && mpvEmbedded }
+
+/** Empuja estado/menú al OSC de mpv embebido. */
+export function mpvOscState(obj) { mpvApi()?.oscState?.(obj) }
+export function mpvOscMenu(obj) { mpvApi()?.oscMenu?.(obj) }
+export function mpvMouse(x, y) { mpvApi()?.mouse?.(x, y) }
+export function mpvKey(name) { mpvApi()?.key?.(name) }
 
 // The native Cast button delegates to the existing web Cast implementation.
 let castRequestListener = null
@@ -99,9 +109,11 @@ export async function playStream(options, onStateChange) {
     if (r?.status !== 'playing') r = await p.open(arg)
     if (r?.status !== 'playing') {
       mpvActive = false
+      mpvEmbedded = false
       throw new Error(r?.error || 'reproductor nativo no disponible')
     }
     mpvActive = true
+    mpvEmbedded = r.embedded !== false // open/switch informan `embedded`
     return r
   }
   const url = sanitizeHttpUrl(options.url)
@@ -212,7 +224,7 @@ export async function setLoadingText(text) {
     if (text) mpvApi()?.showText(text)
     return
   }
-  try { await ExoPlayer.setLoadingText({ text: text || '' }) } catch {}
+  try { await ExoPlayer.setLoadingText({ text: text || '' }) } catch { /* noop */ }
 }
 
 export async function setNextEpisode(options) {
@@ -282,7 +294,7 @@ export async function playPip(options) {
 /** Cierra el mini-player PiP y restaura el audio del principal. */
 export async function stopPip() {
   if (!isAndroidNative()) return
-  try { await ExoPlayer.stopPip() } catch {}
+  try { await ExoPlayer.stopPip() } catch { /* noop */ }
 }
 
 /** Indica si hay un mini-player PiP reproduciendo. */

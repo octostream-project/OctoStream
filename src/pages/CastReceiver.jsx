@@ -1,85 +1,62 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertCircle, Cast } from 'lucide-react'
 import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
-import { loadHls } from '../utils/loadPlayerLibs.js'
+import { inferStreamType } from '../utils/streamType.js'
+import {
+  playStream, stopPlayback, isExoPlayerAvailable, isDesktopPlayerAvailable,
+} from '../utils/exoPlayer.js'
+import { isElectron } from '../utils/platform.js'
 import LogoLoader from '../components/LogoLoader.jsx'
 
+// Receptor "Enviar a TV" — reproduce la URL en el player nativo del
+// dispositivo (ExoPlayer en Android, mpv en escritorio). Sin player web
+// interno: en un navegador solo muestra el aviso.
+const castParams = () => new URLSearchParams(window.location.hash.split('?')[1] || '')
+
 export default function CastReceiver() {
-  const videoRef = useRef(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [title, setTitle] = useState('')
+  const [title] = useState(() => castParams().get('title') || 'Reproduciendo en TV')
 
   useEffect(() => {
-    let hls
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    let cancelled = false
+    const params = castParams()
     const rawUrl = params.get('url')
     const t = params.get('title') || 'Reproduciendo en TV'
 
-    if (!rawUrl) {
-      setError('No se proporcionó URL de stream')
+    const fail = (msg) => {
+      setError(msg)
       setLoading(false)
-      return
     }
 
+    if (!rawUrl) return fail('No se proporcionó URL de stream')
     const url = sanitizeRemoteUrl(rawUrl)
-    if (!url) {
-      setError('URL de stream no válida')
-      setLoading(false)
-      return
-    }
+    if (!url) return fail('URL de stream no válida')
 
-    setTitle(t)
-
-    const videoEl = videoRef.current
-    if (!videoEl) return
-
-    const isHls = url.includes('.m3u8') || url.includes('hls')
-    let cancelled = false
-
-    const onLoaded = () => {
-      setLoading(false)
-      videoEl.play().catch(() => {})
-    }
-    const onError = () => {
-      setError('Error al cargar el video')
-      setLoading(false)
-    }
-    const playDirect = () => {
-      videoEl.src = url
-      videoEl.addEventListener('loadedmetadata', onLoaded)
-      videoEl.addEventListener('error', onError)
-    }
-
-    const init = async () => {
-      if (isHls) {
-        const Hls = await loadHls()
-        if (cancelled) return
-        if (Hls.isSupported()) {
-          hls = new Hls()
-          hls.loadSource(url)
-          hls.attachMedia(videoEl)
-          hls.on(Hls.Events.MANIFEST_PARSED, onLoaded)
-          hls.on(Hls.Events.ERROR, (_, data) => {
-            if (data.fatal) {
-              setError('Error al cargar stream HLS')
-              setLoading(false)
-            }
-          })
-        } else {
-          playDirect()
-        }
-      } else {
-        playDirect()
+    ;(async () => {
+      const native = isExoPlayerAvailable() ||
+        (isElectron() && await isDesktopPlayerAvailable().catch(() => false))
+      if (cancelled) return
+      if (!native) {
+        fail('Esta página requiere la app OctoStream (Android o escritorio)')
+        return
       }
-    }
-    init()
+      playStream({
+        url,
+        streamType: inferStreamType(url) || 'hls',
+        title: t,
+        mode: 'vod',
+      }, (state) => {
+        if (cancelled || !state) return
+        if (state.state === 'ready' || state.state === 'playing') setLoading(false)
+        if (state.state === 'error') fail(state.message || 'Error al cargar el video')
+        if (state.state === 'closed' || state.state === 'ended') setLoading(false)
+      }).catch(e => fail(e?.message || 'Error al iniciar el reproductor'))
+    })()
 
     return () => {
       cancelled = true
-      videoEl.removeEventListener('loadedmetadata', onLoaded)
-      videoEl.removeEventListener('error', onError)
-      if (hls) hls.destroy()
+      stopPlayback().catch(() => {})
     }
   }, [])
 
@@ -90,24 +67,16 @@ export default function CastReceiver() {
         <span className="text-sm font-medium">{title}</span>
       </div>
 
-      {loading && (
+      {loading && !error && (
         <LogoLoader size={80} />
       )}
 
       {error && (
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-4 px-8">
           <AlertCircle className="text-red-400" size={48} />
-          <p className="text-red-400 text-lg">{error}</p>
+          <p className="text-red-400 text-lg text-center">{error}</p>
         </div>
       )}
-
-      <video
-        ref={videoRef}
-        controls
-        autoPlay
-        className="w-full h-full"
-        style={{ display: error ? 'none' : 'block' }}
-      />
     </div>
   )
 }

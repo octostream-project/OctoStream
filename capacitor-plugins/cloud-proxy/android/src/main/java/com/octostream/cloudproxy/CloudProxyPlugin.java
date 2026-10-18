@@ -356,7 +356,8 @@ public class CloudProxyPlugin extends Plugin {
                 + "|192.168.*|10.*|169.254.*"
                 + "|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*"
                 + "|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*"
-                + "|*.tdtspain.com|*.tdtchannels.com|*.rtve.es|*.mediaset.net|*.mediasetinfinity.es|dai.google.com|*.doubleclick.net";
+                + "|*.tdtspain.com|*.tdtchannels.com|*.rtve.es|*.mediaset.net|*.mediasetinfinity.es"
+                + "|*.atresplayer.com|*.atresmedia.com|dai.google.com|*.doubleclick.net";
         System.setProperty("http.nonProxyHosts", directHosts);
         System.setProperty("https.nonProxyHosts", directHosts);
         Log.i(TAG, "System proxy set: " + HTTP_PROXY_ADDR);
@@ -398,6 +399,11 @@ public class CloudProxyPlugin extends Plugin {
                         .addBypassRule("*.rtve.es")
                         .addBypassRule("*.mediaset.net")
                         .addBypassRule("*.mediasetinfinity.es")
+                        // Atresmedia igual que RTVE/Mediaset: sus URLs de
+                        // directo van ligadas a la IP que resuelve — por
+                        // WARP la firma no casa con la IP de reproducción.
+                        .addBypassRule("*.atresplayer.com")
+                        .addBypassRule("*.atresmedia.com")
                         .addBypassRule("dai.google.com")
                         .addBypassRule("*.doubleclick.net")
                         .build();

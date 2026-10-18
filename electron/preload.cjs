@@ -11,8 +11,6 @@ contextBridge.exposeInMainWorld('octostream', {
   proxyPort: proxy.port,
   proxyUrl: proxy.url,
   proxyBase: proxy.base,
-  // Prefijo del endpoint /ffmpeg (remux mkv/avi/ts → mp4 en el main).
-  ffmpegUrl: proxy.ffmpegUrl,
   getLanProxyUrl: () => ipcRenderer.invoke('get-lan-proxy-url'),
   // Reproductores externos instalados en el sistema (mpv/VLC/ffplay).
   openExternalPlayer: (arg) => ipcRenderer.invoke('player:open-external', arg),
@@ -33,6 +31,13 @@ contextBridge.exposeInMainWorld('octostream', {
     subOff: () => ipcRenderer.invoke('player:sub-off'),
     setChannels: (arg) => ipcRenderer.invoke('player:set-channels', arg),
     addSubtitle: (arg) => ipcRenderer.invoke('player:add-sub', arg),
+    searchSubs: (arg) => ipcRenderer.invoke('player:search-subs', arg),
+    // Input embebido (--wid): el hijo nativo no recibe eventos, el renderer
+    // los reenvía. oscState/oscMenu empujan UI state al OSC estilo Android.
+    mouse: (x, y) => ipcRenderer.invoke('player:mouse', { x, y }),
+    key: (name) => ipcRenderer.invoke('player:key', { name }),
+    oscState: (arg) => ipcRenderer.invoke('player:osc-state', arg),
+    oscMenu: (arg) => ipcRenderer.invoke('player:osc-menu', arg),
     stop: () => ipcRenderer.invoke('player:stop'),
     onEvent: (cb) => {
       const wrapped = (_e, ev) => cb(ev)

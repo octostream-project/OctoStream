@@ -1,6 +1,6 @@
 // Data loading: channels, EPG, U7D, RTVE HLS map.
 
-import { CHANNELS_URL, EPG_URL, U7D_URL, TDTCHANNELS_M3U, RTVE_HLS_FALLBACK, normKey, twarn } from './constants.js'
+import { CHANNELS_URL, EPG_URL, U7D_URL, TDTCHANNELS_M3U, RTVE_HLS_FALLBACK, normKey, twarn, unproxied } from './constants.js'
 import { fetchGzJson, fetchJson, fetchText } from './http.js'
 import { saveCache } from './cache.js'
 import { logWarn } from '../../../utils/logger.js'
@@ -89,7 +89,17 @@ export async function getU7d(cache) {
 
 export async function getRtveHls(cache) {
   // Igual que u7d: rtveHlsTs propio en vez del ts global de último guardado.
-  if (cache.rtveHls && Date.now() - (cache.rtveHlsTs || 0) < 60 * 60 * 1000) return cache.rtveHls
+  if (cache.rtveHls && Date.now() - (cache.rtveHlsTs || 0) < 60 * 60 * 1000) {
+    // La playlist viene del proxy local y sus URLs internas llegan
+    // reescritas con el token de AQUELLA sesión — al reutilizar la cache en
+    // otro arranque el token es viejo y el proxy responde 403. Se
+    // desenvuelven al raw antes de usarlas (y se re-persiste limpio).
+    for (const [k, v] of Object.entries(cache.rtveHls)) {
+      const raw = unproxied(v)
+      if (raw !== v) cache.rtveHls[k] = raw
+    }
+    return cache.rtveHls
+  }
   const m = {}
   for (const [cid, url] of Object.entries(RTVE_HLS_FALLBACK)) {
     m[cid] = url
@@ -114,8 +124,11 @@ export async function getRtveHls(cache) {
         const keys = []
         if (curId) keys.push(curId, normKey(curId))
         if (curName) keys.push(normKey(curName))
+        // La playlist llega por el proxy local → URLs internas reescritas
+        // con el token de sesión → desenvolver antes de persistir.
+        const raw = unproxied(trimmed)
         for (const k of keys) {
-          if (!m[k] || /rtvelivestream/.test(trimmed)) m[k] = trimmed
+          if (!m[k] || /rtvelivestream/.test(raw)) m[k] = raw
         }
         curId = curName = null
       }

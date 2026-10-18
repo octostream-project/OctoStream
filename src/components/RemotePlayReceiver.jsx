@@ -2,8 +2,22 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { getSyncServer } from '../utils/remotePlay.js'
 import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
+import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
 
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
+
+// Push entrante → unión con lo local y re-publicar: el siguiente que nos
+// descargue recibe ya los datos fusionados (y así se propaga la unión).
+const applySync = (dataStr) => {
+  try {
+    const counts = mergeRemoteData(JSON.parse(dataStr))
+    if (!counts.favs && !counts.hist && !counts.eps) return
+    console.log(`[Sync] merge recibido: +${counts.favs} favoritos, ${counts.hist} historial, ${counts.eps} episodios`)
+    getSyncServer().then(S => S?.setLocalData({ data: JSON.stringify(localSyncPayload()) }).catch(() => {}))
+  } catch (e) {
+    console.error('[Sync] Parse error:', e?.message)
+  }
+}
 
 const VideoPlayer = lazy(() => import('./VideoPlayer.jsx'))
 
@@ -23,6 +37,7 @@ export default function RemotePlayReceiver() {
     let playHandle = null
     let stopHandle = null
     let pairHandle = null
+    let syncHandle = null
     let cancelled = false
     ;(async () => {
       const SyncServer = await getSyncServer()
@@ -30,6 +45,19 @@ export default function RemotePlayReceiver() {
       try { await SyncServer.start() } catch (e) {
         console.warn('[RemotePlay] server start:', e?.message)
       }
+      syncHandle = await SyncServer.addListener('syncDataReceived', (ev) => {
+        if (ev?.data) applySync(ev.data)
+      })
+      // Pushes que llegaron antes de enganchar el listener (ventana entre el
+      // arranque del servidor y el mount del renderer) quedan en
+      // receivedData — drenarlos aquí o se pierden para siempre.
+      try {
+        const pending = await SyncServer.getReceivedData()
+        if (pending?.data && pending.data !== '{}') {
+          applySync(pending.data)
+          await SyncServer.clearReceivedData()
+        }
+      } catch { /* tolerado */ }
       playHandle = await SyncServer.addListener('playReceived', (ev) => {
         const url = sanitizeRemoteUrl(ev?.url)
         if (!url) return
@@ -56,6 +84,7 @@ export default function RemotePlayReceiver() {
       playHandle?.remove()
       stopHandle?.remove()
       pairHandle?.remove()
+      syncHandle?.remove()
     }
   }, [])
 
@@ -68,10 +97,10 @@ export default function RemotePlayReceiver() {
     // Emparejamiento por identidad (endpoint /pair): el token lo recoge el
     // emisor en su siguiente poll — no hay acción local posterior.
     if (req.endpoint === 'pair' && req.deviceId) {
-      try { await SyncServer.answerPair({ deviceId: req.deviceId, allow }) } catch {}
+      try { await SyncServer.answerPair({ deviceId: req.deviceId, allow }) } catch { /* tolerado */ }
       return
     }
-    try { await SyncServer.allowDevice({ ip: req.ip, allow }) } catch {}
+    try { await SyncServer.allowDevice({ ip: req.ip, allow }) } catch { /* tolerado */ }
     if (!allow) return
     if (req.endpoint === 'play' && req.data) {
       try {
@@ -85,10 +114,11 @@ export default function RemotePlayReceiver() {
             episode: ev.episode > 0 ? ev.episode : undefined,
           })
         }
-      } catch {}
+      } catch { /* tolerado */ }
     } else if (req.endpoint === 'sync' && req.data) {
-      // Push de datos autorizado tras aceptar — Sync.jsx lo recoge si está abierto.
-      window.dispatchEvent(new CustomEvent('octostream:syncData', { detail: req.data }))
+      // Push autorizado tras aceptar → merge directo aquí (funciona aunque
+      // el panel de sync esté cerrado).
+      applySync(req.data)
     }
   }
 

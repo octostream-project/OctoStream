@@ -74,9 +74,12 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   series, anime y doramas esperan hasta que el usuario selecciona un episodio.
 - Las resoluciones de streams deben recibir `AbortSignal` y cancelarse al cambiar
   de ficha, episodio o canal y al vencer el timeout.
-- Code-splitting de players: `hls.js` y `shaka-player` se cargan dinámicamente
-  (`loadPlayerLibs.js`) y se empaquetan en chunks separados que solo se descargan
-  al reproducir HLS o DASH/DRM respectivamente.
+- **No hay reproductor web interno**: se eliminó el `<video>` con hls.js/shaka
+  y el remux `/ffmpeg`. La reproducción es exclusivamente nativa — ExoPlayer
+  (plugin `@octostream/exo-player`) en Android y mpv por IPC
+  (`electron/mpv.cjs`, binario empaquetado) en Linux/Windows. En un navegador
+  web solo se muestra un aviso; los embeds conservan el iframe del proveedor
+  como último recurso en web. DRM Widevine solo en Android.
 - Lazy loading de todas las páginas (`React.lazy` + `Suspense` en `App.jsx`); cada
   ruta es un chunk independiente.
 - Modularización del plugin `tdtSpain.js` (~900 líneas) en módulos bajo
@@ -111,19 +114,25 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 ## Dependencias de Electron
 
 - Player de escritorio (`electron/main.cjs` + `preload.cjs`):
-  - `/ffmpeg` en el proxy local remultiplexa mkv/avi/ts → fMP4 en streaming
-    (`-c:v copy -c:a aac`). El fetch lo hace Node (TLS, redirects, headers del
-    resolver) y ffmpeg lee de `pipe:0` — los builds estáticos con gnutls
-    crashean contra ciertos servidores HTTPS si tocan TLS directamente.
-  - Binarios: `scripts/fetch-ffmpeg.mjs` descarga eugeneware/ffmpeg-static
-    (b6.1.1 = ffmpeg 7.0.2) a `build/ffmpeg/` (gitignored) → `extraResources`
-    por plataforma. En PATH del sistema si no hay empaquetado;
-    `OCTOSTREAM_FFMPEG` fuerza ruta.
   - `player:open-external` IPC lanza mpv/VLC reales por `spawn` con
     allowlist de rutas habituales por SO (los esquemas `vlc://`/`mpv://` no
     existen en escritorio).
   - `win:fullscreen` IPC: el player va a ventana completa al abrirse como en
     Android; `win:fullscreen-changed` sincroniza el icono del botón.
+  - mpv se incrusta en la BrowserWindow con `--wid=<handle>` +
+    `--osc=no --input-default-bindings=no` y carga `electron/mpv-osc.lua`
+    (OSC propio estilo ExoPlayer Android: back, EPG, zapping, CC, vol, cast).
+    El script se copia a tmp en el primer uso (`ensureOscScript`) y marca
+    `user-data/octo-osc-ready` al cargar — `oscPush` encola los
+    `script-message-to octo_osc` hasta esa marca (el nombre interno deriva
+    del archivo: `octo-osc.lua` → `octo_osc`). El overlay ASS fija
+    `ov.res_x/res_y` cada render: el tamaño por defecto 1280x720 de mpv se
+    traslada al embed y desplaza todo si no se re-asigna. El ratón embebido
+    no llega a mpv en todas las plataformas: el renderer reenvía
+    `mouse x y`/`keypress` por IPC (`player:mouse`/`player:key`) y el OSC
+    usa `mp.get_mouse_pos()` (actualizado al instante) para el hit-test.
+    Acciones de app → `script-message octo-action <act>` → evento
+    `{state:'osc', action}` → `handleOscAction` en VideoPlayer.jsx.
   - Cloud-proxy WARP: `electron/main.cjs` lanza el binario `aether`
     (CluvexStudio/Aether, `scripts/fetch-aether.mjs` → `build/aether/` →
     `extraResources`) con las mismas env vars que el plugin Android — SOCKS5
@@ -180,9 +189,8 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   sin bundle se usa `torrent.cjs` +
   `webtorrent` de npm. `src/utils/torrentEngine.js` es la fachada compartida:
   Android → plugin Capacitor, Electron → `window.octostream.torrent`.
-  Archivos mkv/avi/etc. del torrent pasan por el remux `/ffmpeg` (Chromium no
-  reproduce Matroska) — `remuxStream` acepta loopback solo para el puerto del
-  servidor torrent.
+  Los archivos del torrent se reproducen directos en mpv (Matroska nativo,
+  sin remux).
 - El DataSource de ExoPlayer con WARP usa validación TLS normal (sin trust-all).
 - Logs: no volcar headers ni URLs completas firmadas a logcat (host solamente).
 - Reproductor nativo de escritorio: `electron/mpv.cjs` lanza **mpv**
@@ -192,11 +200,11 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   zapping (`keybind PGUP/PGDWN → script-message octo-zap` → evento
   `{state:'zap', index, direction, name}` igual que `channelZap`). Las
   fachadas `exoPlayer.js` (`playStream`/`switchChannel`/`pause`/`seek`/`stop`)
-  enrutan a `window.octostream.player` en Electron; VideoPlayer elige mpv si
-  el binario existe y el stream no es DRM/embed/cast, con fallback
-  automático al player web en cualquier error (`exoFailed`). mpv reproduce
-  mkv/AC3/DTS/HEVC **sin remux** y soporta `sub-add` para los subtítulos de
-  OpenSubtitles (el VTT va por IPC `player:add-sub` a un temporal). Binario:
+  enrutan a `window.octostream.player` en Electron; VideoPlayer usa mpv para
+  todo lo no-DRM/embed en escritorio (sin fallback web — ya no existe player
+  interno). mpv reproduce mkv/AC3/DTS/HEVC **sin remux** y soporta `sub-add`
+  para los subtítulos de OpenSubtitles (el VTT va por IPC `player:add-sub`
+  a un temporal). Binario:
   `scripts/fetch-mpv.mjs` lo descarga a `build/mpv/<plat>-<arch>/`
   (gitignored, sha256 verificado) → `extraResources` →
   `resources/mpv/<plat>-<arch>/` — el usuario **no instala nada**.
@@ -204,9 +212,26 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   squashfs, `AppRun` = sharun estático — no requiere FUSE). Windows:
   shinchiro/mpv-winbuild-cmake `.7z` (mpv.exe auto-contenido +
   d3dcompiler_43.dll). Fallbacks: `OCTOSTREAM_MPV` → sistema (PATH/rutas
-  habituales); sin ningún mpv el player web cubre todo salvo ese caso.
+  habituales); sin ningún mpv se muestra un error (no hay player web).
   `paused-for-cache` se mapea a `buffering`; `core-idle` se ignora a
   propósito (salta en seeks y marcaba stalls falsos en el watchdog).
+  **Cabeceras HTTP**: ffmpeg pliega (obs-fold) cualquier línea de
+  `http-header-fields` >~80 chars — Fastly y el llhttp de Node responden
+  400 sin procesar el request (el request ni llega al handler del proxy
+  local). User-Agent/Referer viajan por las propiedades `user-agent` /
+  `referrer` de mpv (sin plegar); el resto por `http-header-fields` con
+  descarte de líneas >76 chars (`_applyOpts`/`_headersOption`).
+  `OCTO_MPV_LOG=1` vuelca el log de mpv a `/tmp/octo-mpv-<pid>.log`.
+- Streams IP-binding: las URLs de directo de Atresmedia (`atresplayer.com`,
+  `atresmedia.com`) quedan ligadas a la IP que las resolvió — si la
+  resolución sale por WARP y la reproducción directa, el CDN responde
+  **492**. Por eso están en el bypass WARP (Electron `AETHER_BYPASS_*` y
+  `nonProxyHosts`/ProxyConfig del plugin Android) junto a TDT/RTVE/Mediaset.
+- El proxy local reescribe las URLs internas de playlists con el token de
+  sesión (`/proxy?token=…&url=…`) — si una playlist se cachea tal cual, al
+  siguiente arranque el token es viejo y todo falla con 403. `unproxied()`
+  en `tdtSpain/constants.js` desenvuelve antes de persistir/reproducir
+  (aplicado en `getRtveHls`, resolvers geturl/posturl y passthrough hls).
 - URLs loopback (`127.0.0.1`/`localhost`) **nunca** van por el proxy WARP — el
   proxy las resolvería en su extremo remoto (`isLoopbackUrl` en el plugin).
 - Embeds con CDN ligado al documento del proveedor (DLive → tiestep): el m3u8

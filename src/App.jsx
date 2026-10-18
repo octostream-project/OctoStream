@@ -293,8 +293,8 @@ export default function App() {
         return
       }
       if (document.querySelector('[data-player-overlay]')) {
-        // Web (HLS.js / shaka) overlay is in the DOM — let its keydown
-        // handler close it.
+        // El overlay de React del player está en el DOM — su keydown
+        // handler lo cierra.
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Back', bubbles: true }))
       } else if (isPlayerOpen()) {
         // Native ExoPlayer dialog is active. It owns the Back key and closes

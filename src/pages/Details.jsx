@@ -1121,8 +1121,8 @@ export default function Details() {
   // (meta/episodes/onPlayNext nuevos en CADA render de Details). Como Details
   // se re-renderiza con cada updateProgress del store, esas identidades
   // inestables re-ejecutaban efectos del player en bucle — uno de ellos
-  // (useVideoProgress → updateProgress) cerraba un ciclo render→set→render
-  // infinito (React #185) cuando el <video> web tenía duración cargada.
+  // (progreso → updateProgress) cerraba un ciclo render→set→render
+  // infinito (React #185) durante la reproducción.
   const playerMeta = useMemo(() => {
     const base = selectedEpisode && meta
       ? { ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode, episodeName: selectedEpisode.name }

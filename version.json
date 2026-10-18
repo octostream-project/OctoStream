@@ -1,14 +1,14 @@
 {
-  "versionCode": 172,
-  "versionName": "1.72",
+  "versionCode": 173,
+  "versionName": "1.73",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-arm64-v8a.apk",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-arm64-v8a.apk",
   "sha256": "09e5c64ae405e1721afece89eb82751be9acd67c4a0d9b613f5a6df235ecb7d1",
-  "notes": "Paridad escritorio-Android: reproductor nativo mpv, embeds WAF, DLNA, jornadas en tiempo real",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-x86_64.apk"
   },
   "sha256s": {
     "arm64-v8a": "09e5c64ae405e1721afece89eb82751be9acd67c4a0d9b613f5a6df235ecb7d1",

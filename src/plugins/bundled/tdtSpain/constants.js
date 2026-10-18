@@ -62,3 +62,15 @@ export function proxied(url) {
   }
   return url
 }
+
+// Deshace la reescritura del proxy local: una playlist servida por /proxy
+// devuelve sus URLs internas como /proxy?token=…&url=<enc>. Esas URLs solo
+// valen en la sesión que las generó (el token rota por arranque); si se
+// guardan en caché, la siguiente ejecución devuelve 403/400 y la TV muere.
+// Hay que desenvolver antes de persistir o reproducir.
+export function unproxied(url) {
+  const u = String(url || '')
+  const m = u.match(/^https?:\/\/[^/]+\/proxy\?[^#]*[?&]url=([^&#]+)/)
+  if (!m) return u
+  try { return decodeURIComponent(m[1]) } catch { return u }
+}

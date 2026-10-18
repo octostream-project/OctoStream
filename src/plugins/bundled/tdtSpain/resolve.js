@@ -1,6 +1,6 @@
 // Stream resolution for TDT Spain: live channels and U7D programs.
 
-import { UA, normKey, tlog, twarn, proxied } from './constants.js'
+import { UA, normKey, tlog, twarn, proxied, unproxied } from './constants.js'
 import { fetchJson, fetchText, httpPostJson } from './http.js'
 import { getRtveHls, getU7d } from './data.js'
 import { logWarn } from '../../../utils/logger.js'
@@ -150,10 +150,10 @@ async function resolveGetUrl(ch) {
       const json = JSON.parse(text)
       const jsonStr = JSON.stringify(json)
       const m = jsonStr.match(/(?:https?:)?\/\/[^"'\\ ]*\.m3u8[^"'\\ ]*/)
-      if (m) return { url: m[0].startsWith('//') ? 'https:' + m[0] : m[0], streamType: 'hls', quality: 'LIVE', headers: ch.headers }
-    } catch {}
+      if (m) return { url: unproxied(m[0].startsWith('//') ? 'https:' + m[0] : m[0]), streamType: 'hls', quality: 'LIVE', headers: ch.headers }
+    } catch { /* no es JSON — se busca el m3u8 en el texto plano */ }
     const m = text.match(/(?:https?:)?\/\/[^"'\s<>]*\.m3u8[^"'\s<>]*/)
-    if (m) return { url: m[0].startsWith('//') ? 'https:' + m[0] : m[0], streamType: 'hls', quality: 'LIVE', headers: ch.headers }
+    if (m) return { url: unproxied(m[0].startsWith('//') ? 'https:' + m[0] : m[0]), streamType: 'hls', quality: 'LIVE', headers: ch.headers }
     return null
   } catch (e) {
     twarn('[TDT Spain] geturl error:', e?.message, url.substring(0, 80))
@@ -205,7 +205,7 @@ export async function resolveLiveStream(ch, cache) {
     }
   }
   if (st === '' || st === 'hls') {
-    if (/^https?:\/\//.test(url)) return { url, streamType: 'hls', quality: 'LIVE' }
+    if (/^https?:\/\//.test(url)) return { url: unproxied(url), streamType: 'hls', quality: 'LIVE' }
   }
   if (st === 'stream12') {
     try {
@@ -223,7 +223,7 @@ export async function resolveLiveStream(ch, cache) {
     if (/^https?:\/\//.test(url)) return await resolvePostUrl(url)
   }
   if (/^https?:\/\//.test(url) && (/\.m3u8/.test(url) || /\/hls/.test(url))) {
-    return { url, streamType: 'hls', quality: 'LIVE' }
+    return { url: unproxied(url), streamType: 'hls', quality: 'LIVE' }
   }
   return null
 }
@@ -339,7 +339,6 @@ async function resolveU7dMediaset(chKey, startTs, chData, cache, embeddedGuid) {
     const callSign = callSignMatch ? callSignMatch[1] : ''
     if (!callSign) return null
 
-    const now = Date.now()
     const ONE_DAY = 24 * 60 * 60 * 1000
     let guid = embeddedGuid
     let hasVod = false
