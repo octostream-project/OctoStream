@@ -75,6 +75,45 @@ async function isAetherProxyUp() {
   return (await probePort(AETHER_SOCKS_PORT)) && (await probePort(AETHER_HTTP_PORT))
 }
 
+// Verifica que el túnel pase tráfico REAL — un aether zombie escucha en
+// :1819 con el data-plane muerto (handshake MASQUE ok, UDP descartado) y
+// adoptarlo enruta todo a un proxy roto. CONNECT SOCKS + TLS + GET mínimo
+// a cloudflare.com/cdn-cgi/trace; si no llegan bytes, el túnel está caído.
+let tunnelAliveCache = { ts: 0, ok: false }
+function probeTunnel(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (ok) => {
+      if (done) return
+      done = true
+      resolve(ok)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    socksHandshake('cloudflare.com', 443, (err, sock) => {
+      if (err || !sock) { clearTimeout(timer); return finish(false) }
+      const tlsSock = tls.connect({ socket: sock, servername: 'cloudflare.com' })
+      tlsSock.once('secureConnect', () => {
+        tlsSock.write('GET /cdn-cgi/trace HTTP/1.1\r\nHost: cloudflare.com\r\nConnection: close\r\n\r\n')
+      })
+      tlsSock.once('data', () => {
+        clearTimeout(timer)
+        try { tlsSock.destroy() } catch {}
+        finish(true)
+      })
+      tlsSock.once('error', () => { clearTimeout(timer); finish(false) })
+    })
+  })
+}
+
+// Adopción de un aether externo: puerto vivo + túnel que pasa tráfico.
+// Caché de 15s — las llamadas de status son frecuentes y el probe no es gratis.
+async function isAetherTunnelAlive() {
+  if (Date.now() - tunnelAliveCache.ts < 15000) return tunnelAliveCache.ok
+  const ok = (await isAetherProxyUp()) && (await probeTunnel())
+  tunnelAliveCache = { ts: Date.now(), ok }
+  return ok
+}
+
 function resolveAether() {
   if (process.env.OCTOSTREAM_AETHER && fs.existsSync(process.env.OCTOSTREAM_AETHER)) {
     return process.env.OCTOSTREAM_AETHER
@@ -114,9 +153,10 @@ async function clearAetherRouting() {
 
 async function configureAetherProxy() {
   // Arranque: si un aether ya corre (externo o lanzado antes), adoptar el
-  // túnel existente — el plugin Android también reutiliza el proceso vivo.
-  if (!(await isAetherProxyUp())) {
-    console.log('[Aether] No SOCKS5 proxy on 127.0.0.1:1819 — direct traffic')
+  // túnel existente — pero SOLO si pasa tráfico; un zombie con túnel muerto
+  // enrutaría todo a un proxy roto (fail-closed en cada request).
+  if (!(await isAetherTunnelAlive())) {
+    console.log('[Aether] No working WARP tunnel on 127.0.0.1:1819 — direct traffic')
     return false
   }
   try {
@@ -147,8 +187,9 @@ async function aetherConnect() {
   aetherState.connecting = true
   aetherState.error = ''
   try {
-    // Un aether externo ya corriendo en :1819 se adopta sin lanzar otro.
-    if (await isAetherProxyUp()) {
+    // Un aether externo ya corriendo en :1819 se adopta sin lanzar otro —
+    // pero solo si el túnel pasa tráfico; un zombie se mata y se relanza.
+    if (await isAetherTunnelAlive()) {
       await applyAetherRouting()
       return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
     }
