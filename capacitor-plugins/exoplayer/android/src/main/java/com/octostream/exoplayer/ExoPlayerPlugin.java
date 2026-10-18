@@ -55,6 +55,7 @@ import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.datasource.cronet.CronetDataSource;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
+import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory;
@@ -4210,6 +4211,29 @@ public class ExoPlayerPlugin extends Plugin {
         // Periodically report position and duration for progress saving
         positionUpdateRunnable = new Runnable() {
             private long lastEmittedPosition = -1;
+            // Watchdog de stall: READY + playWhenReady sin progreso real =
+            // decoder/fuente atascado SIN pasar por BUFFERING — el check de
+            // buffering no lo ve y la pantalla quedaba negra para siempre.
+            // La señal son los frames renderizados por el decoder, NO la
+            // posición: en directos HLS la ventana se desliza y la posición
+            // queda constante (~offset al live edge) pese a reproducir bien.
+            // 3 ticks seguidos (~15s) → reload del MediaSource.
+            private long lastStallSignal = -1;
+            private int stallTicks = 0;
+            private long stallSignal() {
+                try {
+                    DecoderCounters vc = player.getVideoDecoderCounters();
+                    if (vc != null) return vc.renderedOutputBufferCount;
+                    DecoderCounters ac = player.getAudioDecoderCounters();
+                    if (ac != null) return ac.renderedOutputBufferCount;
+                } catch (Exception ignored) {}
+                // Sin contadores (decoder aún no creado — raro): la posición
+                // solo es fiable en VOD; en directos la ventana deslizante la
+                // deja quieta en el borde aun reproduciendo bien → señal no
+                // fiable, saltar la detección para no recargar en falso.
+                if ("live".equals(playerMode)) return Long.MIN_VALUE;
+                return player.getCurrentPosition();
+            }
             @Override
             public void run() {
                 if (player == null) return;
@@ -4225,6 +4249,30 @@ public class ExoPlayerPlugin extends Plugin {
                     event.put("position", position);
                     event.put("duration", duration > 0 ? duration : 0);
                     notifyListeners("playbackState", event);
+                }
+                // Detector de "pantalla negra": isPlaying() = READY +
+                // playWhenReady + sin supresión — debería estar saliendo
+                // vídeo y no sale ni un frame. La pausa manual y la
+                // supresión por audio-focus (isPlaying=false) no cuentan.
+                // BUFFERING/IDLE los cubre scheduleBufferingCheck.
+                if (player.isPlaying()) {
+                    long signal = stallSignal();
+                    if (signal != Long.MIN_VALUE) {
+                        if (signal == lastStallSignal) {
+                            stallTicks++;
+                            if (stallTicks >= 3) {
+                                stallTicks = 0;
+                                lastStallSignal = -1;
+                                onPlaybackStall(position);
+                            }
+                        } else {
+                            stallTicks = 0;
+                        }
+                        lastStallSignal = signal;
+                    }
+                } else {
+                    stallTicks = 0;
+                    lastStallSignal = -1;
                 }
                 // Next episode popup: show 30s before end (10s for short content)
                 // Check every 5s; only log when close to threshold
@@ -4298,6 +4346,43 @@ public class ExoPlayerPlugin extends Plugin {
             emitBufferingTimeout();
         };
         mainHandler.postDelayed(bufferingCheckRunnable, longBuffering ? 90000 : 20000);
+    }
+
+    /**
+     * Stall en READY: el decoder/fuente dejó de producir frames sin pasar
+     * por BUFFERING — pantalla negra/congelada sin spinner ni error. Se
+     * recupera igual que un stall de buffering: recargar el MediaSource
+     * (re-descarga la playlist y reinicia el pipeline) dentro del mismo
+     * presupuesto de reintentos; agotados → error + cierre.
+     */
+    private void onPlaybackStall(long frozenPosMs) {
+        if (player == null || lastMediaSource == null) return;
+        int maxRetries = longBuffering ? 4 : "live".equals(playerMode) ? 2 : 1;
+        if (bufferingRetries < maxRetries) {
+            bufferingRetries++;
+            Log.w(TAG, "Stall en READY (posición congelada " + frozenPosMs
+                    + "ms) — reloading source (retry " + bufferingRetries + "/" + maxRetries + ")");
+            cancelBufferingCheck();
+            try {
+                float savedVolume = player.getVolume();
+                if ("live".equals(playerMode)) {
+                    player.setMediaSource(lastMediaSource);
+                } else {
+                    player.setMediaSource(lastMediaSource, Math.max(0, frozenPosMs));
+                }
+                player.prepare();
+                if (savedVolume > 0f) player.setVolume(savedVolume);
+            } catch (Exception e) {
+                Log.e(TAG, "stall retry failed: " + e.getMessage());
+                emitBufferingTimeout();
+                return;
+            }
+            // Rearmar el check de buffering por si queda colgado al recargar.
+            scheduleBufferingCheck();
+            return;
+        }
+        Log.w(TAG, "Stall en READY agotó reintentos — error");
+        emitBufferingTimeout();
     }
 
     private void emitBufferingTimeout() {
@@ -5791,7 +5876,18 @@ public class ExoPlayerPlugin extends Plugin {
         if (forceBypassProxy || direct) return false;
         if (isTdtSpainDomain(url) || isLoopbackUrl(url)) return false;
         String httpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
-        return httpProxy != null && !httpProxy.isEmpty();
+        if (httpProxy == null || httpProxy.isEmpty()) return false;
+        // 'connected' tiene histéresis (~30s) para no caer por misses sueltos,
+        // así que antes de rutar el stream se verifica el puerto local de
+        // verdad: con el proxy muerto el stream colgaría ~15s y fallaría igual
+        // con cualquier servidor hasta reiniciar la app. Puerto caído → marca
+        // desconectado (el overlay reconecta WARP) y este stream va directo.
+        if (!com.octostream.cloudproxy.CloudProxyPlugin.isLocalProxyUp()) {
+            Log.w(TAG, "WARP proxy local no responde — stream directo y estado marcado caído");
+            com.octostream.cloudproxy.CloudProxyPlugin.markDisconnected();
+            return false;
+        }
+        return true;
     }
 
     // Construye el DataSource.Factory del stream principal (o de un zap),

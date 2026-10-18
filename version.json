@@ -1,18 +1,18 @@
 {
-  "versionCode": 163,
-  "versionName": "1.63",
+  "versionCode": 164,
+  "versionName": "1.64",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.63/octostream-1.63-arm64-v8a.apk",
-  "sha256": "ab8e9f0aaa5bbf2f180c1a765d7f546ff6b475d847a611adf05058f46433fd29",
-  "notes": "",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.64/octostream-1.64-arm64-v8a.apk",
+  "sha256": "1c87f628fc4de393e3a934e990248b4266931cf00d46fc5c18a5180c3102ce3b",
+  "notes": "Fix pantalla negra: watchdog de reproducción congelada (READY sin frames) con reintento automático y fallback; detección de proxy WARP muerto a media sesión (streams ya no fallan hasta reiniciar).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.63/octostream-1.63-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.63/octostream-1.63-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.63/octostream-1.63-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.64/octostream-1.64-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.64/octostream-1.64-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.64/octostream-1.64-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ab8e9f0aaa5bbf2f180c1a765d7f546ff6b475d847a611adf05058f46433fd29",
-    "armeabi-v7a": "ae5685d915ec2b9f4664c88e7e6b854355e4dd4319dd99de310d82fb1eee544f",
-    "x86_64": "8fc3b3ac9b107fe0990ccfa9954c7b372c47ee29388a334f2e0f030cf75c2a74"
+    "arm64-v8a": "1c87f628fc4de393e3a934e990248b4266931cf00d46fc5c18a5180c3102ce3b",
+    "armeabi-v7a": "ee6d4324578954e3e24f34f272b47943f264fbafa777e34cbd0c0fbc4942e96d",
+    "x86_64": "5ec9abce80a84aab6b64c9563860a341c9d34190522c6f198643125850a70d33"
   }
 }

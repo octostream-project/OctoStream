@@ -275,6 +275,28 @@ public class CloudProxyPlugin extends Plugin {
         return connected ? HTTP_PROXY_ADDR : null;
     }
 
+    /**
+     * Sonda barata del puerto HTTP CONNECT local (400ms). La usa ExoPlayer
+     * antes de rutar un stream por WARP: 'connected' tiene histéresis (~30s)
+     * y un túnel muerto haría colgar y fallar cada servidor hasta reiniciar.
+     */
+    public static boolean isLocalProxyUp() {
+        try (java.net.Socket s = new java.net.Socket()) {
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", HTTP_PROXY_PORT), 400);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
+    public static void markDisconnected() {
+        synchronized (PROCESS_LOCK) {
+            connected = false;
+            statusMisses = 0;
+        }
+    }
+
     /** @deprecated usar {@link #getHttpProxy()} — nunca devolvió el puerto SOCKS. */
     @Deprecated
     public static String getSocksProxy() {
