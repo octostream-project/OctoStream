@@ -35,3 +35,4 @@ releases/*.apk
 # Firma de release (nunca commitear)
 *.jks
 keystore.properties
+dist-releases/
