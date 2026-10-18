@@ -227,6 +227,18 @@ public class ExoPlayerPlugin extends Plugin {
     // de red y reconstruir en directo en vez de repetir el mismo factory roto.
     private boolean lastSourceUsedWarp = false;
     private MediaSource lastMediaSource = null;
+    private DefaultTrackSelector trackSelector = null;
+    // Rebuffer crónico: READY→BUFFERING repetido en ciclos cortos ("se para
+    // cada pocos segundos"). Cada pausa es breve y el watchdog de 20s nunca
+    // salta — sin contador de tasa esto era irrecuperable en TVs débiles.
+    private boolean wasPlayingReady = false;
+    private int rebufferCount = 0;
+    private long rebufferWindowStart = 0;
+    private boolean warpBypassedAfterRebuffer = false;
+    private boolean qualityCapped = false;
+    // Dispositivo débil (TV Box antigua): isLowRamDevice o sin ABI 64-bit.
+    // Ajusta buffers para no asfixiar 1GB de RAM con 50MB de vídeo.
+    private boolean lowEndDevice = false;
 
     // Cliente OkHttp compartido para peticiones puntuales (búsqueda de
     // subtítulos, etc.). Cada `new OkHttpClient()` crea su propio dispatcher
@@ -3999,13 +4011,25 @@ public class ExoPlayerPlugin extends Plugin {
         // - maxBuffer: 120s (cuánto buffer máximo antes de dejar de descargar)
         // - bufferForPlayback: 2.5s (cuánto buffer para empezar a reproducir)
         // - bufferForPlaybackAfterRebuffer: 5s (cuánto buffer tras un rebuffer)
+        // En dispositivos débiles (TV Box ARMv7 con ~1GB) 50MB de buffer de
+        // vídeo presionan la RAM: GC churn + decoder 1080p → rebuffering.
+        // Buffer algo más corto pero suficiente para absorber jitter.
+        lowEndDevice = isLowEndDevice(context);
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
-                .setBufferDurationsMs(50000, 120000, fastStart ? 1000 : 2500, fastStart ? 2500 : 5000)
-                .setTargetBufferBytes(50 * 1024 * 1024) // 50MB max buffer para conexiones lentas
+                .setBufferDurationsMs(
+                        lowEndDevice ? 30000 : 50000,
+                        lowEndDevice ? 60000 : 120000,
+                        fastStart ? 1000 : 2500, fastStart ? 2500 : 5000)
+                .setTargetBufferBytes(lowEndDevice ? 32 * 1024 * 1024 : 50 * 1024 * 1024)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
 
-        DefaultTrackSelector trackSelector = new DefaultTrackSelector(context);
+        wasPlayingReady = false;
+        rebufferCount = 0;
+        rebufferWindowStart = 0;
+        warpBypassedAfterRebuffer = false;
+        qualityCapped = false;
+        trackSelector = new DefaultTrackSelector(context);
         trackSelector.setParameters(
                 trackSelector.buildUponParameters()
                         .setPreferredAudioLanguage("es")
@@ -4073,6 +4097,7 @@ public class ExoPlayerPlugin extends Plugin {
                         bufferingRetries = 0;
                         behindLiveRetries = 0;
                         sourceErrorRetries = 0;
+                        wasPlayingReady = true;
                         dismissStreamLoading();
                         event.put("state", "ready");
                         if (pendingSeekMs > 0 && player != null) {
@@ -4085,6 +4110,11 @@ public class ExoPlayerPlugin extends Plugin {
                         // con la playlist HLS colgada se recarga solo antes de
                         // rendirse y cerrar el player.
                         scheduleBufferingCheck();
+                        // Rebuffer crónico (READY→BUFFERING en ciclos cortos):
+                        // cada pausa es breve y el watchdog de 20s no llega a
+                        // saltar, pero la película "se para cada pocos
+                        // segundos". Mitigar por tasa de rebuffers.
+                        if (wasPlayingReady) onRebuffer();
                         // En torrents un stall = espera de piezas. Mostrar el
                         // overlay de carga (JS lo mantiene con el progreso de
                         // descarga en vivo vía setLoadingText).
@@ -4220,6 +4250,7 @@ public class ExoPlayerPlugin extends Plugin {
             // 3 ticks seguidos (~15s) → reload del MediaSource.
             private long lastStallSignal = -1;
             private int stallTicks = 0;
+            private int lastDropCount = 0;
             private long stallSignal() {
                 try {
                     DecoderCounters vc = player.getVideoDecoderCounters();
@@ -4273,6 +4304,23 @@ public class ExoPlayerPlugin extends Plugin {
                 } else {
                     stallTicks = 0;
                     lastStallSignal = -1;
+                }
+                // Decoder saturado (SoC débil + 1080p): frames que se
+                // descartan por llegar tarde — la imagen se entrecorta aunque
+                // el buffer vaya lleno. >30 drops/tick (~6fps perdidas) →
+                // bajar variantes adaptativas a 720p antes de que el stall
+                // llegue a congelar la imagen del todo.
+                if (player.isPlaying()) {
+                    try {
+                        DecoderCounters vc = player.getVideoDecoderCounters();
+                        if (vc != null) {
+                            int drops = vc.droppedBufferCount;
+                            if (drops - lastDropCount > 30) {
+                                applyQualityCap("decoder saturado (frame drops)");
+                            }
+                            lastDropCount = drops;
+                        }
+                    } catch (Exception ignored) {}
                 }
                 // Next episode popup: show 30s before end (10s for short content)
                 // Check every 5s; only log when close to threshold
@@ -4362,6 +4410,10 @@ public class ExoPlayerPlugin extends Plugin {
             bufferingRetries++;
             Log.w(TAG, "Stall en READY (posición congelada " + frozenPosMs
                     + "ms) — reloading source (retry " + bufferingRetries + "/" + maxRetries + ")");
+            // Un stall que se repite puede ser decoder saturado (1080p en un
+            // SoC débil): tras el primer fallo, bajar variantes adaptativas
+            // a 720p para que la recarga ya entre en una calidad asumible.
+            if (bufferingRetries > 1) applyQualityCap("stall repetido");
             cancelBufferingCheck();
             try {
                 float savedVolume = player.getVolume();
@@ -4383,6 +4435,82 @@ public class ExoPlayerPlugin extends Plugin {
         }
         Log.w(TAG, "Stall en READY agotó reintentos — error");
         emitBufferingTimeout();
+    }
+
+    /**
+     * TV Box antigua / SoC débil: sin ABI de 64 bits (ARMv7 puro) o RAM baja
+     * según el sistema. Ajusta buffers y la política de mitigación.
+     */
+    private boolean isLowEndDevice(Context context) {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager)
+                    context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null && am.isLowRamDevice()) return true;
+        } catch (Exception ignored) {}
+        return android.os.Build.SUPPORTED_64_BIT_ABIS.length == 0;
+    }
+
+    /**
+     * Rebuffer crónico: ≥3 entradas en BUFFERING en 60s estando READY antes
+     * (la película "se para cada pocos segundos"). Cada pausa es breve y el
+     * watchdog de 20s nunca llega a disparar — mitigar por tasa:
+     * 1) si la fuente iba por el proxy WARP local, reconstruir en directo —
+     *    el túnel añade latencia + CPU de cifrado que un SoC viejo no
+     *    sostiene a bitrate de 1080p (misma lógica que isWarpConnRefused,
+     *    pero aquí el túnel responde: simplemente no da el ancho de banda);
+     * 2) limitar las variantes adaptativas a 720p — HLS/DASH bajan de
+     *    calidad solos y dejan de rebufferar (progresivos: no-op inocuo).
+     */
+    private void onRebuffer() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - rebufferWindowStart > 60000) {
+            rebufferWindowStart = now;
+            rebufferCount = 0;
+        }
+        if (++rebufferCount < 3 || player == null) return;
+        rebufferCount = 0;
+        rebufferWindowStart = now;
+        if (lastSourceUsedWarp && !warpBypassedAfterRebuffer
+                && currentUrl != null && !currentUrl.isEmpty()) {
+            warpBypassedAfterRebuffer = true;
+            Log.w(TAG, "Rebuffer crónico vía WARP — reconstruyendo fuente en directo");
+            try {
+                DataSource.Factory dsf = buildStreamDataSourceFactory(
+                        currentUrl, currentHeaders, currentDirect, true);
+                MediaSource src = buildMediaSource(currentUrl, currentStreamType,
+                        dsf, lastDrmSessionManager, lastLicenseUrl);
+                lastDataSourceFactory = dsf;
+                lastMediaSource = src;
+                lastSourceUsedWarp = false;
+                float savedVolume = player.getVolume();
+                if ("live".equals(playerMode)) player.setMediaSource(src);
+                else player.setMediaSource(src, Math.max(0, player.getCurrentPosition()));
+                player.prepare();
+                if (savedVolume > 0f) player.setVolume(savedVolume);
+                return; // dejar que el directo se estabilice antes de bajar calidad
+            } catch (Exception e) {
+                Log.e(TAG, "rebuffer warp bypass failed: " + e.getMessage());
+            }
+        }
+        applyQualityCap("rebuffer crónico");
+    }
+
+    /**
+     * Limita la selección adaptativa a 720p. En un stream HLS/DASH el
+     * player baja de variante solo y el rebuffering/stall se corta; en
+     * progresivos (mp4/mkv debrid, un solo track) es un no-op inocuo.
+     */
+    private void applyQualityCap(String reason) {
+        if (qualityCapped || trackSelector == null) return;
+        qualityCapped = true;
+        Log.w(TAG, reason + " — limitando variantes de vídeo a 720p");
+        try {
+            trackSelector.setParameters(trackSelector.buildUponParameters()
+                    .setMaxVideoSize(1280, 720)
+                    .build());
+        } catch (Exception e) {
+            Log.e(TAG, "quality cap failed: " + e.getMessage());
+        }
     }
 
     private void emitBufferingTimeout() {
@@ -5762,6 +5890,20 @@ public class ExoPlayerPlugin extends Plugin {
                 bufferingRetries = 0;
                 behindLiveRetries = 0;
                 sourceErrorRetries = 0;
+                wasPlayingReady = false;
+                rebufferCount = 0;
+                rebufferWindowStart = 0;
+                warpBypassedAfterRebuffer = false;
+                qualityCapped = false;
+                // El selector se reutiliza entre zaps — levantar el cap de
+                // 720p que hubiera aplicado el canal anterior.
+                if (trackSelector != null) {
+                    try {
+                        trackSelector.setParameters(trackSelector.buildUponParameters()
+                                .setMaxVideoSize(Integer.MAX_VALUE, Integer.MAX_VALUE)
+                                .build());
+                    } catch (Exception ignored) {}
+                }
                 // No llamar a player.stop() antes de setMediaSource: el propio
                 // setMediaSource + prepare resetean el player y la sesión de audio
                 // correctamente. El stop() explícito puede dejar la sesión de audio
@@ -8334,6 +8476,12 @@ public class ExoPlayerPlugin extends Plugin {
         behindLiveRetries = 0;
         sourceErrorRetries = 0;
         lastSourceUsedWarp = false;
+        wasPlayingReady = false;
+        rebufferCount = 0;
+        rebufferWindowStart = 0;
+        warpBypassedAfterRebuffer = false;
+        qualityCapped = false;
+        trackSelector = null;
         if (playerView != null) {
             playerView.setPlayer(null);
             playerView = null;
