@@ -11,6 +11,9 @@ const crypto = require('crypto')
 const { URL } = require('url')
 const { SyncServer } = require('./sync-server.cjs')
 const Youtube = require('./youtube.cjs')
+const Embed = require('./embed.cjs')
+const Dlna = require('./dlna.cjs')
+const Mpv = require('./mpv.cjs')
 // El motor torrent llega bundleado (electron/torrent.bundle.mjs, generado
 // por scripts/bundle-torrent.mjs) porque el asar no incluye node_modules;
 // en dev sin bundle se usa el fuente (torrent.cjs + webtorrent de npm).
@@ -53,6 +56,7 @@ const LAN_HOST = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|192\.168\.|10\.|169\.25
 function isLanHost(host) { return LAN_HOST.test(host || '') }
 
 const aetherState = { proc: null, connected: false, connecting: false, error: '' }
+let mainWindow = null
 
 function probePort(port) {
   return new Promise((resolve) => {
@@ -96,12 +100,14 @@ async function applyAetherRouting() {
     proxyBypassRules: AETHER_BYPASS_CHROMIUM,
   })
   aetherState.connected = true
+  Embed.applySessionRouting()
   console.log('[Aether] routing via WARP — renderer SOCKS5 + proxy local')
 }
 
 async function clearAetherRouting() {
   aetherState.connected = false
   try { await session.defaultSession.setProxy({ mode: 'direct' }) } catch {}
+  Embed.applySessionRouting()
 }
 
 async function configureAetherProxy() {
@@ -980,6 +986,15 @@ function startProxyServer() {
       return
     }
 
+    // Assets públicos de raíz (logo-symbol.png usado por LogoLoader, sidebar,
+    // splash, favicon…): sin esto las imágenes con src="/logo-*.png" daban
+    // 404/403 en el empaquetado y los loaders se veían vacíos. Solo archivos
+    // existentes en dist/ — si no existe se sigue con el routing normal.
+    if (req.method === 'GET' && isLocal && parsed.pathname.length > 1 &&
+        !parsed.pathname.slice(1).includes('/')) {
+      if (servePackagedApp(parsed.pathname, res)) return
+    }
+
     if (parsed.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ status: 'ok' }))
@@ -1048,6 +1063,21 @@ function startProxyServer() {
         try { ffHeaders = JSON.parse(ffHeadersParam) } catch {}
       }
       remuxStream(targetUrl, ffHeaders, res)
+      return
+    }
+
+    if (parsed.pathname === '/embed-relay') {
+      // Relay de origen para CDNs ligados al documento del embed
+      // (DLive/tiestep): el fetch se hace con la sesión del BrowserWindow del
+      // embed (TLS Chromium + sus cookies) — espejo del playRelay de Android.
+      // Misma validación de destino que /proxy (loopback/LAN fuera — SSRF).
+      const relayTarget = parsed.searchParams.get('u')
+      if (!relayTarget || !validProxyTarget(relayTarget)) {
+        res.writeHead(400)
+        res.end('Invalid or forbidden url')
+        return
+      }
+      Embed.handleRelayRequest(parsed, res)
       return
     }
 
@@ -1268,6 +1298,124 @@ for (const [channel, fn] of Object.entries(SYNC_IPC)) {
   ipcMain.handle(channel, (_event, arg) => Promise.resolve(fn(getSync(), arg)))
 }
 
+// ─── Embeds WAF (paridad con el WebView oculto/relay de Android) ─────────────
+Embed.init({
+  getProxyBase: () => `http://127.0.0.1:${PROXY_PORT}`,
+  getProxyToken: () => PROXY_TOKEN,
+  getRouting: () => aetherState.connected
+    ? { proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, proxyBypassRules: AETHER_BYPASS_CHROMIUM }
+    : null,
+  sendState: (payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.webContents.send('embed:state', payload) } catch {}
+    }
+  },
+})
+ipcMain.handle('embed:resolve', (_e, arg) => Embed.resolve(arg || {}))
+ipcMain.handle('embed:play', (_e, arg) => Embed.play(arg || {}))
+ipcMain.handle('embed:relay', (_e, arg) => Embed.relay(arg || {}))
+ipcMain.handle('embed:relay-stop', (_e, arg) => Embed.stopRelay(arg?.id || arg))
+ipcMain.handle('embed:close-all', () => Embed.closeAll())
+
+// ─── DLNA "Enviar a TV" (paridad con openDlna de Android) ────────────────────
+ipcMain.handle('cast:dlna-scan', (_e, arg) => Dlna.scan(arg?.timeout || 3500))
+ipcMain.handle('cast:dlna', (_e, arg) => Dlna.scanAndPlay(arg || {}))
+
+// ─── Reproductor nativo mpv (paridad con el plugin ExoPlayer de Android) ────
+// Ventana propia controlada por JSON IPC (--input-ipc-server): la app manda
+// play/pause/seek/switch y recibe position/ended/closed/zap como playbackState.
+let mpvSession = null
+function mpvSendToRenderer(ev) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('player:event', ev) } catch {}
+  }
+}
+function getMpv() {
+  if (mpvSession?.running) return mpvSession
+  if (mpvSession) { try { mpvSession.close() } catch {} mpvSession = null }
+  return null
+}
+const MPV_URL_OK = (u) => /^https?:\/\//i.test(u || '')
+ipcMain.handle('player:status', () => ({
+  available: !!Mpv.findMpv(),
+  playing: !!mpvSession?.running,
+  exe: Mpv.findMpv() || '',
+}))
+ipcMain.handle('player:open', async (_e, arg = {}) => {
+  if (!MPV_URL_OK(arg.url)) return { status: 'error', error: 'URL no válida' }
+  const exe = Mpv.findMpv()
+  if (!exe) return { status: 'unavailable', error: 'mpv no está instalado (instala el paquete mpv o vlc)' }
+  getMpv()
+  const session = new Mpv.MpvSession(exe, mpvSendToRenderer, () => { mpvSession = null })
+  mpvSession = session
+  return session.open(arg)
+})
+ipcMain.handle('player:switch', async (_e, arg = {}) => {
+  if (!MPV_URL_OK(arg.url)) return { status: 'error', error: 'URL no válida' }
+  const s = getMpv()
+  return s ? s.switch(arg) : { status: 'error', error: 'no hay sesión' }
+})
+ipcMain.handle('player:pause', () => { getMpv()?.pause() })
+ipcMain.handle('player:resume', () => { getMpv()?.resume() })
+ipcMain.handle('player:seek', (_e, arg = {}) => { if (Number.isFinite(arg.sec)) getMpv()?.seek(arg.sec) })
+ipcMain.handle('player:rate', (_e, arg = {}) => { if (Number.isFinite(arg.rate)) getMpv()?.setRate(arg.rate) })
+ipcMain.handle('player:volume', (_e, arg = {}) => { if (Number.isFinite(arg.v)) getMpv()?.setVolume(arg.v) })
+ipcMain.handle('player:mute', (_e, arg = {}) => { getMpv()?.setMute(arg.m) })
+ipcMain.handle('player:text', (_e, arg = {}) => { getMpv()?.showText(arg.text) })
+ipcMain.handle('player:sub-delay', (_e, arg = {}) => { if (Number.isFinite(arg.sec)) getMpv()?.setSubDelay(arg.sec) })
+ipcMain.handle('player:sub-off', () => { getMpv()?.subOff() })
+ipcMain.handle('player:set-channels', (_e, arg = {}) => { getMpv()?.setChannels(arg.channels, arg.channelIndex) })
+ipcMain.handle('player:stop', () => { const s = getMpv(); if (s) { s.close(); mpvSession = null } })
+// Subtítulo descargado por la app (OpenSubtitles, VTT en texto): se escribe a
+// un temporal y se añade con sub-add — mpv no puede leer blob: URLs.
+ipcMain.handle('player:add-sub', (_e, arg = {}) => {
+  const s = getMpv()
+  if (!s || typeof arg.content !== 'string' || !arg.content) return { ok: false }
+  try {
+    const file = path.join(os.tmpdir(), `octo-sub-${Date.now()}.vtt`)
+    fs.writeFileSync(file, arg.content, 'utf8')
+    s.addSubtitle(file, arg.label || 'Subtítulo', arg.lang || '')
+    return { ok: true }
+  } catch { return { ok: false } }
+})
+
+// ─── Update check escritorio (paridad con appUpdater de Android) ─────────────
+// Mismo manifiesto version.json del repo; el diálogo abre la release en el
+// navegador (no hay auto-update firmado sin electron-updater).
+ipcMain.handle('update:check', async () => {
+  try {
+    const resp = await fetch('https://api.github.com/repos/octostream-project/OctoStream/releases/latest', {
+      headers: { 'User-Agent': 'OctoStream', 'Accept': 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!resp.ok) return { available: false }
+    const rel = await resp.json()
+    const tag = String(rel.tag_name || '').replace(/^v/, '')
+    const cur = String(app.getVersion() || '').replace(/^v/, '')
+    const newer = tag.split('.').map(Number)
+    const now = cur.split('.').map(Number)
+    let isNewer = false
+    for (let i = 0; i < Math.max(newer.length, now.length); i++) {
+      const a = newer[i] || 0, b = now[i] || 0
+      if (a > b) { isNewer = true; break }
+      if (a < b) break
+    }
+    return {
+      available: isNewer,
+      version: rel.tag_name || tag,
+      notes: String(rel.body || '').slice(0, 2000),
+      url: rel.html_url || 'https://github.com/octostream-project/OctoStream/releases/latest',
+    }
+  } catch {
+    return { available: false }
+  }
+})
+ipcMain.handle('update:open', (_e, arg) => {
+  const url = typeof arg === 'string' ? arg : arg?.url
+  if (url && /^https:\/\//i.test(url)) return shell.openExternal(url)
+  return Promise.resolve()
+})
+
 app.whenReady().then(async () => {
   if (components?.whenReady) {
     try {
@@ -1317,6 +1465,8 @@ function createWindow() {
       allowRunningInsecureContent: false,
     },
   })
+  mainWindow = win
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null })
 
   win.on('enter-full-screen', () => win.webContents.send('win:fullscreen-changed', true))
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreen-changed', false))
@@ -1392,6 +1542,17 @@ function createWindow() {
       cb({ cancel: false, responseHeaders: headers })
       return
     }
+    // Iframes de embed iniciados por la app: X-Frame-Options/CSP frame-ancestors
+    // bloquearían el fallback iframe de los providers — se retiran (solo para
+    // respuestas solicitadas desde el frame de la app, no para terceros).
+    if (details.resourceType === 'subFrame' || details.resourceType === 'subframe') {
+      for (const k of Object.keys(headers)) {
+        if (/^x-frame-options$/i.test(k)) delete headers[k]
+        if (/^content-security-policy/i.test(k)) {
+          headers[k] = headers[k].map(v => v.replace(/frame-ancestors[^;]*(;|$)/gi, '')).filter(v => v.trim())
+        }
+      }
+    }
     // For Mediaset/DAI CDN streams (rawvod, link.api), preserve specific origin
     // for cookies (hdntl). For API calls (services-ott-prod-fe), use * so the
     // renderer can make POST requests (login, playback check) without CORS errors.
@@ -1444,6 +1605,10 @@ app.on('window-all-closed', () => {
   if (torrentEngine) {
     torrentEngine.stop().catch(() => {})
     torrentEngine = null
+  }
+  if (mpvSession) {
+    try { mpvSession.close() } catch {}
+    mpvSession = null
   }
   if (process.platform !== 'darwin') {
     app.quit()

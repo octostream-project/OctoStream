@@ -2,12 +2,28 @@
 // Handles HLS, DASH, and Widevine DRM natively without CORS issues.
 
 import { ExoPlayer } from '@octostream/exo-player'
-import { isAndroidNative } from './platform.js'
+import { isAndroidNative, isElectron } from './platform.js'
 import { sanitizeHttpUrl } from './sanitizeUrl.js'
 
 let stateListener = null
 let zapListener = null
 let episodeSelectListener = null
+
+// ─── Reproductor nativo de escritorio (mpv por IPC, electron/mpv.cjs) ───────
+// Misma superficie que el plugin ExoPlayer: playStream/switchChannel/pause/
+// seek/stop + eventos 'position'/'ended'/'closed'/'zap' sobre los mismos
+// listeners — VideoPlayer no distingue Android de Electron-mpv.
+let mpvActive = false
+let mpvEventSub = null
+function ensureMpvEvents() {
+  if (mpvEventSub || !isElectron() || !window.octostream?.player?.onEvent) return
+  mpvEventSub = window.octostream.player.onEvent((ev) => {
+    if (ev?.state === 'zap') { zapListener?.(ev); return }
+    if (ev?.state === 'closed') mpvActive = false
+    if (stateListener) stateListener(ev)
+  })
+}
+const mpvApi = () => (isElectron() && mpvActive ? window.octostream?.player : null)
 
 // The native Cast button delegates to the existing web Cast implementation.
 let castRequestListener = null
@@ -32,6 +48,12 @@ if (isAndroidNative()) {
     console.info('[ExoPlayer] castRequested received', event?.title || '')
     if (castRequestListener) castRequestListener(event)
   })
+} else if (isElectron() && window.octostream?.embed?.onState) {
+  // Estados del player embebido en ventana propia (embed_webview_playing) —
+  // mismo canal que el playbackState de Android para VideoPlayer.
+  window.octostream.embed.onState((event) => {
+    if (stateListener) stateListener(event)
+  })
 }
 
 /**
@@ -55,7 +77,32 @@ export function setCastRequestListener(listener) {
 
 export async function playStream(options, onStateChange) {
   if (!isAndroidNative()) {
-    throw new Error('ExoPlayer only available on Android native')
+    // Electron → mpv nativo (ventana propia controlada por IPC). Si la sesión
+    // sigue viva (zap por re-render de LiveTV) se hace switch en vez de abrir.
+    const p = isElectron() ? window.octostream?.player : null
+    if (!p) throw new Error('ExoPlayer only available on Android native')
+    const safeUrl = sanitizeHttpUrl(options.url)
+    if (!safeUrl) throw new Error('URL de stream no válida')
+    stateListener = onStateChange
+    zapListener = options.onZap || null
+    ensureMpvEvents()
+    const arg = {
+      url: safeUrl,
+      headers: options.headers || {},
+      title: options.title || '',
+      startSec: options.startTime || 0,
+      subtitles: options.subtitles || null,
+      channels: options.channels || null,
+      channelIndex: options.channelIndex ?? -1,
+    }
+    let r = mpvActive ? await p.switch(arg) : null
+    if (r?.status !== 'playing') r = await p.open(arg)
+    if (r?.status !== 'playing') {
+      mpvActive = false
+      throw new Error(r?.error || 'reproductor nativo no disponible')
+    }
+    mpvActive = true
+    return r
   }
   const url = sanitizeHttpUrl(options.url)
   if (!url) throw new Error('URL de stream no válida')
@@ -96,7 +143,18 @@ export async function playStream(options, onStateChange) {
  * Called after a 'channelZap' event once JS has resolved the new stream.
  */
 export async function switchChannel(options) {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) {
+    const p = mpvApi()
+    if (!p) return
+    const url = sanitizeHttpUrl(options.url)
+    if (!url) return
+    return p.switch({
+      url,
+      headers: options.headers || {},
+      title: options.title || '',
+      channelIndex: options.channelIndex ?? -1,
+    })
+  }
   const url = sanitizeHttpUrl(options.url)
   if (!url) return
   return ExoPlayer.switchChannel({
@@ -119,7 +177,13 @@ export async function switchChannel(options) {
  * (e.g. Details → live route) and when the EPG catalog refreshes.
  */
 export async function setChannels(options) {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) {
+    mpvApi()?.setChannels({
+      channels: options.channels || null,
+      channelIndex: options.channelIndex ?? -1,
+    })
+    return
+  }
   return ExoPlayer.setChannels({
     channels: options.channels || null,
     channelIndex: options.channelIndex ?? -1,
@@ -143,7 +207,11 @@ export async function setEpisodes(options) {
  * from the TorrentEngine progress events).
  */
 export async function setLoadingText(text) {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) {
+    // mpv: texto en pantalla (OSD) — el progreso del torrent se ve igual.
+    if (text) mpvApi()?.showText(text)
+    return
+  }
   try { await ExoPlayer.setLoadingText({ text: text || '' }) } catch {}
 }
 
@@ -160,17 +228,29 @@ export async function setNextEpisode(options) {
 }
 
 export async function pausePlayback() {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) { mpvApi()?.pause(); return }
   return ExoPlayer.pause()
 }
 
 export async function resumePlayback() {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) { mpvApi()?.resume(); return }
   return ExoPlayer.resume()
 }
 
 export async function stopPlayback() {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) {
+    // En Electron cierra las ventanas/relays de embed que quedaran abiertos
+    // y la sesión mpv nativa si estaba activa.
+    if (isElectron()) {
+      stateListener = null
+      window.octostream?.embed?.closeAll?.().catch?.(() => {})
+      if (mpvActive) {
+        mpvActive = false
+        window.octostream?.player?.stop?.().catch?.(() => {})
+      }
+    }
+    return
+  }
   stateListener = null
   zapListener = null
   episodeSelectListener = null
@@ -217,17 +297,31 @@ export async function isPipActive() {
 }
 
 export async function seekTo(positionSec) {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) {
+    if (Number.isFinite(positionSec)) mpvApi()?.seek(positionSec)
+    return
+  }
   return ExoPlayer.seekTo({ position: positionSec })
 }
 
 export async function setPlaybackRate(rate) {
-  if (!isAndroidNative()) return
+  if (!isAndroidNative()) { mpvApi()?.setRate(rate); return }
   return ExoPlayer.setPlaybackRate({ rate })
 }
 
 export function isExoPlayerAvailable() {
   return isAndroidNative()
+}
+
+/**
+ * ¿Hay reproductor nativo (mpv) usable en escritorio? Async porque la
+ * detección del binario vive en el proceso principal. VideoPlayer la usa
+ * para elegir entre mpv y el player web — con DRM Widevine siempre web.
+ */
+export async function isDesktopPlayerAvailable() {
+  const p = isElectron() ? window.octostream?.player : null
+  if (!p) return false
+  try { return (await p.status())?.available === true } catch { return false }
 }
 
 /**
@@ -241,6 +335,18 @@ export function isExoPlayerAvailable() {
  */
 export async function playEmbed(url, title = '', referer = '', playback = false, waitUntil = 0) {
   if (!isAndroidNative()) {
+    // Electron: ventana BrowserWindow propia (electron/embed.cjs) — misma
+    // superficie: playback:true reproduce dentro de la ventana hasta que el
+    // usuario la cierra; playback:false resuelve al detectar el vídeo.
+    if (isElectron() && window.octostream?.embed?.play) {
+      const safeUrl = sanitizeHttpUrl(url)
+      if (!safeUrl) throw new Error('URL de embed no válida')
+      const safeRef = referer ? sanitizeHttpUrl(referer) : null
+      return window.octostream.embed.play({
+        url: safeUrl, title, referer: safeRef || undefined,
+        playback: playback === true, waitUntil: waitUntil || 0,
+      })
+    }
     throw new Error('ExoPlayer playEmbed only available on Android native')
   }
   const safeUrl = sanitizeHttpUrl(url)
@@ -271,7 +377,21 @@ export function setPlaybackStateListener(cb) {
  * @returns {Promise<{status: 'resolved'|'failed'|'busy', url?: string, streamType?: string, referer?: string, cookies?: string}>}
  */
 export async function resolveEmbed(url, timeout = 20000, referer = '') {
-  if (!isAndroidNative()) return { status: 'failed' }
+  if (!isAndroidNative()) {
+    // Electron: resolver headless con BrowserWindow oculta (electron/embed.cjs)
+    // — ejecuta el challenge JS, auto-reproduce y captura la media URL por red.
+    if (isElectron() && window.octostream?.embed?.resolve) {
+      const safeUrl = sanitizeHttpUrl(url)
+      if (!safeUrl) return { status: 'failed' }
+      const safeRef = referer ? sanitizeHttpUrl(referer) : null
+      try {
+        return await window.octostream.embed.resolve({ url: safeUrl, timeout, referer: safeRef || undefined })
+      } catch {
+        return { status: 'failed' }
+      }
+    }
+    return { status: 'failed' }
+  }
   const safeUrl = sanitizeHttpUrl(url)
   if (!safeUrl) return { status: 'failed' }
   const safeRef = referer ? sanitizeHttpUrl(referer) : null
@@ -294,7 +414,22 @@ export async function resolveEmbed(url, timeout = 20000, referer = '') {
  * @returns {Promise<{status: 'playing'|'failed'}>}
  */
 export async function playRelay(url, referer = '', title = '', mode = 'live') {
-  if (!isAndroidNative()) return { status: 'failed' }
+  if (!isAndroidNative()) {
+    // Electron: relay de origen (electron/embed.cjs) — devuelve la URL
+    // loopback /embed-relay que el player web reproduce directamente
+    // (en Android la reproduce el propio ExoPlayer nativo).
+    if (isElectron() && window.octostream?.embed?.relay) {
+      const safeUrl = sanitizeHttpUrl(url)
+      if (!safeUrl) return { status: 'failed' }
+      const safeRef = referer ? sanitizeHttpUrl(referer) : null
+      try {
+        return await window.octostream.embed.relay({ url: safeUrl, referer: safeRef || undefined, mode })
+      } catch {
+        return { status: 'failed' }
+      }
+    }
+    return { status: 'failed' }
+  }
   const safeUrl = sanitizeHttpUrl(url)
   if (!safeUrl) return { status: 'failed' }
   const safeRef = referer ? sanitizeHttpUrl(referer) : null
@@ -324,7 +459,16 @@ export async function openMiracast() {
  * Devuelve { sent, device } — sent=false si no se encontró ninguna TV.
  */
 export async function openDlna(url, title) {
-  if (!isAndroidNative() || !url) return { sent: false }
+  if (!url) return { sent: false }
+  // Electron: SSDP + AVTransport en electron/dlna.cjs — misma superficie.
+  if (isElectron()) {
+    try {
+      return await window.octostream?.cast?.dlna?.({ url, title: title || 'OctoStream' }) || { sent: false }
+    } catch {
+      return { sent: false }
+    }
+  }
+  if (!isAndroidNative()) return { sent: false }
   try {
     return await ExoPlayer.openDlna({ url, title: title || 'OctoStream' })
   } catch {

@@ -7,6 +7,7 @@ import { isAndroidNative } from '../utils/platform.js'
 // minCode > versionCode instalada → actualización forzosa (sin cancelar).
 export default function UpdateChecker() {
   const [update, setUpdate] = useState(null)
+  const [desktopUpdate, setDesktopUpdate] = useState(null)
   const [phase, setPhase] = useState('prompt') // prompt | downloading | needPerm | error | reinstall
   const [percent, setPercent] = useState(0)
   const [error, setError] = useState('')
@@ -14,20 +15,66 @@ export default function UpdateChecker() {
   const apkPath = useRef(null)
 
   useEffect(() => {
-    if (!isAndroidNative()) return undefined
-    const t = setTimeout(async () => {
-      const u = await checkForUpdate()
-      if (u) setUpdate(u)
-    }, 8000)
-    return () => clearTimeout(t)
+    if (isAndroidNative()) {
+      const t = setTimeout(async () => {
+        const u = await checkForUpdate()
+        if (u) setUpdate(u)
+      }, 8000)
+      return () => clearTimeout(t)
+    }
+    // Electron: mismo check a GitHub releases (IPC update:check) — el diálogo
+    // abre la página de la release para descargar el instalador del SO.
+    if (window.octostream?.update?.check) {
+      const t = setTimeout(async () => {
+        try {
+          const u = await window.octostream.update.check()
+          if (u?.available) setDesktopUpdate(u)
+        } catch { /* sin red: silencio */ }
+      }, 8000)
+      return () => clearTimeout(t)
+    }
+    return undefined
   }, [])
 
   useEffect(() => {
+    if (!isAndroidNative()) return undefined
     const sub = AppUpdater.addListener('downloadProgress', (p) => {
       if (p.percent >= 0) setPercent(p.percent)
     })
     return () => { sub.then((h) => h.remove()).catch(() => {}) }
   }, [])
+
+  // Diálogo de actualización de escritorio — descarga manual desde la release.
+  if (desktopUpdate) {
+    return (
+      <div data-tv-modal className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
+        <div className="w-[min(90vw,480px)] rounded-2xl bg-slate-900 p-6 shadow-2xl">
+          <h2 className="text-xl font-bold text-white">Nueva versión {desktopUpdate.version}</h2>
+          {desktopUpdate.notes ? (
+            <p className="mt-3 whitespace-pre-line text-sm text-slate-300 max-h-40 overflow-y-auto">{desktopUpdate.notes}</p>
+          ) : null}
+          <div className="mt-6 flex justify-end gap-3">
+            <button
+              className="rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none"
+              onClick={() => setDesktopUpdate(null)}
+              autoFocus
+            >
+              Ahora no
+            </button>
+            <button
+              className="rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none"
+              onClick={() => {
+                window.octostream?.update?.open?.(desktopUpdate.url)
+                setDesktopUpdate(null)
+              }}
+            >
+              Descargar
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (!update) return null
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Tv, Wifi, Copy, Check, X, MonitorSmartphone, ScanSearch, ChevronDown, ChevronUp, ScreenShare } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
 import { scanDevices, sendPlay, pingDevice, getLastDevice, getDiscovered } from '../utils/remotePlay.js'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { openMiracast, openDlna } from '../utils/exoPlayer.js'
 
 const itemCls =
@@ -121,7 +121,7 @@ export default function CastMenu({
           </div>
         </button>
 
-        {isAndroidNative() && (
+        {(isAndroidNative() || isElectron()) && (
           <button
             onClick={async () => {
               if (dlnaState === 'sending') return

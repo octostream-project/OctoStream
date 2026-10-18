@@ -5,6 +5,7 @@ import LogoLoader from '../components/LogoLoader.jsx'
 import { useTranslation } from '../i18n/index.js'
 import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
 import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
+import { fetchMarcaCalendar, MARCA_SLUGS } from '../utils/marcaLive.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
@@ -439,6 +440,7 @@ export default function Sports() {
   const [resolvingId, setResolvingId] = useState(null)
   const [selectedLeague, setSelectedLeague] = useState(null) // group | null
   const [marcaResults, setMarcaResults] = useState(new Map()) // leagueSlug → [{home,away,homeScore,awayScore}]
+  const [marcaLive, setMarcaLive] = useState(new Map()) // leagueSlug → jornadas[] (scrape runtime de marca.com)
   const [sitemapTick, setSitemapTick] = useState(0) // bump cuando el índice FCTV (sitemap) está listo
   const [streamPicker, setStreamPicker] = useState(null) // { item, streams }
   const playAbortRef = useRef(null)
@@ -687,7 +689,15 @@ export default function Sports() {
       if (!cancelled) setMarcaResults(map)
     }
     refresh()
-    const iv = setInterval(refresh, 6 * 60 * 60 * 1000)
+    // Jornadas reales desde marca.com (mismo scrape que el workflow CI): la
+    // API de Sofascore challengea (403) desde muchas IPs y el fichero
+    // empaquetado se queda congelado en la jornada del build.
+    const refreshMarca = () => fetchMarcaCalendar(
+      CAL_LEAGUES.filter(lg => MARCA_SLUGS.has(lg.slug)).map(lg => lg.slug), ctl.signal)
+      .then(m => { if (!cancelled && m.size) setMarcaLive(prev => new Map([...prev, ...m])) })
+      .catch(() => {})
+    refreshMarca()
+    const iv = setInterval(() => { refresh(); refreshMarca() }, 6 * 60 * 60 * 1000)
     return () => { cancelled = true; ctl.abort(); clearInterval(iv) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCat])
@@ -890,10 +900,15 @@ export default function Sports() {
       // y también si la liga está en off-season (pocas jornadas con datos).
       const sofaJornadas = marcaResults.get(lg.slug)
       const conv = sofaJornadas?.length ? sofaToJornadas(sofaJornadas) : null
-      // Ligas Marca exigen una jornada "llena" (≥3 partidos) para preferir el
-      // dato runtime sobre el empaquetado; las extra no tienen fallback
-      // empaquetado — con un solo partido (p.ej. Supercopa) ya se usa.
-      const jornadasSrc = conv?.some(j => j.matches.length >= (lg.utId ? 1 : 3)) ? conv : lg.jornadas
+      // Orden de fuentes para el calendario:
+      // 1) scrape vivo de marca.com (jornada real de esta semana — la API de
+      //    Sofascore challengea 403 desde muchas IPs),
+      // 2) Sofascore si algún día responde,
+      // 3) el fichero Marca empaquetado (fallback offline, puede quedar viejo).
+      const liveJornadas = marcaLive.get(lg.slug)
+      const jornadasSrc = liveJornadas?.some(j => j.matches.length) ? liveJornadas
+        : conv?.some(j => j.matches.length >= (lg.utId ? 1 : 3)) ? conv
+        : lg.jornadas
       const jornadas = jornadasSrc.map(j => ({
         round: j.round,
         name: j.name || null,
@@ -988,7 +1003,7 @@ export default function Sports() {
     return { groups: groups.filter(g => g.items.length), usedNames: used }
     // sitemapTick: re-ejecutar cuando el índice sitemap de FCTV termine de
     // cargar — adjunta _fctvItem a tarjetas que antes quedaban sin enlaces.
-  }, [leagueGroups, marcaResults, sitemapTick])
+  }, [leagueGroups, marcaResults, marcaLive, sitemapTick])
 
   // Ligas FCTV no cubiertas por el calendario Marca (solo en catálogo fútbol).
   const extraFctvGroups = useMemo(
@@ -1039,11 +1054,9 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: solo la anterior y la siguiente. "Anterior" es la
-  // última jornada que ya jugó algún partido — pero solo se muestra el día
-  // en que jugó: al terminar ese día se borra. "Siguiente" es la jornada
-  // con el próximo partido más cercano — no un partido aplazado a un mes
-  // vista (el Levante-Athletic de J6 no debe esconder la J8 de esta semana).
+  // Jornadas visibles: solo UNA — la de esta semana. Es la que se está
+  // jugando hoy (incluye sus resultados) o, si ya terminó, la próxima con
+  // el partido más cercano en el tiempo — no un aplazado a un mes vista.
   const visibleJornadas = activeLeague?.marca ? (() => {
     const list = activeLeague.jornadas.filter(j => j.items.length)
     if (!list.length) return []
@@ -1060,12 +1073,16 @@ export default function Sports() {
     // Anterior: la última jornada con partidos jugados hoy (incluye la que
     // está en juego ahora mismo).
     const prev = [...list].reverse().find(j => lastPlayed(j) >= todayStart)
-    // Siguiente: si hay anterior, la que va detrás; si no, la del próximo
-    // partido más cercano en el tiempo.
-    const next = prev
-      ? list.find(j => j.round > prev.round)
-      : list.reduce((best, j) => (nextKick(j) < nextKick(best) ? j : best), list[0])
-    return list.filter(j => j === prev || j === next)
+    // Siguiente: la jornada del próximo partido más cercano en el tiempo;
+    // si todo está jugado (datos viejos), la más reciente — no la primera.
+    const next = list.reduce((best, j) => {
+      const t = nextKick(j), b = nextKick(best)
+      return t < b || (t === b && lastPlayed(j) > lastPlayed(best)) ? j : best
+    }, list[0])
+    // Solo sale la jornada de esta semana: la que se jugó/juega hoy si la
+    // hay (con sus resultados), si no la próxima.
+    const current = prev || next
+    return current ? [current] : []
   })() : []
   // Partidos visibles en ligas sin calendario: directos, recién finalizados
   // y próximos — los jugados hace >3h ya no se muestran.

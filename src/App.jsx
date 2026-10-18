@@ -536,7 +536,7 @@ export default function App() {
 
         {screensaverActive && <Screensaver onDismiss={dismissScreensaver} />}
         {(android || isElectron()) && <RemotePlayReceiver />}
-        {android && <UpdateChecker />}
+        {(android || isElectron()) && <UpdateChecker />}
       </div>
     </ErrorBoundary>
   )

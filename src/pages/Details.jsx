@@ -12,7 +12,7 @@ import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
@@ -1041,8 +1041,9 @@ export default function Details() {
     const url = sanitizeUrl(meta.trailer)
     if (!url) return
 
-    // On Android, use NewPipeExtractor to get direct stream URL and play in ExoPlayer
-    if (isAndroidNative()) {
+    // Android: NewPipeExtractor → URL directa en ExoPlayer. Electron: la
+    // misma superficie vía yt-dlp (window.octostream.youtube) → player web.
+    if (isAndroidNative() || isElectron()) {
       setTrailerLoading(true)
       try {
         const stream = await resolveYouTubeStream(url)

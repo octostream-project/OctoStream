@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { openSubtitlesPlugin } from '../plugins/builtIn/index.js'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { createAndroidHlsLoader, setManifestBaseUrl } from '../utils/hlsAndroidLoader.js'
 import { setPlayerOpen, markPlayerClosed } from '../utils/tvNavigation.js'
-import { playStream, stopPlayback, isExoPlayerAvailable, playEmbed, playRelay, resolveEmbed, setChannels, setEpisodes, setNextEpisode, setCastRequestListener, setLoadingText, setPlaybackStateListener } from '../utils/exoPlayer.js'
+import { playStream, stopPlayback, isExoPlayerAvailable, isDesktopPlayerAvailable, playEmbed, playRelay, resolveEmbed, setChannels, setEpisodes, setNextEpisode, setCastRequestListener, setLoadingText, setPlaybackStateListener } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
 import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
@@ -63,7 +63,7 @@ function torrentStatusText(ev) {
   return `Descargando torrent… ${pct}%\n${parts.join(' · ')}`
 }
 
-export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null }) {
+function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null }) {
   const videoRef = useRef(null)
   const containerRef = useRef(null)
   const hlsRef = useRef(null)
@@ -129,6 +129,15 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // Zapping en el player web (Electron/navegador): el nativo lo hace dentro
   // del diálogo ExoPlayer; aquí el índice se trackea localmente y cada zap
   // llama onZapChannel → LiveTV resuelve el stream y re-renderiza.
+  // Reproductor nativo de escritorio (mpv por IPC — paridad ExoPlayer).
+  // Se detecta una vez por montaje; si no hay binario cae al player web.
+  const [desktopMpv, setDesktopMpv] = useState(false)
+  useEffect(() => {
+    if (!isElectron()) return
+    let on = true
+    isDesktopPlayerAvailable().then(ok => { if (on) setDesktopMpv(ok) }).catch(() => {})
+    return () => { on = false }
+  }, [])
   const [zapIndex, setZapIndex] = useState(channelIndex)
   const [prevChannelIndex, setPrevChannelIndex] = useState(channelIndex)
   if (prevChannelIndex !== channelIndex) {
@@ -531,23 +540,32 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       return res
     }
 
-    // On Android, use native ExoPlayer for all video playback
-    // ExoPlayer handles HLS, DASH, and Widevine DRM natively without CORS issues
+    // On Android, use native ExoPlayer for all video playback; en escritorio
+    // el equivalente es el mpv controlado por IPC (electron/mpv.cjs).
+    // DRM Widevine no va a mpv (sin CDM) — ese sigue en el player web (shaka).
     // If ExoPlayer previously failed (e.g. 403 from CDN), fall back to HLS.js
-    if (isExoPlayerAvailable() && !exoFailed) {
+    const hasDrm = !!stream.drm?.licenseUrl || stream.drm?.type === 'widevine'
+    // La detección del binario va por IPC — await dentro de init (async) para
+    // no competir con el estado desktopMpv (que llega una renderización tarde).
+    const desktopNative = isElectron() && !hasDrm && !isEmbed && !casting &&
+      await isDesktopPlayerAvailable()
+    if ((isExoPlayerAvailable() || desktopNative) && !exoFailed) {
       // Reducir memoria del WebView: quitar video/canvas/source del DOM
       // antes de abrir ExoPlayer (el player nativo se muestra sobre el WebView).
       // NO limpiar <img> — React no restaura srcs borrados fuera de su control
       // y el banner/thumbnails quedaban vacíos al volver del player.
-      try {
-        document.querySelectorAll('video, canvas, source').forEach(el => {
-          el.src = ''
-          el.srcset = ''
-        })
-        // Ocultar el contenido de la página para liberar memoria de render
-        const root = document.getElementById('root')
-        if (root) root.style.display = 'none'
-      } catch {}
+      // En Electron-mpv la app queda visible (ventana propia) — no tocar el DOM.
+      if (!desktopNative) {
+        try {
+          document.querySelectorAll('video, canvas, source').forEach(el => {
+            el.src = ''
+            el.srcset = ''
+          })
+          // Ocultar el contenido de la página para liberar memoria de render
+          const root = document.getElementById('root')
+          if (root) root.style.display = 'none'
+        } catch {}
+      }
       if (window.gc) { try { window.gc() } catch {} }
 
       // La app queda oculta (root display:none) mientras ExoPlayer está al
@@ -562,7 +580,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       }
 
       const proxyUrl = window.octostream?.proxyUrl
-      const isElectron = !!window.octostream?.isElectron
+      const isElectronApp = !!window.octostream?.isElectron
       let streamUrl = sanitizeUrl(stream.url)
       if (!streamUrl) {
         restoreAppDom()
@@ -592,7 +610,9 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         }
       }
       const skipProxy = stream.streamType === 'dash' || /directos\.mediasetinfinity\.es|dai\.google\.com|doubleclick\.net/i.test(streamUrl)
-      if (proxyUrl && isElectron && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
+      // mpv hace fetch directo con sus propias cabeceras — el wrapper del
+      // proxy local solo aplica al player web de Chromium.
+      if (proxyUrl && isElectronApp && !desktopNative && /^https?:\/\//.test(streamUrl) && !streamUrl.includes('127.0.0.1') && !skipProxy) {
         streamUrl = withProxyHeaders(proxyUrl + encodeURIComponent(streamUrl), stream.headers)
       }
 
@@ -707,6 +727,12 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         if (state.state === 'buffering' || state.state === 'idle') playerStalledRef.current = true
         else if (state.state === 'ready' || state.state === 'ended' || state.state === 'error') playerStalledRef.current = false
         if (state.state === 'error') {
+          if (desktopNative) {
+            // Escritorio: mpv falló → fallback automático al player web con
+            // el mismo stream (exoFailed apaga useNativePlayer y re-inicia).
+            setExoFailed(true)
+            return
+          }
           // If ExoPlayer fails with HTTP 403 or source error, fall back to HLS.js in WebView
           const msg = state.message || ''
           const isHttpError = /403|forbidden|source error|bad http|io.*http/i.test(msg)
@@ -854,6 +880,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       playStream(playArgs, onPlaybackState).catch(e => {
         console.error('[Player] ExoPlayer error:', e?.message)
         restoreAppDom()
+        if (desktopNative) {
+          // mpv no disponible o falló al abrir → el player web lo intenta.
+          setExoFailed(true)
+          return
+        }
         setPlayerOpen(false)
         setError(`Error al iniciar ExoPlayer: ${e?.message || 'unknown'}`)
       })
@@ -1780,8 +1811,12 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     }
   }, [])
 
-  // Apply subtitle delay to active text tracks
+  // Apply subtitle delay to active text tracks (o a mpv por IPC).
   useEffect(() => {
+    if (isElectron() && desktopMpv) {
+      window.octostream?.player?.setSubDelay?.(subDelay)
+      return
+    }
     const videoEl = videoRef.current
     if (!videoEl) return
     for (let i = 0; i < videoEl.textTracks.length; i++) {
@@ -1944,6 +1979,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // On Android, embeds are handled by native WebView (playEmbed), not iframe
   const isNativeEmbed = isEmbed && isExoPlayerAvailable()
   const useNativeExoPlayer = isExoPlayerAvailable() && stream && !isEmbed && !exoFailed
+  // Escritorio: misma condición con el mpv por IPC — sin embeds, sin DRM
+  // (Widevine va por shaka) y sin casting (usa el <video> para el proxy LAN).
+  const useNativePlayer = useNativeExoPlayer ||
+    (isElectron() && desktopMpv && stream && !isEmbed && !exoFailed && !casting &&
+      !(stream.drm?.licenseUrl || stream.drm?.type === 'widevine'))
 
   // En escritorio el player siempre va a ventana completa (como el diálogo
   // nativo de Android): requestFullscreen DOM solo agranda el elemento
@@ -2144,6 +2184,18 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
     try {
       const srtContent = await openSubtitlesPlugin.downloadSubtitle(sub.downloadUrl, sub.encoding)
       const vttContent = srtToVtt(srtContent)
+      // Reproductor nativo mpv: blob: no existe para él — el VTT va por IPC
+      // a un temporal y entra por sub-add (mismo menú de subtítulos de mpv).
+      if (isElectron() && desktopMpv) {
+        window.octostream?.player?.addSubtitle?.({
+          content: vttContent,
+          label: sub.fileName || sub.language || 'Subtítulo',
+          lang: sub.language || 'es',
+        })
+        setActiveSubtitle(sub)
+        setShowSubsPanel(false)
+        return
+      }
       const blob = new Blob([vttContent], { type: 'text/vtt' })
       const blobUrl = URL.createObjectURL(blob)
       // Revoke the previous subtitle blob URL to avoid memory leaks
@@ -2177,6 +2229,11 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   }
 
   const removeSubtitles = () => {
+    if (isElectron() && desktopMpv) {
+      window.octostream?.player?.subOff?.()
+      setActiveSubtitle(null)
+      return
+    }
     const videoEl = videoRef.current
     if (!videoEl) return
     const track = videoEl.querySelector('track[data-subs]')
@@ -2343,9 +2400,9 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
   // ajustes y navegación D-pad. No renderizar una segunda UI web detrás.
   // Pero el menú de Cast SI debe renderizarse para que el botón nativo pueda
   // abrir el diálogo de dispositivos.
-  if (useNativeExoPlayer && !error && !showCastMenu && !casting && !remoteDevice) return null
+  if (useNativePlayer && !error && !showCastMenu && !casting && !remoteDevice) return null
 
-  if (useNativeExoPlayer && !error) {
+  if (useNativePlayer && !error) {
     return (
       <div className="fixed inset-0 z-[60] pointer-events-none">
         {showCastMenu && (
@@ -2466,7 +2523,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         />
       )}
 
-      {!isEmbed && !error && !useNativeExoPlayer && (
+      {!isEmbed && !error && !useNativePlayer && (
         <div className="w-full h-full flex items-center justify-center" onClick={togglePlayPause}>
           <video
             ref={videoRef}
@@ -2485,7 +2542,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
         </div>
       )}
 
-      {useNativeExoPlayer && (
+      {useNativePlayer && (
         <div className="w-full h-full flex flex-col items-center justify-center bg-black gap-4">
           <LogoLoader size={80} />
           <p className="text-white text-sm">Cargando enlace…</p>
@@ -2493,7 +2550,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       )}
 
       {/* Panel de zapping: lista de canales del player web */}
-      {mode === 'live' && showChannels && channels?.length > 1 && !useNativeExoPlayer && (
+      {mode === 'live' && showChannels && channels?.length > 1 && !useNativePlayer && (
         <div
           className="absolute top-0 right-0 bottom-0 w-72 max-w-[70vw] z-30 bg-dark-900/95 backdrop-blur border-l border-dark-700 flex flex-col"
           onClick={(e) => e.stopPropagation()}
@@ -2523,7 +2580,7 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       )}
 
       {/* Barra inferior de controles */}
-      {!isEmbed && !error && !useNativeExoPlayer && (
+      {!isEmbed && !error && !useNativePlayer && (
         <div className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent pb-3 pt-12 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
 
           {/* Seek bar */}
@@ -3037,4 +3094,129 @@ export default function VideoPlayer({ mode = 'vod', stream, title, onClose, onEn
       )}
     </div>
   )
+}
+
+// ─── Wrapper con resolución de embeds en Electron ────────────────────────────
+// En Android la cadena embed → WebView oculto → relay → WebView visible vive
+// dentro del flujo nativo. En Electron el equivalente corre aquí ANTES de
+// montar el player: (1) resolver headless (BrowserWindow oculta + sniff de
+// red) → URL directa + headers; (2) relay de origen para CDNs ligados al
+// documento (DLive/tiestep) → URL loopback /embed-relay; (3) para embeds con
+// «sandbox check», el player embebido en ventana propia; (4) iframe normal.
+export default function VideoPlayer(props) {
+  const { stream, title, onClose, mode } = props
+  const isElectronEnv = !!window.octostream?.isElectron
+  const isEmbedStream = !!stream && (stream.streamType === 'embed' || stream.streamType === 'iframe')
+  const canResolve = isElectronEnv && isEmbedStream && !!window.octostream?.embed?.resolve
+  // resolution: {for: stream, stream: resolvedStream|null} — keyed por el
+  // stream de entrada así el estado se deriva sin setState síncrono (null =
+  // cadena agotada → iframe).
+  const [resolution, setResolution] = useState(null)
+  const resolvedStream = resolution?.for === stream ? resolution.stream : null
+  const resolving = canResolve && !(resolution && resolution.for === stream)
+  const relayIdRef = useRef(null)
+
+  useEffect(() => {
+    if (!canResolve) return undefined
+    let cancelled = false
+    const url = sanitizeUrl(stream.url)
+    const referer = stream.referer || stream.headers?.Referer || ''
+    // Embeds con cuenta atrás pre-emisión (FCTV): esperar hasta kickoff+90min.
+    const kickoff = stream._fctvItem?._matchDate || 0
+    const waitUntil = kickoff > Date.now() ? kickoff + 90 * 60 * 1000 : 0
+
+    ;(async () => {
+      // 1) Resolver headless — el equivalente del resolveEmbed de Android.
+      let res = null
+      try { res = await resolveEmbed(url, 15000, referer) } catch { /* fallthrough */ }
+      if (cancelled) return
+      if (res?.status === 'resolved' && res.url && !stream._wvPlayback) {
+        // URL extraída reproducible con headers — los del request real de la
+        // página (Referer/Origin/UA/cookies) los exige el CDN firmado.
+        const headers = { ...(res.requestHeaders || {}), ...(stream.headers || {}) }
+        if (res.referer && !headers.Referer && !headers.referer) headers.Referer = res.referer
+        if (res.cookies && !headers.Cookie && !headers.cookie) headers.Cookie = res.cookies
+        setResolution({ for: stream, stream: {
+          ...stream,
+          url: res.url,
+          streamType: res.streamType || inferStreamType(res.url) || 'hls',
+          headers,
+        } })
+        return
+      }
+      // 2) Relay de origen — el m3u8 solo se sirve al documento del embed
+      // (TLS/cookies del navegador). Solo con media URL ya resuelta — en
+      // Android relayCtx solo se alimenta de res.url, nunca del documento.
+      if (res?.status === 'resolved' && res.url) try {
+        const r = await playRelay(res.url, res.referer || referer || url, title || '', mode === 'live' ? 'live' : 'vod')
+        if (cancelled) {
+          if (r?.id) window.octostream?.embed?.relayStop?.({ id: r.id })?.catch?.(() => {})
+          return
+        }
+        if (r?.status === 'playing' && r.url) {
+          relayIdRef.current = r.id
+          // URL loopback servida por el proxy local con la sesión del embed.
+          setResolution({ for: stream, stream: { ...stream, url: r.url, streamType: 'hls', headers: {} } })
+          return
+        }
+      } catch { /* fallthrough */ }
+      // 3) Fallbacks de ventana visible (misma cadena que Android):
+      //    - _wvPlayback (sandbox check DLive/tiestep): el iframe sandboxed
+      //      no los supera → reproducir dentro de la ventana del embed
+      //      (playEmbed playback:true) hasta que el usuario cierre.
+      //    - resto: resolución interactiva — el usuario completa el
+      //      captcha/click y la ventana se cierra sola al detectar el vídeo
+      //      (playEmbed playback:false), devolviendo la URL directa.
+      try {
+        if (stream._wvPlayback) {
+          const r = await playEmbed(url, title || '', referer, true, waitUntil)
+          if (!cancelled && r?.status === 'closed') { onClose?.(); return }
+        } else {
+          const r = await playEmbed(url, title || '', referer, false, waitUntil)
+          if (cancelled) return
+          if (r?.status === 'resolved' && r.url) {
+            const headers = { ...(r.requestHeaders || {}), ...(stream.headers || {}) }
+            if (r.referer && !headers.Referer && !headers.referer) headers.Referer = r.referer
+            if (r.cookies && !headers.Cookie && !headers.cookie) headers.Cookie = r.cookies
+            setResolution({ for: stream, stream: {
+              ...stream, url: r.url,
+              streamType: r.streamType || inferStreamType(r.url) || 'hls', headers,
+            } })
+            return
+          }
+          if (r?.status === 'closed') { onClose?.(); return }
+        }
+      } catch { /* fallthrough */ }
+      // 4) Iframe normal — último recurso (X-Frame-Options ya se retira en
+      // el main para peticiones iniciadas por la app).
+      if (!cancelled) setResolution({ for: stream, stream: null })
+    })()
+
+    return () => {
+      cancelled = true
+      if (relayIdRef.current) {
+        window.octostream?.embed?.relayStop?.({ id: relayIdRef.current })?.catch?.(() => {})
+        relayIdRef.current = null
+      }
+    }
+  }, [stream, canResolve, mode, onClose, title])
+
+  if (canResolve && resolving && !resolvedStream) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center gap-4">
+        <LogoLoader size={80} />
+        <p className="text-white text-sm text-center px-8">Resolviendo vídeo…</p>
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 btn-ghost p-2 rounded-lg"
+          title="Cerrar"
+        >
+          <X size={24} />
+        </button>
+      </div>
+    )
+  }
+
+  const effStream = resolvedStream || stream
+  return <VideoPlayerInner {...props} stream={effStream} />
 }

@@ -16,6 +16,30 @@ contextBridge.exposeInMainWorld('octostream', {
   getLanProxyUrl: () => ipcRenderer.invoke('get-lan-proxy-url'),
   // Reproductores externos instalados en el sistema (mpv/VLC/ffplay).
   openExternalPlayer: (arg) => ipcRenderer.invoke('player:open-external', arg),
+  // Reproductor nativo mpv controlado por IPC — equivalente del plugin
+  // ExoPlayer de Android (player:event → playbackState + channelZap).
+  player: {
+    status: () => ipcRenderer.invoke('player:status'),
+    open: (arg) => ipcRenderer.invoke('player:open', arg),
+    switch: (arg) => ipcRenderer.invoke('player:switch', arg),
+    pause: () => ipcRenderer.invoke('player:pause'),
+    resume: () => ipcRenderer.invoke('player:resume'),
+    seek: (sec) => ipcRenderer.invoke('player:seek', { sec }),
+    setRate: (rate) => ipcRenderer.invoke('player:rate', { rate }),
+    setVolume: (v) => ipcRenderer.invoke('player:volume', { v }),
+    setMute: (m) => ipcRenderer.invoke('player:mute', { m }),
+    showText: (text) => ipcRenderer.invoke('player:text', { text }),
+    setSubDelay: (sec) => ipcRenderer.invoke('player:sub-delay', { sec }),
+    subOff: () => ipcRenderer.invoke('player:sub-off'),
+    setChannels: (arg) => ipcRenderer.invoke('player:set-channels', arg),
+    addSubtitle: (arg) => ipcRenderer.invoke('player:add-sub', arg),
+    stop: () => ipcRenderer.invoke('player:stop'),
+    onEvent: (cb) => {
+      const wrapped = (_e, ev) => cb(ev)
+      ipcRenderer.on('player:event', wrapped)
+      return () => ipcRenderer.removeListener('player:event', wrapped)
+    },
+  },
   // Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
   cloudProxy: {
     connect: () => ipcRenderer.invoke('cloud:connect'),
@@ -74,5 +98,29 @@ contextBridge.exposeInMainWorld('octostream', {
       ipcRenderer.on('sync-event', wrapped)
       return () => ipcRenderer.removeListener('sync-event', wrapped)
     },
+  },
+  // Paridad con el WebView oculto/relay de Android: resolver headless,
+  // reproducción en ventana propia y relay de origen por el proxy local.
+  embed: {
+    resolve: (arg) => ipcRenderer.invoke('embed:resolve', arg),
+    play: (arg) => ipcRenderer.invoke('embed:play', arg),
+    relay: (arg) => ipcRenderer.invoke('embed:relay', arg),
+    relayStop: (arg) => ipcRenderer.invoke('embed:relay-stop', arg),
+    closeAll: () => ipcRenderer.invoke('embed:close-all'),
+    onState: (cb) => {
+      const wrapped = (_e, payload) => cb(payload)
+      ipcRenderer.on('embed:state', wrapped)
+      return () => ipcRenderer.removeListener('embed:state', wrapped)
+    },
+  },
+  // DLNA "Enviar a TV" — paridad con openDlna() de Android.
+  cast: {
+    dlna: (arg) => ipcRenderer.invoke('cast:dlna', arg),
+    dlnaScan: (arg) => ipcRenderer.invoke('cast:dlna-scan', arg),
+  },
+  // Update check de escritorio — paridad con appUpdater (abre la release).
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    open: (arg) => ipcRenderer.invoke('update:open', arg),
   },
 })

@@ -16,6 +16,7 @@ vi.mock('@octostream/exo-player', () => ({
 
 vi.mock('./platform.js', () => ({
   isAndroidNative: vi.fn(),
+  isElectron: vi.fn(() => false),
 }))
 
 import { ExoPlayer } from '@octostream/exo-player'

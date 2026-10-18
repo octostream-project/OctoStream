@@ -185,6 +185,20 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   servidor torrent.
 - El DataSource de ExoPlayer con WARP usa validación TLS normal (sin trust-all).
 - Logs: no volcar headers ni URLs completas firmadas a logcat (host solamente).
+- Reproductor nativo de escritorio: `electron/mpv.cjs` lanza **mpv**
+  (`--input-ipc-server`, socket de líneas JSON) en ventana propia con OSC —
+  paridad del plugin ExoPlayer de Android. Emite los mismos estados
+  (`position` cada 5 s, `ended`, `closed`, `error`, `buffering`, `ready`) y
+  zapping (`keybind PGUP/PGDWN → script-message octo-zap` → evento
+  `{state:'zap', index, direction, name}` igual que `channelZap`). Las
+  fachadas `exoPlayer.js` (`playStream`/`switchChannel`/`pause`/`seek`/`stop`)
+  enrutan a `window.octostream.player` en Electron; VideoPlayer elige mpv si
+  el binario existe y el stream no es DRM/embed/cast, con fallback
+  automático al player web en cualquier error (`exoFailed`). mpv reproduce
+  mkv/AC3/DTS/HEVC **sin remux** y soporta `sub-add` para los subtítulos de
+  OpenSubtitles (el VTT va por IPC `player:add-sub` a un temporal). Binario:
+  `resources/mpv/` empaquetado → `OCTOSTREAM_MPV` → sistema (PATH/rutas
+  habituales); sin mpv instalado el player web cubre todo salvo ese caso.
 - URLs loopback (`127.0.0.1`/`localhost`) **nunca** van por el proxy WARP — el
   proxy las resolvería en su extremo remoto (`isLoopbackUrl` en el plugin).
 - Embeds con CDN ligado al documento del proveedor (DLive → tiestep): el m3u8
@@ -202,6 +216,27 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   anti-PDF-check ("Sandbox not allowed") + desmuteo del player.
   `VideoPlayer.jsx` cae a ese modo cuando una URL resuelta de embed falla en
   ExoPlayer, o directo si el stream trae `_wvPlayback`.
+- Paridad de embeds en escritorio (`electron/embed.cjs` + IPC `embed:*` +
+  `window.octostream.embed`): la misma cadena de Android la ejecuta un
+  wrapper en `VideoPlayer.jsx` antes de montar el player —
+  (1) `resolveEmbed` headless con `BrowserWindow` oculta (partición
+  `persist:octo-embed`) que ejecuta el challenge JS, auto-reproduce y
+  captura la media URL por `webRequest` (un listener por evento en la sesión,
+  fan-out por `webContentsId`); (2) `playRelay` → endpoint `/embed-relay` del
+  proxy local que hace `session.fetch` con la sesión del embed (TLS Chromium
+  + cookies + mismos headers que usó la página) y reescribe playlists;
+  (3) `playEmbed` ventana visible (`playback:false` resolución interactiva,
+  `playback:true` player embebido hasta cerrar); (4) iframe como último
+  recurso — el main retira `X-Frame-Options`/`frame-ancestors` en subframes
+  iniciados por la app. La sesión de embeds hereda el routing WARP
+  (`Embed.applySessionRouting` desde `applyAetherRouting`).
+- DLNA "Enviar a TV" en escritorio (`electron/dlna.cjs` + `cast:dlna`):
+  SSDP M-SEARCH → descripción UPnP → AVTransport `SetAVTransportURI`+`Play`
+  (misma superficie que `openDlna()` de Android: `{sent, device}`).
+- Update check en escritorio (`update:check`/`update:open` IPC +
+  rama Electron de `UpdateChecker.jsx`): compara `releases/latest` de GitHub
+  con `app.getVersion()` y abre la página de la release (sin auto-install
+  — no hay electron-updater configurado).
 
 ## Auto-updater (modelo FCTV)
 

@@ -1,18 +1,18 @@
 {
-  "versionCode": 171,
-  "versionName": "1.71",
+  "versionCode": 172,
+  "versionName": "1.72",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.71/octostream-1.71-arm64-v8a.apk",
-  "sha256": "892e1b1d0cc4afc23c789a699ebb96d0f78a7b6da244f1e4e5ac0c5ae3c1735c",
-  "notes": "Inicio simplificado: solo categorias esenciales por genero (sin sagas, estudios ni tematicas)",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-arm64-v8a.apk",
+  "sha256": "09e5c64ae405e1721afece89eb82751be9acd67c4a0d9b613f5a6df235ecb7d1",
+  "notes": "Paridad escritorio-Android: reproductor nativo mpv, embeds WAF, DLNA, jornadas en tiempo real",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.71/octostream-1.71-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.71/octostream-1.71-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.71/octostream-1.71-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.72/octostream-1.72-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "892e1b1d0cc4afc23c789a699ebb96d0f78a7b6da244f1e4e5ac0c5ae3c1735c",
-    "armeabi-v7a": "7a2fbbca66b9bf8a03a910e2710f41a546e9344756fc07a1147224817b90f746",
-    "x86_64": "a57e14b957f96883cf1aa7f4a326c9d971f286d170766d00e1e30b75712ec604"
+    "arm64-v8a": "09e5c64ae405e1721afece89eb82751be9acd67c4a0d9b613f5a6df235ecb7d1",
+    "armeabi-v7a": "c4046a146915f05738e240b4927ac96bb2cf2c437de185027c4c3b5b675bb940",
+    "x86_64": "d37eb402b6dd4c44f3ad9720bed461e36a1b774e545587f18d1931fceb7b357f"
   }
 }
