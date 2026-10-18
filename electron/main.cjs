@@ -1080,6 +1080,16 @@ ipcMain.handle('riseup:save', async (_e, arg) => {
   }
 })
 
+// OpenVPN embebido (Linux): tun0 vía pkexec — el túnel vive mientras la
+// app vive; al morir el proceso hijo, la VPN se apaga sola. Con el tun
+// arriba, aether/WARP enruta por Riseup automáticamente.
+const Openvpn = require('./openvpn.cjs')
+ipcMain.handle('riseup:connect', (_e, arg) => Openvpn.connect(String(arg?.conf || '')))
+ipcMain.handle('riseup:disconnect', () => Openvpn.disconnect())
+ipcMain.handle('riseup:status', () => Openvpn.status())
+ipcMain.handle('riseup:install', () => Openvpn.installOpenvpn())
+app.on('will-quit', () => { try { Openvpn.disconnect() } catch {} })
+
 ipcMain.handle('riseup:import', async (_e, arg) => {
   const conf = String(arg?.conf || '')
   if (!conf) return { imported: false, error: 'conf vacía' }

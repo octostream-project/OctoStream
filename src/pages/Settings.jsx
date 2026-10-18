@@ -8,7 +8,7 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
-import { openRiseupProfile, importRiseupToNetworkManager } from '../utils/riseupVpn.js'
+import { openRiseupProfile, importRiseupToNetworkManager, connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus, installOpenvpn } from '../utils/riseupVpn.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
@@ -132,6 +132,58 @@ export default function Settings() {
   // de cliente fresco y lo abre con el cliente OpenVPN del sistema.
   const [riseupBusy, setRiseupBusy] = useState(false)
   const [riseupMsg, setRiseupMsg] = useState('')
+  const [riseupState, setRiseupState] = useState('disconnected') // disconnected | connecting | connected
+  const [riseupHasBin, setRiseupHasBin] = useState(true)
+
+  useEffect(() => {
+    riseupTunnelStatus().then(s => {
+      if (s.connected) setRiseupState('connected')
+      else if (s.connecting) setRiseupState('connecting')
+      setRiseupHasBin(s.hasOpenvpn !== false)
+    }).catch(() => {})
+  }, [])
+
+  const toggleRiseupTunnel = useCallback(async () => {
+    setRiseupMsg('')
+    if (riseupState === 'connected' || riseupState === 'connecting') {
+      await disconnectRiseupTunnel()
+      setRiseupState('disconnected')
+      return
+    }
+    setRiseupState('connecting')
+    setRiseupBusy(true)
+    try {
+      const r = await connectRiseupTunnel()
+      if (r.status === 'connected') {
+        setRiseupState('connected')
+        setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
+      } else if (r.error === 'no-openvpn') {
+        setRiseupState('disconnected')
+        setRiseupHasBin(false)
+        setRiseupMsg('OpenVPN no está instalado — instálalo para usar el túnel embebido.')
+      } else {
+        setRiseupState('disconnected')
+        setRiseupMsg('No se pudo conectar: ' + (r.error || r.status || 'desconocido'))
+      }
+    } catch (e) {
+      setRiseupState('disconnected')
+      setRiseupMsg('Error: ' + (e.message || e))
+    } finally {
+      setRiseupBusy(false)
+    }
+  }, [riseupState])
+
+  const handleInstallOpenvpn = useCallback(async () => {
+    setRiseupBusy(true)
+    const r = await installOpenvpn()
+    setRiseupBusy(false)
+    if (r.installed) {
+      setRiseupHasBin(true)
+      setRiseupMsg('OpenVPN instalado — ya puedes conectar el túnel.')
+    } else {
+      setRiseupMsg('No se pudo instalar: ' + (r.error || 'desconocido'))
+    }
+  }, [])
 
   const handleRiseup = useCallback(async (importNm = false) => {
     setRiseupBusy(true)
@@ -1441,12 +1493,43 @@ export default function Settings() {
                 </p>
               </div>
             </div>
+            {isElectron() && (
+              <label className="flex items-center justify-between cursor-pointer mb-4">
+                <span className="text-sm text-dark-300">
+                  {riseupState === 'connecting' ? 'Conectando…' : riseupState === 'connected' ? 'Túnel activo (WARP va por aquí)' : 'Túnel apagado'}
+                </span>
+                <button
+                  onClick={toggleRiseupTunnel}
+                  disabled={riseupBusy}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    riseupState === 'connected' ? 'bg-green-600' :
+                    riseupState === 'connecting' ? 'bg-yellow-600' :
+                    'bg-dark-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                      riseupState !== 'disconnected' ? 'translate-x-6' : ''
+                    }`}
+                  />
+                </button>
+              </label>
+            )}
+            {!riseupHasBin && isElectron() && (
+              <button
+                onClick={handleInstallOpenvpn}
+                disabled={riseupBusy}
+                className="px-4 py-2 mb-3 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
+              >
+                Instalar OpenVPN
+              </button>
+            )}
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => handleRiseup(false)}
                 disabled={riseupBusy}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-green-600 hover:bg-green-700 text-white'
+                  riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-dark-700 hover:bg-dark-600 text-dark-200'
                 }`}
               >
                 {riseupBusy ? 'Generando perfil…' : 'Generar y abrir perfil .ovpn'}
