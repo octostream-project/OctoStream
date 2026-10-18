@@ -3,16 +3,16 @@
   "versionName": "1.75",
   "minCode": 0,
   "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-arm64-v8a.apk",
-  "sha256": "482764d59195e7225843d50e90366c2a4f092ef190ceceda1386953d773427ce",
-  "notes": "",
+  "sha256": "7266485a9f2504b05074130c9d9d92f78193223833c637e510e9113026b6e6ba",
+  "notes": "Deportes: sin congelarse, hora+fecha en tarjetas, EN DIRECTO 15min antes; FCTV autodescubre dominio; updater desktop con descarga in-app",
   "apkUrls": {
     "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-arm64-v8a.apk",
     "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-armeabi-v7a.apk",
     "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.75/octostream-1.75-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "482764d59195e7225843d50e90366c2a4f092ef190ceceda1386953d773427ce",
-    "armeabi-v7a": "5de91f1ef046ba9662231f9bf3821523d51387d877f2bdd4d173947da5de3e7e",
-    "x86_64": "5f5e4527759effc875a676b55e54126fc0397864103a8003d14d51c5dcfc12f5"
+    "arm64-v8a": "7266485a9f2504b05074130c9d9d92f78193223833c637e510e9113026b6e6ba",
+    "armeabi-v7a": "36b77772afc39293a3ca5e70b5cbab3633d739d034b45ff899e51fcdd6ae8617",
+    "x86_64": "c55733cdf20436fa0035d4d205a6a5e70f3e055192d5a72520da7595d105232b"
   }
 }
