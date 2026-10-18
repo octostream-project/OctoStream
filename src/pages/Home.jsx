@@ -24,35 +24,6 @@ const MOVIE_CATS = [
   { id: 'movie-fantasy', name: 'Fantasía' },
   { id: 'movie-2025', name: 'Estrenos 2025' },
   { id: 'movie-2024', name: 'Estrenos 2024' },
-  // Estudios
-  { id: 'movie-ghibli', name: 'Studio Ghibli' },
-  { id: 'movie-pixar', name: 'Pixar' },
-  { id: 'movie-disney', name: 'Disney' },
-  { id: 'movie-marvel', name: 'Marvel' },
-  { id: 'movie-dc', name: 'DC' },
-  { id: 'movie-a24', name: 'A24' },
-  // Temáticas
-  { id: 'movie-zombies', name: 'Zombis' },
-  { id: 'movie-vampiros', name: 'Vampiros' },
-  { id: 'movie-halloween', name: 'Halloween' },
-  { id: 'movie-navidad', name: 'Navidad' },
-  { id: 'movie-aliens', name: 'Alienígenas' },
-  { id: 'movie-timetravel', name: 'Viajes en el tiempo' },
-  { id: 'movie-distopias', name: 'Distopías' },
-  { id: 'movie-ww2', name: 'II Guerra Mundial' },
-  { id: 'movie-tiburones', name: 'Tiburones' },
-  { id: 'movie-serial', name: 'Asesinos en serie' },
-  // Sagas
-  { id: 'movie-harry-potter', name: 'Harry Potter' },
-  { id: 'movie-star-wars', name: 'Star Wars' },
-  { id: 'movie-a-todo-gas', name: 'A todo gas' },
-  { id: 'movie-james-bond', name: 'James Bond' },
-  { id: 'movie-jurassic', name: 'Jurassic Park' },
-  { id: 'movie-piratas', name: 'Piratas del Caribe' },
-  { id: 'movie-toy-story', name: 'Toy Story' },
-  { id: 'movie-john-wick', name: 'John Wick' },
-  { id: 'movie-scream', name: 'Scream' },
-  { id: 'movie-hobbit', name: 'El Hobbit' },
 ]
 
 const SERIES_CATS = [
@@ -72,13 +43,6 @@ const SERIES_CATS = [
   { id: 'tv-mystery', name: 'Misterio' },
   { id: 'tv-2025', name: 'Series 2025' },
   { id: 'tv-2024', name: 'Series 2024' },
-  // Temáticas
-  { id: 'tv-zombies', name: 'Zombis' },
-  { id: 'tv-vampiros', name: 'Vampiros' },
-  { id: 'tv-superheroes', name: 'Superhéroes' },
-  { id: 'tv-ww2', name: 'II Guerra Mundial' },
-  { id: 'tv-distopias', name: 'Distopías' },
-  { id: 'tv-timetravel', name: 'Viajes en el tiempo' },
 ]
 
 const ANIME_CATS = [
