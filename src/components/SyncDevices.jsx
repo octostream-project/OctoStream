@@ -3,7 +3,7 @@ import { RefreshCw, Wifi, Check, AlertCircle, Download, Upload, X, MonitorSmartp
 import { useStore } from '../store/useStore.js'
 import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from './OctoLoader.jsx'
-import { getSyncServer, getDiscovered, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
+import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
 // red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
@@ -23,6 +23,7 @@ export default function SyncDevices() {
   // Dispositivo objetivo del diálogo de acción: {ip, url, deviceId, alias, fingerprint}
   const [actionDevice, setActionDevice] = useState(null)
   const [discovered, setDiscovered] = useState([])
+  const [sweeping, setSweeping] = useState(false)
   const [status, setStatus] = useState('idle') // idle | connecting | syncing | done | error
   const [message, setMessage] = useState('')
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
@@ -102,9 +103,29 @@ export default function SyncDevices() {
     }
   }
 
+  // Barrido /24 como respaldo del anuncio UDP: muchos routers filtran
+  // multicast/broadcast (aislamiento de AP, IGMP snooping, bandas 2.4/5GHz
+  // separadas) y el descubrimiento solo-UDP se queda vacío para siempre.
+  const runSweep = async () => {
+    if (sweeping) return
+    setSweeping(true)
+    try {
+      const list = await scanDevices()
+      setDiscovered(prev => {
+        const merged = new Map(prev.map(d => [d.deviceId || d.ip, d]))
+        for (const d of list) merged.set(d.deviceId || d.ip, d)
+        return [...merged.values()]
+      })
+    } catch { /* sweep opcional */ } finally {
+      setSweeping(false)
+    }
+  }
+
   useEffect(() => {
     let active = true
     let discIv = null
+    let sweepTimer = null
+    let swept = false
     ;(async () => {
       const SyncServer = await getSyncServer()
       if (!SyncServer || !active) return
@@ -116,6 +137,15 @@ export default function SyncDevices() {
         // Dispositivos anunciándose por UDP — lista viva.
         getDiscovered().then(setDiscovered)
         discIv = setInterval(() => getDiscovered().then(d => { if (active) setDiscovered(d) }), 4000)
+        // Si en ~8s el UDP no encontró a nadie, barrer el /24 una vez.
+        sweepTimer = setTimeout(() => {
+          if (!active || swept) return
+          swept = true
+          setDiscovered(prev => {
+            if (prev.length === 0) runSweep()
+            return prev
+          })
+        }, 8000)
         updateLocalData()
         syncListenerRef.current = await SyncServer.addListener('syncDataReceived', (event) => {
           handleReceivedData(event.data)
@@ -130,6 +160,7 @@ export default function SyncDevices() {
     return () => {
       active = false
       if (discIv) clearInterval(discIv)
+      if (sweepTimer) clearTimeout(sweepTimer)
       if (syncListenerRef.current) syncListenerRef.current.remove()
     }
   }, [])
@@ -292,9 +323,20 @@ export default function SyncDevices() {
             ))}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-dark-500 text-sm py-2">
+          <div className="flex items-center gap-3 text-dark-500 text-sm py-2">
             <OctoLoader size={16} />
-            <p>Buscando OctoStream en la red…</p>
+            <p>{sweeping ? 'Buscando OctoStream en la red local…' : 'Buscando OctoStream en la red…'}</p>
+            {!sweeping && (
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={runSweep}
+                className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-dark-300 text-xs transition-colors"
+              >
+                <RefreshCw size={13} />
+                Reintentar
+              </button>
+            )}
           </div>
         )}
 

@@ -481,19 +481,28 @@ public class SyncServerPlugin extends Plugin {
         return "{}";
     }
 
+    private static final Object SERVER_LOCK = new Object();
+
     @PluginMethod
     public void start(PluginCall call) {
         try {
             loadIdentity();
-            if (server == null) {
-                server = new SyncHttpServer(PORT);
-                server.start();
-                Log.i(TAG, "Sync server started on port " + PORT);
+            // RemotePlayReceiver (arranque de la app) y el panel Sync pueden
+            // llamar a start() en paralelo — sin lock ambos creaban el
+            // NanoHTTPD y el segundo lanzaba BindException → "No se pudo
+            // iniciar el servidor" + descubrimiento nunca arrancado.
+            synchronized (SERVER_LOCK) {
+                if (server == null) {
+                    server = new SyncHttpServer(PORT);
+                    server.start();
+                    Log.i(TAG, "Sync server started on port " + PORT);
+                }
             }
             startDiscovery();
             JSObject ret = new JSObject();
             ret.put("port", PORT);
             ret.put("ip", getLocalIpAddress());
+            ret.put("ips", JSArrayCompat(localIps()));
             ret.put("url", "http://" + getLocalIpAddress() + ":" + PORT);
             ret.put("deviceId", deviceId);
             ret.put("alias", deviceAlias);
@@ -529,6 +538,7 @@ public class SyncServerPlugin extends Plugin {
         ret.put("alias", deviceAlias);
         ret.put("fingerprint", deviceFingerprint);
         ret.put("ip", getLocalIpAddress());
+        ret.put("ips", JSArrayCompat(localIps()));
         ret.put("port", PORT);
         ret.put("url", "http://" + getLocalIpAddress() + ":" + PORT);
         call.resolve(ret);
@@ -564,6 +574,7 @@ public class SyncServerPlugin extends Plugin {
     public void getIpAddress(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("ip", getLocalIpAddress());
+        ret.put("ips", JSArrayCompat(localIps()));
         ret.put("port", PORT);
         ret.put("url", "http://" + getLocalIpAddress() + ":" + PORT);
         call.resolve(ret);
@@ -750,6 +761,13 @@ public class SyncServerPlugin extends Plugin {
                 if (bcast != null) {
                     discSocket.send(new DatagramPacket(payload, payload.length, bcast, DISC_PORT));
                 }
+                // Broadcast dirigido por interfaz — recomputado por ciclo
+                // porque la red puede cambiar (WiFi↔Ethernet, VPN arriba/abajo).
+                for (InetAddress d : directedBroadcasts()) {
+                    try {
+                        discSocket.send(new DatagramPacket(payload, payload.length, d, DISC_PORT));
+                    } catch (Exception ignored) {}
+                }
                 Thread.sleep(2500);
             } catch (InterruptedException e) {
                 break;
@@ -809,7 +827,7 @@ public class SyncServerPlugin extends Plugin {
 
     @PluginMethod
     public void getDiscoveredDevices(PluginCall call) {
-        JSONArray arr = new JSONArray();
+        com.getcapacitor.JSArray arr = new com.getcapacitor.JSArray();
         long now = System.currentTimeMillis();
         try {
             synchronized (discovered) {
@@ -822,11 +840,20 @@ public class SyncServerPlugin extends Plugin {
             }
         } catch (Exception ignored) {}
         JSObject ret = new JSObject();
-        try { ret.put("devices", new com.getcapacitor.JSArray(arr)); } catch (Exception ignored) {}
+        ret.put("devices", arr);
         call.resolve(ret);
     }
 
     private String getLocalIpAddress() {
+        java.util.List<String> ips = localIps();
+        return ips.isEmpty() ? "127.0.0.1" : ips.get(0);
+    }
+
+    // Todos los IPv4 no-loopback del dispositivo — en TV con Ethernet+WiFi o
+    // móviles con hotspot el "primer" IPv4 puede ser del adaptador equivocado
+    // y el barrido /24 nunca alcanzaba a los demás OctoStream.
+    private java.util.List<String> localIps() {
+        java.util.List<String> out = new java.util.ArrayList<>();
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces != null && interfaces.hasMoreElements()) {
@@ -836,13 +863,42 @@ public class SyncServerPlugin extends Plugin {
                 while (addrs.hasMoreElements()) {
                     InetAddress addr = addrs.nextElement();
                     if (addr instanceof java.net.Inet4Address && !addr.isLoopbackAddress()) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        if (ip != null && !out.contains(ip)) out.add(ip);
                     }
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "getLocalIpAddress error: " + e.getMessage());
+            Log.e(TAG, "localIps error: " + e.getMessage());
         }
-        return "127.0.0.1";
+        return out;
+    }
+
+    // Broadcast dirigido por interfaz (192.168.1.255…): algunos APs/stacks
+    // filtran el limited broadcast 255.255.255.255 pero sí entregan el
+    // dirigido a la subred concreta — LocalSend hace lo mismo.
+    private java.util.List<InetAddress> directedBroadcasts() {
+        java.util.List<InetAddress> out = new java.util.ArrayList<>();
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface ni = interfaces.nextElement();
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                for (java.net.InterfaceAddress ia : ni.getInterfaceAddresses()) {
+                    InetAddress b = ia.getBroadcast();
+                    if (b != null && !out.contains(b)) out.add(b);
+                }
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    // Construir el JSArray elemento a elemento: new JSArray(JSONArray) pasa
+    // por el ctor Object→wrap y en algunos org.json devuelve un array
+    // anidado o lanza → la lista de dispositivos llegaba vacía a JS.
+    private static com.getcapacitor.JSArray JSArrayCompat(java.util.List<?> items) {
+        com.getcapacitor.JSArray a = new com.getcapacitor.JSArray();
+        for (Object o : items) a.put(o);
+        return a;
     }
 }

@@ -22,7 +22,8 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - `CapacitorHttp` debe estar **habilitado** en `capacitor.config.json` para que los
   cargadores HLS (`hlsAndroidLoader.js`) y el cliente HTTP (`httpClient.js`) puedan
   saltarse CORS en Android.
-- SDK objetivo: `compileSdk/targetSdk 34`, `minSdk 23`. AGP 8.2.1.
+- SDK objetivo: `compileSdk/targetSdk 36`, `minSdk 24` (actualizado desde
+  34/23 — Capacitor 8 lo exige). AGP 8.2.1.
 - Media3 ExoPlayer 1.3.1 se declara en `capacitor-plugins/exoplayer/android/build.gradle`,
   incluido `media3-decoder-ffmpeg` (AC3/E-AC-3/DTS/TrueHD — imprescindible para
   .mkv debrid con audio AC3/DTS; sin él esos archivos suenan en silencio).
@@ -31,6 +32,11 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   (cloud-proxy) no lo incluye; jlibtorrent sí cubre las 4. Si se regenera
   `android/` con `cap add android` hay que volver a poner los abiFilters
   y regenerar los iconos con `python3 scripts/gen-android-icons.py`.
+- `android:usesCleartextTraffic="true"` en `AndroidManifest.xml` es
+  **obligatorio** (targetSdk 36 bloquea HTTP cleartext por defecto y sin él
+  mueren: el sync LAN `http://:8765`, el servidor local de torrents
+  `127.0.0.1`, el relay Palantir y cualquier stream `http://` scrapeado).
+  Si se regenera `android/` con `cap add android` hay que volver a añadirlo.
 
 ## Mejoras aplicadas recientemente
 
@@ -139,9 +145,12 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   - Cada dispositivo tiene identidad persistente: `deviceId` (UUID), alias
     generado ("Pulpo Sabio") y fingerprint `XXXX-XXXX` (SHA-256 de un secreto
     local). Se anuncia en `/ping` y por UDP :8766 (multicast 239.255.60.60
-    + broadcast 255.255.255.255, ~2.5s) —
-    los demás OctoStream se descubren solos sin barrer el /24 (el barrido
-    queda como fallback para versiones viejas).
+    + broadcast 255.255.255.255 + **broadcast dirigido por interfaz**
+    192.168.x.255…, ~2.5s) — los demás OctoStream se descubren solos sin
+    barrer el /24. `SyncDevices` además lanza un barrido `scanDevices`
+    automático si el UDP no encuentra a nadie en ~8s (routers con
+    aislamiento de AP / IGMP snooping) y barre **todos** los /24 locales
+    (`ips[]` del backend — multi-interfaz WiFi+Ethernet/VPN).
   - Emparejamiento: `POST /pair {deviceId, alias, fingerprint}` → si es nuevo
     dispara `pairRequest` (diálogo con alias+código en `RemotePlayReceiver`)
     y responde `{pending:true}`; el emisor re-pregunta hasta que el usuario

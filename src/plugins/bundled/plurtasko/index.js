@@ -40,17 +40,18 @@ import { jkanime } from './channels/jkanime.js'
 import { dontorrent } from './channels/dontorrent.js'
 import { grantorrent } from './channels/grantorrent.js'
 import { subtorrents } from './channels/subtorrents.js'
+import { bloghorror } from './channels/bloghorror.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
 // doramedplay excluido: el sitio pasó a ser 100% VIP (páginas de contenido
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
-const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents]
+const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror]
 
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
 // de torrents ni se emiten streams .torrent/magnet.
-const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents'])
+const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror'])
 export const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
 const activeChannels = () => torrentSearchEnabled()
   ? CHANNELS

@@ -38,13 +38,38 @@ function fingerprintOf(secret) {
   return `${hex.slice(0, 4)}-${hex.slice(4)}`
 }
 
-function localIp() {
+function localIps() {
+  const out = []
   for (const list of Object.values(os.networkInterfaces())) {
     for (const ni of list || []) {
-      if (ni.family === 'IPv4' && !ni.internal) return ni.address
+      if (ni.family === 'IPv4' && !ni.internal && !out.includes(ni.address)) {
+        out.push(ni.address)
+      }
     }
   }
-  return '127.0.0.1'
+  return out
+}
+
+function localIp() {
+  return localIps()[0] || '127.0.0.1'
+}
+
+// Broadcast dirigido por interfaz (ip | ~netmask → 192.168.1.255): algunos
+// APs filtran el limited broadcast 255.255.255.255 pero entregan el
+// dirigido a la subred — LocalSend hace lo mismo.
+function directedBroadcasts() {
+  const out = []
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const ni of list || []) {
+      if (ni.family !== 'IPv4' || ni.internal) continue
+      const a = ni.address.split('.').map(Number)
+      const m = (ni.netmask || '').split('.').map(Number)
+      if (a.length !== 4 || m.length !== 4 || m.some(Number.isNaN)) continue
+      const b = a.map((o, i) => (o | (~m[i] & 0xff)) & 0xff).join('.')
+      if (!out.includes(b)) out.push(b)
+    }
+  }
+  return out
 }
 
 // Anti-CSRF idéntico al plugin Java: cliente nativo (sin Origin) o origen
@@ -325,7 +350,9 @@ class SyncServer {
       const payload = this._announcement()
       const send = () => {
         if (!this.discSocket) return
-        for (const target of [DISC_GROUP, '255.255.255.255']) {
+        // Multicast + limited broadcast + dirigido por interfaz (la red
+        // puede cambiar: VPN arriba/abajo, WiFi↔Ethernet).
+        for (const target of [DISC_GROUP, '255.255.255.255', ...directedBroadcasts()]) {
           try { this.discSocket.send(payload, DISC_PORT, target) } catch {}
         }
       }
@@ -393,9 +420,10 @@ class SyncServer {
   }
 
   getIpAddress() {
-    const ip = localIp()
+    const ips = localIps()
+    const ip = ips[0] || '127.0.0.1'
     return {
-      ip, port: PORT, url: `http://${ip}:${PORT}`,
+      ip, ips, port: PORT, url: `http://${ip}:${PORT}`,
       deviceId: this.deviceId, alias: this.deviceAlias, fingerprint: this.deviceFingerprint,
     }
   }

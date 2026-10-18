@@ -4,6 +4,11 @@
 
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpPostJson } from './httpClient.js'
+// Import ESTÁTICO del plugin — registra 'SyncServer' al cargar la app. El
+// import dinámico en frío (chunk + __vite__mapDeps) es frágil en WebViews
+// de TV antiguos: si fallaba, getSyncServer() devolvía null → el panel de
+// sync quedaba en "Buscando…" eterno y el dispositivo ni se anunciaba.
+import SyncServerPlugin from '@optopus/sync-server'
 
 let syncServerPromise = null
 
@@ -38,29 +43,22 @@ export function getSyncServer() {
   }
   if (!isAndroidNative()) return Promise.resolve(null)
   if (!syncServerPromise) {
-    syncServerPromise = import('@optopus/sync-server')
-      .then(m => {
-        const p = m.default
-        return {
-          start: () => p.start(),
-          stop: () => p.stop(),
-          getIpAddress: () => p.getIpAddress(),
-          setLocalData: (o) => p.setLocalData(o),
-          getReceivedData: () => p.getReceivedData(),
-          clearReceivedData: () => p.clearReceivedData(),
-          allowDevice: (o) => p.allowDevice(o),
-          getPairedDevices: () => p.getPairedDevices(),
-          forgetDevices: () => p.forgetDevices(),
-          getDeviceInfo: () => p.getDeviceInfo(),
-          getDiscoveredDevices: () => p.getDiscoveredDevices(),
-          answerPair: (o) => p.answerPair(o),
-          addListener: (n, cb) => p.addListener(n, cb),
-        }
-      })
-      .catch(e => {
-        console.warn('[RemotePlay] Plugin no disponible:', e?.message)
-        return null
-      })
+    const p = SyncServerPlugin
+    syncServerPromise = Promise.resolve({
+      start: () => p.start(),
+      stop: () => p.stop(),
+      getIpAddress: () => p.getIpAddress(),
+      setLocalData: (o) => p.setLocalData(o),
+      getReceivedData: () => p.getReceivedData(),
+      clearReceivedData: () => p.clearReceivedData(),
+      allowDevice: (o) => p.allowDevice(o),
+      getPairedDevices: () => p.getPairedDevices(),
+      forgetDevices: () => p.forgetDevices(),
+      getDeviceInfo: () => p.getDeviceInfo(),
+      getDiscoveredDevices: () => p.getDiscoveredDevices(),
+      answerPair: (o) => p.answerPair(o),
+      addListener: (n, cb) => p.addListener(n, cb),
+    })
   }
   return syncServerPromise
 }
@@ -181,15 +179,24 @@ export async function scanDevices(onProgress) {
   await new Promise(r => setTimeout(r, 800))
   const found = new Map()
   for (const d of await getDiscovered()) found.set(d.ip, d)
-  const { ip } = await SyncServer.getIpAddress()
-  // Sin red local (o respuesta inesperada del nativo) devolvemos solo lo
-  // descubierto por UDP — ip.split fallaba con TypeError no capturado.
-  if (!ip || typeof ip !== 'string') return [...found.values()]
-  const prefix = ip.split('.').slice(0, 3).join('.')
+  const info = await SyncServer.getIpAddress()
+  // Barrer TODOS los /24 locales, no solo el primero: en dispositivos
+  // multi-interfaz (TV con Ethernet+WiFi, PC con VPN/Docker) el primer IPv4
+  // puede ser el del adaptador equivocado y el barrido nunca alcanzaba a
+  // los demás OctoStream. 'ips' lo exponen los backends nuevos; 'ip' solo
+  // queda como fallback de versiones viejas.
+  const ips = Array.isArray(info?.ips) && info.ips.length ? info.ips : (info?.ip ? [info.ip] : [])
+  const prefixes = [...new Set(ips
+    .filter(ip => typeof ip === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(ip))
+    .map(ip => ip.split('.').slice(0, 3).join('.')))]
+  if (!prefixes.length) return [...found.values()]
+  const localSet = new Set(ips)
   const hosts = []
-  for (let i = 1; i <= 254; i++) {
-    const h = `${prefix}.${i}`
-    if (h !== ip && !found.has(h)) hosts.push(h)
+  for (const prefix of prefixes) {
+    for (let i = 1; i <= 254; i++) {
+      const h = `${prefix}.${i}`
+      if (!localSet.has(h) && !found.has(h)) hosts.push(h)
+    }
   }
   const BATCH = 32
   for (let i = 0; i < hosts.length; i += BATCH) {
