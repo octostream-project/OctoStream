@@ -410,6 +410,20 @@ public class ExoPlayerPlugin extends Plugin {
     private TextView speedLabel = null;
     private float currentSpeed = 1f;
 
+    // --- Relación de aspecto (modos AspectRatioFrameLayout) ---
+    private TextView aspectLabel = null;
+    private int aspectModeIdx = 0;
+    private static final int[] ASPECT_MODES = {
+            AspectRatioFrameLayout.RESIZE_MODE_FIT,
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+            AspectRatioFrameLayout.RESIZE_MODE_FILL,
+            AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH,
+            AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT};
+    private static final String[] ASPECT_LABELS = {
+            "Ajustar (original)", "Zoom (recortar)", "Llenar (estirar)",
+            "Ancho fijo", "Alto fijo"};
+    private static final String[] ASPECT_SHORT = {"Fit", "Zoom", "Full", "Ancho", "Alto"};
+
     // --- Top bar estilo Stremio (atrás + título + info) ---
     private LinearLayout topBar = null;
     private TextView playerTitleView = null;
@@ -4848,6 +4862,20 @@ public class ExoPlayerPlugin extends Plugin {
         speedLabel.setText(formatSpeed(currentSpeed));
         speedLabel.setOnClickListener(v -> showPlaybackSpeedMenu());
 
+        // Relación de aspecto: persiste entre sesiones — en TV el zoom se
+        // ajusta una vez por dispositivo (overscan) y debe recordarse.
+        aspectLabel = controlsOverlay.findViewById(R.id.octo_aspect);
+        if (aspectLabel != null) {
+            try {
+                aspectModeIdx = Math.max(0, Math.min(ASPECT_MODES.length - 1,
+                        context.getSharedPreferences("octo_player", Context.MODE_PRIVATE)
+                                .getInt("aspect_mode", 0)));
+            } catch (Exception e) { aspectModeIdx = 0; }
+            if (playerView != null) playerView.setResizeMode(ASPECT_MODES[aspectModeIdx]);
+            aspectLabel.setText(ASPECT_SHORT[aspectModeIdx]);
+            aspectLabel.setOnClickListener(v -> showAspectRatioMenu());
+        }
+
         // Cast: botón junto a los demás controles. Usa el framework nativo de
         // Google Cast (MediaRouter + CastContext) para mostrar el selector de
         // dispositivos del sistema. El SDK web (chrome.cast) no funciona en
@@ -4960,6 +4988,7 @@ public class ExoPlayerPlugin extends Plugin {
                 controlsOverlay.findViewById(R.id.octo_subtitle),
                 controlsOverlay.findViewById(R.id.octo_subdelay),
                 speedLabel,
+                aspectLabel,
                 controlsOverlay.findViewById(R.id.octo_settings),
                 octoCastBtn,
                 octoPipBtn,
@@ -6562,13 +6591,14 @@ public class ExoPlayerPlugin extends Plugin {
 
     private void showSettingsMenu() {
         if (player == null) return;
-        String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad"};
+        String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad", "Relación de aspecto"};
         showInPlayerMenu("Ajustes de reproducción", options, -1, (which) -> {
             switch (which) {
                 case 0: showQualityMenu(); break;
                 case 1: showAudioMenu(); break;
                 case 2: showSubtitleMenu(); break;
                 case 3: showPlaybackSpeedMenu(); break;
+                case 4: showAspectRatioMenu(); break;
             }
         });
     }
@@ -7709,6 +7739,18 @@ public class ExoPlayerPlugin extends Plugin {
         }
     }
 
+    private void showAspectRatioMenu() {
+        showInPlayerMenu("Relación de aspecto", ASPECT_LABELS, aspectModeIdx, (selected) -> {
+            aspectModeIdx = selected;
+            if (playerView != null) playerView.setResizeMode(ASPECT_MODES[selected]);
+            if (aspectLabel != null) aspectLabel.setText(ASPECT_SHORT[selected]);
+            try {
+                getContext().getSharedPreferences("octo_player", Context.MODE_PRIVATE)
+                        .edit().putInt("aspect_mode", selected).apply();
+            } catch (Exception ignored) {}
+        });
+    }
+
     private void showPlaybackSpeedMenu() {
         String[] labels = {"0.5x", "0.75x", "Normal (1x)", "1.25x", "1.5x", "2x"};
         float[] speeds = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f};
@@ -8462,6 +8504,7 @@ public class ExoPlayerPlugin extends Plugin {
         volumePopup = null;
         speedLabel = null;
         currentSpeed = 1f;
+        aspectLabel = null;
         // Stop position updates and send final position
         if (positionUpdateRunnable != null) {
             mainHandler.removeCallbacks(positionUpdateRunnable);

@@ -1,18 +1,18 @@
 {
-  "versionCode": 166,
-  "versionName": "1.66",
+  "versionCode": 167,
+  "versionName": "1.67",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-arm64-v8a.apk",
-  "sha256": "60a8631b7602f01538d8fe309e7eca6914df87fab290012e4666f2e2b7ba1444",
-  "notes": "Reparación real en TVs débiles (ARMv7): tunneling habilitado (sync A/V por hardware) y audio offload AC3/EAC3/DTS por HDMI — libera la CPU del decoder ffmpeg por software. Las mitigaciones de 1.65 siguen como red de seguridad.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-arm64-v8a.apk",
+  "sha256": "3c5b332e1b8db61aed55a8d5368f8e03b54026fc33c509559c856fba0825b5b4",
+  "notes": "Botón de relación de aspecto en el reproductor: Ajustar, Zoom, Llenar, Ancho fijo y Alto fijo — con persistencia entre sesiones y acceso también desde el menú de ajustes.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.67/octostream-1.67-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "60a8631b7602f01538d8fe309e7eca6914df87fab290012e4666f2e2b7ba1444",
-    "armeabi-v7a": "b119acbc953cc87c8f9e3c7b76e2e5e79550552bff25d4625831b2bf7c559f8a",
-    "x86_64": "a661b01a1bd3836abe7d23ff549bf31d4083c4dfe43d1f29912520099d075003"
+    "arm64-v8a": "3c5b332e1b8db61aed55a8d5368f8e03b54026fc33c509559c856fba0825b5b4",
+    "armeabi-v7a": "5320a92d27846dd25f85aca070d15caf529b0c4ce91ff277abec2fbe33b25615",
+    "x86_64": "c16d96f83db8f3f060f32d5321cc9a097a0698c44462da02d0e990a4c9eeb91b"
   }
 }

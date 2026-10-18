@@ -341,6 +341,20 @@
             android:clickable="true"
             android:focusable="true" />
 
+        <TextView
+            android:id="@+id/octo_aspect"
+            android:layout_width="64dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:text="Fit"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:contentDescription="Relación de aspecto"
+            android:clickable="true"
+            android:focusable="true" />
+
         <ImageButton
             android:id="@+id/octo_settings"
             android:layout_width="48dp"
