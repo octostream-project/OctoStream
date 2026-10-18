@@ -45,6 +45,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
@@ -4037,6 +4038,21 @@ public class ExoPlayerPlugin extends Plugin {
                         // TV: no activar subtítulos automáticamente. El usuario
                         // puede activarlos únicamente desde el menú propio de ExoPlayer.
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        // Reparación real en SoCs débiles (no solo mitigar con
+                        // 720p): tunneling delega el sync A/V al hardware del
+                        // decoder y el audio offload manda AC3/EAC3/DTS por
+                        // HDMI/spdif sin decodificar por software — el ffmpeg
+                        // ext renderer consume un core entero en ARMv7 y era
+                        // la causa del rebuffering con buffer lleno.
+                        // Si el hardware no los soporta se ignoran solos.
+                        .setTunnelingEnabled(lowEndDevice)
+                        .setAudioOffloadPreferences(new TrackSelectionParameters.AudioOffloadPreferences.Builder()
+                                .setAudioOffloadMode(lowEndDevice
+                                        ? TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+                                        : TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
+                                .setIsGaplessSupportRequired(false)
+                                .setIsSpeedChangeSupportRequired(false)
+                                .build())
                         .build()
         );
 

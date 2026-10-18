@@ -1,18 +1,18 @@
 {
-  "versionCode": 165,
-  "versionName": "1.65",
+  "versionCode": 166,
+  "versionName": "1.66",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.65/octostream-1.65-arm64-v8a.apk",
-  "sha256": "5d1145ea8a3f50d6423301414e31ef60305045ee59e9d381f643223c120f8842",
-  "notes": "Fix parones en TVs antiguas (ARMv7): detector de rebuffer crónico con bypass automático de WARP lento y reducción a 720p en fuentes adaptativas; cap por frame drops del decoder; buffers ajustados en dispositivos con poca RAM.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-arm64-v8a.apk",
+  "sha256": "60a8631b7602f01538d8fe309e7eca6914df87fab290012e4666f2e2b7ba1444",
+  "notes": "Reparación real en TVs débiles (ARMv7): tunneling habilitado (sync A/V por hardware) y audio offload AC3/EAC3/DTS por HDMI — libera la CPU del decoder ffmpeg por software. Las mitigaciones de 1.65 siguen como red de seguridad.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.65/octostream-1.65-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.65/octostream-1.65-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.65/octostream-1.65-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.66/octostream-1.66-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "5d1145ea8a3f50d6423301414e31ef60305045ee59e9d381f643223c120f8842",
-    "armeabi-v7a": "b365b55f98b21b50d52a09aa70d455130b8a8b0907d499e2eef1f028a6d33a9f",
-    "x86_64": "87563ee28b3208cbd7af4f2ae8fe9c5a3feac0411e6e921b1869f5402f752ec7"
+    "arm64-v8a": "60a8631b7602f01538d8fe309e7eca6914df87fab290012e4666f2e2b7ba1444",
+    "armeabi-v7a": "b119acbc953cc87c8f9e3c7b76e2e5e79550552bff25d4625831b2bf7c559f8a",
+    "x86_64": "a661b01a1bd3836abe7d23ff549bf31d4083c4dfe43d1f29912520099d075003"
   }
 }
