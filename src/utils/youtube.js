@@ -149,7 +149,10 @@ export async function resolveYouTubeStream(url, { force = false } = {}) {
     // (Cloudflare WARP). YouTube no está bloqueado por ISP, no lo necesita.
     const direct = true
     if (result.hlsUrl) {
-      return { url: result.hlsUrl, streamType: 'hls', quality: 'Live', title: result.title, subtitles, direct }
+      // isLive solo lo informa el backend de escritorio (yt-dlp); en Android
+      // hlsUrl implica directo — mantener la etiqueta 'Live' en ese caso.
+      const label = result.isLive === false ? 'Auto' : 'Live'
+      return { url: result.hlsUrl, streamType: 'hls', quality: label, title: result.title, subtitles, direct }
     }
     if (result.dashUrl) {
       return { url: result.dashUrl, streamType: 'dash', quality: '', title: result.title, subtitles, direct }

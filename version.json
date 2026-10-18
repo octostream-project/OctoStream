@@ -1,14 +1,14 @@
 {
-  "versionCode": 173,
-  "versionName": "1.73",
+  "versionCode": 174,
+  "versionName": "1.74",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-arm64-v8a.apk",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-arm64-v8a.apk",
   "sha256": "00ff27cf9e8ce800dd50ba7aad0d92e0b6210a9a4b7e9da62586fcb408c10eea",
-  "notes": "mpv embebido con controles estilo Android en Linux/Windows; solo reproductores nativos; TV arreglada; subtítulos OpenSubtitles sin API key; sincronización LAN bidireccional",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.73/octostream-1.73-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.74/octostream-1.74-x86_64.apk"
   },
   "sha256s": {
     "arm64-v8a": "00ff27cf9e8ce800dd50ba7aad0d92e0b6210a9a4b7e9da62586fcb408c10eea",

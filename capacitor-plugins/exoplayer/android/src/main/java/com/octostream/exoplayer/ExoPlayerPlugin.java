@@ -31,6 +31,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -283,6 +284,11 @@ public class ExoPlayerPlugin extends Plugin {
     private LinearLayout episodeListPanel = null;
     private LinearLayout episodeListContainer = null;
     private ImageButton octoEpisodesBtn = null;
+    // Catálogo de temporadas: chips T1/T2… encima de la lista de episodios —
+    // cambio de temporada dentro del player sin salir (estilo Stremio).
+    private JSONArray seasonList = null;   // [{season:1},...] o [1,2,...]
+    private int displayedSeason = 0;       // temporada mostrada en el panel
+    private LinearLayout seasonChipsRow = null;
 
     // Aceleración del seek con D-pad: pulsaciones repetidas en la misma
     // dirección aumentan el salto (10s → 15s → 30s → 60s → 90s → 120s).
@@ -542,7 +548,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Referer", origin + "/");
                                 headers.put("Origin", origin);
                             }
-                            openPlayer(directUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1);
+                            openPlayer(directUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                         return;
                     }
@@ -657,7 +663,7 @@ public class ExoPlayerPlugin extends Plugin {
                 relayKeepAlive = true;
                 try {
                     openPlayer(relayUrl, "hls", false, null, new JSObject(), new JSObject(),
-                            title, mode, null, -1, null, null, 0, 0, null, "", 0, 0, null, -1);
+                            title, mode, null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 } finally {
                     relayKeepAlive = false;
                 }
@@ -1946,7 +1952,7 @@ public class ExoPlayerPlugin extends Plugin {
                             if (cookies != null && !cookies.isEmpty()) {
                                 headers.put("Cookie", cookies);
                             }
-                            openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1);
+                            openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                     }
                 }
@@ -2999,7 +3005,7 @@ public class ExoPlayerPlugin extends Plugin {
             if (cookies != null && !cookies.isEmpty()) {
                 headers.put("Cookie", cookies);
             }
-            openPlayer(url, st, false, null, headers, new JSObject(), title, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1);
+            openPlayer(url, st, false, null, headers, new JSObject(), title, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
         });
     }
 
@@ -3388,6 +3394,9 @@ public class ExoPlayerPlugin extends Plugin {
         // del player (botón de episodios → zap de episodios).
         JSONArray episodes = call.getArray("episodes", null);
         int epIndex = call.getInt("episodeIndex", -1);
+        // Catálogo de temporadas completo: chips T1/T2… en el panel para
+        // cambiar de temporada sin salir del player (evento seasonSelected).
+        JSONArray seasons = call.getArray("seasons", null);
 
         boolean longBuf = call.getBoolean("longBuffering", false);
         // CDNs rápidos/adaptativos (YouTube): arrancar con menos buffer
@@ -3444,7 +3453,7 @@ public class ExoPlayerPlugin extends Plugin {
                 streamLoadingText = loadText != null && !loadText.isEmpty() ? loadText : "Cargando enlace…";
                 openPlayer(url, streamType, direct, licenseUrl, headersJson, drmHeadersJson, title,
                            playerModeForCall, channels, chanIndex, epgNowStr, epgNextStr, epgStart, epgEnd,
-                           logo, imdbId, mediaSeason, mediaEpisode, episodes, epIndex);
+                           logo, imdbId, mediaSeason, mediaEpisode, episodes, epIndex, seasons);
                 if (startTimeSec > 0 && player != null) {
                     pendingSeekMs = (long) (startTimeSec * 1000);
                 }
@@ -3463,7 +3472,7 @@ public class ExoPlayerPlugin extends Plugin {
                             String mode, JSONArray channels, int chanIndex, String epgNowStr, String epgNextStr,
                             long epgStart, long epgEnd, String logo,
                             String imdbId, int season, int episode,
-                            JSONArray episodes, int epIndex) {
+                            JSONArray episodes, int epIndex, JSONArray seasons) {
         Context context = getContext();
         channelLogoFallback = logo;
         mediaImdbId = imdbId != null ? imdbId : "";
@@ -3473,6 +3482,10 @@ public class ExoPlayerPlugin extends Plugin {
         // stream no trae lista (película, YouTube, directo), se limpia.
         episodeList = episodes;
         episodeIndex = epIndex;
+        // Temporadas: el chip seleccionado es el de la temporada en
+        // reproducción (o la de la lista de episodios recibida).
+        seasonList = seasons;
+        displayedSeason = season > 0 ? season : firstEpisodeSeason(episodes);
         externalSubUrl = null;
         pendingSelectExternalSub = false;
         playerMode = mode != null ? mode : "vod";
@@ -3528,6 +3541,10 @@ public class ExoPlayerPlugin extends Plugin {
         String savedEpgNext = epgNext;
         long savedEpgStart = epgNowStart;
         long savedEpgEnd = epgNowEnd;
+        // Mismo motivo que el zap state: seasonList/displayedSeason ya traen
+        // los valores del nuevo play() — closePlayer() los resetearía.
+        JSONArray savedSeasonList = seasonList;
+        int savedDisplayedSeason = displayedSeason;
         if (player != null || dialog != null || resolverWebView != null || embedDialog != null) {
             // Suppress the "closed" event so the JS side doesn't unmount the
             // VideoPlayer when we're about to open a new player for the next
@@ -3542,6 +3559,8 @@ public class ExoPlayerPlugin extends Plugin {
         if (savedChannelName != null && !savedChannelName.isEmpty()) currentChannelName = savedChannelName;
         epgNow = savedEpgNow;
         epgNext = savedEpgNext;
+        seasonList = savedSeasonList;
+        displayedSeason = savedDisplayedSeason;
         epgNowStart = savedEpgStart;
         epgNowEnd = savedEpgEnd;
 
@@ -5582,6 +5601,22 @@ public class ExoPlayerPlugin extends Plugin {
         header.setPadding(dp(16), 0, 0, dp(8));
         panel.addView(header);
 
+        // Chips de temporadas (T1, T2…): tocar un chip emite 'seasonSelected'
+        // y JS recarga la lista vía setEpisodes sin cerrar el player.
+        if (seasonList != null && seasonList.length() > 1) {
+            HorizontalScrollView hs = new HorizontalScrollView(context);
+            hs.setHorizontalScrollBarEnabled(false);
+            hs.setPadding(0, 0, 0, dp(6));
+            seasonChipsRow = new LinearLayout(context);
+            seasonChipsRow.setOrientation(LinearLayout.HORIZONTAL);
+            hs.addView(seasonChipsRow);
+            panel.addView(hs, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            populateSeasonChips(context);
+        } else {
+            seasonChipsRow = null;
+        }
+
         ScrollView scroll = new ScrollView(context);
         scroll.setVerticalScrollBarEnabled(false);
         episodeListContainer = new LinearLayout(context);
@@ -5649,7 +5684,8 @@ public class ExoPlayerPlugin extends Plugin {
 
             final int epSeason = season;
             final int epNumber = epNum;
-            row.setOnClickListener(v -> selectEpisodeAt(idx, epSeason, epNumber));
+            final String epName = name;
+            row.setOnClickListener(v -> selectEpisodeAt(idx, epSeason, epNumber, epName));
             row.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
                     v.setBackgroundColor(0x557B5BF5);
@@ -5660,6 +5696,81 @@ public class ExoPlayerPlugin extends Plugin {
             if (i == episodeIndex) row.setBackgroundColor(0x227B5BF5);
             episodeListContainer.addView(row);
         }
+    }
+
+    // Número de temporada del primer episodio de la lista (cuando no llega
+    // `season` explícito en play()).
+    private int firstEpisodeSeason(JSONArray episodes) {
+        if (episodes == null) return 0;
+        JSONObject ep = episodes.optJSONObject(0);
+        return ep != null ? ep.optInt("season", 0) : 0;
+    }
+
+    // Extrae el número de temporada de un elemento del catálogo: acepta
+    // enteros planos ([1,2,3]) u objetos ({season:n} / {seasonNumber:n}).
+    private int seasonNumberAt(int i) {
+        if (seasonList == null) return i + 1;
+        Object o = seasonList.opt(i);
+        if (o instanceof Number) return ((Number) o).intValue();
+        if (o instanceof JSONObject) {
+            JSONObject so = (JSONObject) o;
+            int n = so.optInt("season", so.optInt("seasonNumber", 0));
+            if (n > 0) return n;
+        }
+        return i + 1;
+    }
+
+    private void populateSeasonChips(Context context) {
+        if (seasonChipsRow == null || seasonList == null) return;
+        seasonChipsRow.removeAllViews();
+        for (int i = 0; i < seasonList.length(); i++) {
+            final int season = seasonNumberAt(i);
+            if (season <= 0) continue;
+            TextView chip = new TextView(context);
+            chip.setText("T" + season);
+            chip.setTextSize(14f);
+            boolean sel = season == displayedSeason;
+            chip.setTextColor(sel ? 0xFF0E1116 : 0xFFB0B0B0);
+            chip.setTypeface(null, android.graphics.Typeface.BOLD);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(14), dp(6), dp(14), dp(6));
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setCornerRadius(dp(14));
+            bg.setColor(sel ? ACCENT_COLOR : 0x337B5BF5);
+            chip.setBackground(bg);
+            chip.setFocusable(true);
+            chip.setClickable(true);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(dp(4), 0, dp(4), 0);
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(v -> onSeasonChip(season));
+            chip.setOnFocusChangeListener((v, hasFocus) ->
+                    v.setAlpha(hasFocus ? 1f : (season == displayedSeason ? 1f : 0.85f)));
+            seasonChipsRow.addView(chip);
+        }
+    }
+
+    // Click en un chip de temporada: pinta "Cargando…" y pide a JS la lista
+    // de esa temporada; JS responde con setEpisodes() sin cerrar el player.
+    private void onSeasonChip(int season) {
+        if (season == displayedSeason) return;
+        displayedSeason = season;
+        episodeIndex = -1; // la lista que llegue no contiene el ep actual
+        populateSeasonChips(getContext());
+        if (episodeListContainer != null) {
+            episodeListContainer.removeAllViews();
+            TextView loading = new TextView(getContext());
+            loading.setText("Cargando temporada " + season + "…");
+            loading.setTextColor(0xFF9E9E9E);
+            loading.setTextSize(14f);
+            loading.setPadding(dp(16), dp(14), dp(16), dp(14));
+            episodeListContainer.addView(loading);
+        }
+        JSObject data = new JSObject();
+        data.put("season", season);
+        notifyListeners("seasonSelected", data);
+        resetControlsTimer();
     }
 
     private boolean isEpisodeListVisible() {
@@ -5684,7 +5795,7 @@ public class ExoPlayerPlugin extends Plugin {
         if (episodeListPanel != null) episodeListPanel.setVisibility(View.GONE);
     }
 
-    private void selectEpisodeAt(int idx, int season, int episode) {
+    private void selectEpisodeAt(int idx, int season, int episode, String name) {
         hideEpisodeList();
         // Aviso transitorio mientras JS resuelve los enlaces del episodio (el
         // episodio actual sigue reproduciéndose). No usar showStreamLoading:
@@ -5694,6 +5805,7 @@ public class ExoPlayerPlugin extends Plugin {
         data.put("index", idx);
         data.put("season", season);
         data.put("episode", episode);
+        data.put("name", name != null ? name : "");
         notifyListeners("episodeSelected", data);
     }
 
@@ -5877,9 +5989,16 @@ public class ExoPlayerPlugin extends Plugin {
     public void setEpisodes(PluginCall call) {
         JSONArray episodes = call.getArray("episodes", null);
         int idx = call.getInt("episodeIndex", -1);
+        // `season`: temporada a la que pertenece la lista (respuesta a
+        // 'seasonSelected'); actualiza el chip activo sin reconstruir panel.
+        int season = call.getInt("season", 0);
         mainHandler.post(() -> {
             episodeList = episodes;
             episodeIndex = idx;
+            if (season > 0) {
+                displayedSeason = season;
+                if (seasonChipsRow != null) populateSeasonChips(getContext());
+            }
             if (octoEpisodesBtn != null) {
                 boolean show = episodeList != null && episodeList.length() > 0
                         && !"live".equals(playerMode);
@@ -6608,7 +6727,10 @@ public class ExoPlayerPlugin extends Plugin {
 
     private void showSettingsMenu() {
         if (player == null) return;
-        String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad", "Relación de aspecto"};
+        // Controles poco frecuentes plegados aquí — la fila principal queda
+        // solo con iconos (estilo Stremio): CC±/1x/Fit/boost viven en este menú.
+        String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad",
+                "Relación de aspecto", "Sincronía de subtítulos", "Amplificador de volumen"};
         showInPlayerMenu("Ajustes de reproducción", options, -1, (which) -> {
             switch (which) {
                 case 0: showQualityMenu(); break;
@@ -6616,7 +6738,27 @@ public class ExoPlayerPlugin extends Plugin {
                 case 2: showSubtitleMenu(); break;
                 case 3: showPlaybackSpeedMenu(); break;
                 case 4: showAspectRatioMenu(); break;
+                case 5: showSubtitleDelayMenu(); break;
+                case 6: showBoostMenu(); break;
             }
+        });
+    }
+
+    // Menú de niveles del amplificador de volumen (el slider popup sigue
+    // existiendo oculto en la fila; aquí se elige nivel directo).
+    private void showBoostMenu() {
+        final int[] vals = {100, 125, 150, 200, 250, 300};
+        String[] labels = new String[vals.length];
+        int sel = 0;
+        for (int i = 0; i < vals.length; i++) {
+            labels[i] = vals[i] + " %";
+            if (Math.abs(boostPercent - vals[i]) < 13) sel = i;
+        }
+        showInPlayerMenu("Amplificador de volumen (" + boostPercent + "%)", labels, sel, which -> {
+            boostPercent = vals[which];
+            applyVolumeBoost();
+            if (boostValueTv != null) boostValueTv.setText(boostPercent + "%");
+            if (boostSeek != null) boostSeek.setProgress(boostPercent - 100);
         });
     }
 
@@ -8480,6 +8622,9 @@ public class ExoPlayerPlugin extends Plugin {
         episodeListPanel = null;
         episodeListContainer = null;
         octoEpisodesBtn = null;
+        seasonList = null;
+        displayedSeason = 0;
+        seasonChipsRow = null;
         seekStreak = 0;
         lastSeekDir = 0;
         swipeGestureDetector = null;

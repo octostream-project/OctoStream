@@ -8,7 +8,7 @@ import {
   isExoPlayerAvailable, isDesktopPlayerAvailable, playEmbed, playRelay,
   resolveEmbed, setChannels, setEpisodes, setNextEpisode,
   setCastRequestListener, setLoadingText, setPlaybackStateListener,
-  isMpvEmbedded, mpvOscState, mpvOscMenu, mpvMouse, mpvKey,
+  isMpvEmbedded, mpvOscState, mpvOscMenu, mpvMouse, mpvKey, mpvPip, mpvClick,
 } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
@@ -41,7 +41,7 @@ function torrentStatusText(ev) {
   return `Descargando torrent… ${pct}%\n${parts.join(' · ')}`
 }
 
-function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null }) {
+function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null, onLoadSeason = null }) {
   const updateProgress = useStore(s => s.updateProgress)
   const [loading, setLoading] = useState(true)
   const [resolvingEmbed, setResolvingEmbed] = useState(false)
@@ -53,6 +53,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   const [mpvEmb, setMpvEmb] = useState(false)
   // Resultados OpenSubtitles servidos al menú del OSC (subpick por índice).
   const oscSubsRef = useRef(null)
+  const pipRef = useRef(false) // PiP de escritorio (ventana mini siempre-encima)
   // Ocultar el cursor tras idle cuando mpv está embebido (como un player).
   const [cursorHidden, setCursorHidden] = useState(false)
   const cursorTimerRef = useRef(null)
@@ -90,9 +91,19 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   // registra una vez al llamar a playStream y debe leer la lista actual.
   const episodesRef = useRef(episodes)
   const onPlayEpisodeRef = useRef(onPlayEpisode)
+  const onLoadSeasonRef = useRef(onLoadSeason)
+  // Lista que está mostrando el panel nativo AHORA MISMO — cambia cuando el
+  // usuario elige otra temporada en los chips (seasonSelected → setEpisodes).
+  const panelEpsRef = useRef({ season: meta?.season ?? 0, eps: episodes || [] })
   useEffect(() => {
     episodesRef.current = episodes
     onPlayEpisodeRef.current = onPlayEpisode
+    onLoadSeasonRef.current = onLoadSeason
+    // Si la prop episodes sigue correspondiendo a la temporada en pantalla,
+    // sincroniza la vista del panel (watched marks, lista reordenada…).
+    if (panelEpsRef.current.season === (meta?.season ?? 0)) {
+      panelEpsRef.current = { season: meta?.season ?? 0, eps: episodes || [] }
+    }
   })
   // Refs de posición — los handlers registrados una vez en init() deben leer
   // el valor actual (progreso al cerrar, tick verde de "visto", seek por
@@ -165,10 +176,19 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     switch (action) {
       case 'close':
       case 'stop':
+        // Restaurar la ventana si estaba en PiP antes de cerrar.
+        if (pipRef.current) { mpvPip(false)?.catch?.(() => {}); pipRef.current = false }
         // stopPlayback → session.close → evento 'closed' → path normal de
         // cierre (progreso final, onClose) sin duplicar lógica.
         stopPlayback().catch(() => {})
         break
+      case 'pip': {
+        // Mini reproductor de escritorio: ventana pequeña siempre-encima con
+        // mpv embebido dentro (equivalente al PiP de Android).
+        const on = !pipRef.current
+        try { pipRef.current = !!(await mpvPip(on)) } catch { /* noop */ }
+        break
+      }
       case 'subs': {
         if (!playArgs?.imdbId) break
         mpvOscMenu({ title: 'Subtítulos — OpenSubtitles', action: 'subpick', items: ['Buscando…'] })
@@ -769,9 +789,42 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         episodeIndex: episodes?.length && meta?.season != null
           ? episodes.findIndex(e => e.season === meta.season && e.episode === meta.episode)
           : -1,
+        // Catálogo de temporadas para los chips del panel (T1/T2…) — solo
+        // números >0; el especial T0 queda fuera igual que en la ficha.
+        seasons: meta?.seasonsList?.length
+          ? meta.seasonsList.map(s => s.seasonNumber).filter(n => n > 0)
+          : null,
         onEpisodeSelect: (ev) => {
-          const ep = episodesRef.current?.[ev.index]
-          if (ep && onPlayEpisodeRef.current) onPlayEpisodeRef.current(ep)
+          // El panel puede estar mostrando otra temporada — buscar el ep por
+          // índice en la lista QUE EL PANEL tiene, no en la prop episodes.
+          const panel = panelEpsRef.current
+          const list = panel?.season === ev.season ? panel.eps : null
+          const ep = list?.[ev.index]
+            || { season: ev.season, episode: ev.episode, name: ev.name || `Episodio ${ev.episode}` }
+          if (onPlayEpisodeRef.current) onPlayEpisodeRef.current(ep)
+        },
+        onSeasonSelect: async (ev) => {
+          const loader = onLoadSeasonRef.current
+          if (!loader || !ev?.season) return
+          try {
+            const eps = await loader(ev.season)
+            if (!eps?.length || closedRef.current) return
+            panelEpsRef.current = { season: ev.season, eps }
+            // ¿Contiene el episodio que suena? (volver a la temporada actual)
+            const idx = eps.findIndex(e => e.season === meta?.season && e.episode === meta?.episode)
+            setEpisodes({
+              season: ev.season,
+              episodeIndex: idx,
+              episodes: eps.map(e => ({
+                name: e.name || `Episodio ${e.episode}`,
+                season: e.season ?? ev.season,
+                episode: e.episode ?? 0,
+                watched: !!e.watched,
+              })),
+            })
+          } catch (e) {
+            console.warn('[Player] season load failed:', e?.message)
+          }
         },
       }
       const onPlaybackState = (state) => {
@@ -861,6 +914,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           // the episode finished and the next is being loaded.
           console.log('[Player] closed event received, closedRef=', closedRef.current, 'endedReceived=', endedRef.current)
           setMpvEmb(false)
+          if (pipRef.current) { mpvPip(false)?.catch?.(() => {}); pipRef.current = false }
           if (!closedRef.current && !endedRef.current) {
             const sinceOpen = Date.now() - openedAtRef.current
             if (sinceOpen < 1000) {
@@ -1023,10 +1077,12 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   }, [channels, channelIndex, meta?.type, meta?.name, meta?.epgNow, meta?.epgNext, meta?.epgStart, meta?.epgEnd, title])
 
   // Empujar la lista de episodios al player nativo si llega/cambia después de
-  // empezar la reproducción (mismo patrón que setChannels).
+  // empezar la reproducción (mismo patrón que setChannels). `season` mantiene
+  // el chip correcto si el usuario estaba navegando otra temporada del panel.
   useEffect(() => {
     if (closedRef.current || !episodes?.length) return
     setEpisodes({
+      season: meta?.season ?? 0,
       episodes: episodes.map(e => ({
         name: e.name || `Episodio ${e.episode}`,
         season: e.season ?? 1,
@@ -1469,7 +1525,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 2500)
           }}
           onMouseDown={(e) => {
-            if (e.button === 0) mpvKey('MOUSE_BTN0')
+            // Click con coordenadas (clickat): mouse+keypress por separado
+            // llegaban desincronizados y el OSC hit-testeaba la posición vieja.
+            if (e.button === 0) mpvClick(e.clientX, e.clientY)
             else if (e.button === 2) mpvKey('MOUSE_BTN2')
           }}
           onContextMenu={(e) => e.preventDefault()}

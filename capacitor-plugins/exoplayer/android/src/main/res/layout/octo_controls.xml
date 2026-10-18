@@ -263,12 +263,16 @@
             android:layout_width="12dp"
             android:layout_height="1dp" />
 
+        <!-- Controles secundarios plegados al menú de ajustes (estilo
+             Stremio: fila solo de iconos). visibility="gone" los saca de la
+             fila y del foco D-pad pero el wiring Java sigue funcionando. -->
         <ImageButton
             android:id="@+id/octo_boost"
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:background="@android:color/transparent"
             android:contentDescription="Amplificador de volumen"
+            android:visibility="gone"
             android:src="@drawable/ic_volume_boost" />
 
         <LinearLayout
@@ -324,6 +328,7 @@
             android:textSize="14sp"
             android:textStyle="bold"
             android:contentDescription="Sincronía de subtítulos"
+            android:visibility="gone"
             android:clickable="true"
             android:focusable="true" />
 
@@ -338,6 +343,7 @@
             android:textSize="15sp"
             android:textStyle="bold"
             android:contentDescription="Velocidad de reproducción"
+            android:visibility="gone"
             android:clickable="true"
             android:focusable="true" />
 
@@ -352,6 +358,7 @@
             android:textSize="13sp"
             android:textStyle="bold"
             android:contentDescription="Relación de aspecto"
+            android:visibility="gone"
             android:clickable="true"
             android:focusable="true" />
 

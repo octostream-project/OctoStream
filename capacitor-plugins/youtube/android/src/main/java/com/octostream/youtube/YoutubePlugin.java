@@ -301,8 +301,11 @@ public class YoutubePlugin extends Plugin {
                 getDownloader();
 
                 StreamingService youtube = ServiceList.YouTube;
-                // Use search with video filter to only get video results
-                SearchExtractor extractor = youtube.getSearchExtractor(query);
+                // Filtro "videos": sin él cada página trae shelves/canales/
+                // playlists que pageResult descarta → páginas vacías y el
+                // "Cargar más" parecía no hacer nada (verificado en JVM: los
+                // directos siguen entrando con este filtro).
+                SearchExtractor extractor = youtube.getSearchExtractor(query, java.util.Collections.singletonList("videos"), "");
                 extractor.fetchPage();
 
                 ListExtractor.InfoItemsPage<InfoItem> page = extractor.getInitialPage();
@@ -332,7 +335,9 @@ public class YoutubePlugin extends Plugin {
                 getDownloader();
 
                 StreamingService youtube = ServiceList.YouTube;
-                SearchExtractor extractor = youtube.getSearchExtractor(query);
+                // Mismo filtro "videos" que search(): la continuación ya va
+                // codificada en el token, pero el extractor debe ser coherente.
+                SearchExtractor extractor = youtube.getSearchExtractor(query, java.util.Collections.singletonList("videos"), "");
                 org.schabi.newpipe.extractor.Page nextPage = pageFromJson(nextPageData);
                 if (nextPage == null) {
                     call.reject("invalid nextPage");

@@ -360,8 +360,6 @@ Youtube.init({
       return agentFor(u, u.protocol === 'https:')
     } catch { return undefined }
   },
-  getWarpProxyUrl: () => aetherState.connected
-    ? `socks5h://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}` : null,
 })
 
 // ─── Local stream proxy ────────────────────────────────────────────────────
@@ -1075,6 +1073,26 @@ ipcMain.handle('win:fullscreen-state', (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false
 })
 
+// Mini reproductor (PiP): ventana pequeña siempre-encima mientras mpv sigue
+// embebido en ella — equivalente al PiP del player Android.
+let pipSavedBounds = null
+ipcMain.handle('win:pip', (event, on) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+  if (on) {
+    if (!pipSavedBounds && !win.isFullScreen()) pipSavedBounds = win.getBounds()
+    if (win.isFullScreen()) win.setFullScreen(false)
+    win.setAlwaysOnTop(true)
+    const sw = 480, sh = 290
+    const area = pipSavedBounds || win.getBounds()
+    win.setBounds({ x: area.x + area.width - sw - 16, y: area.y + area.height - sh - 16, width: sw, height: sh })
+    return true
+  }
+  win.setAlwaysOnTop(false)
+  if (pipSavedBounds) { win.setBounds(pipSavedBounds); pipSavedBounds = null }
+  return false
+})
+
 // IPC handler: log messages from renderer to terminal
 ipcMain.on('renderer-log', (_event, msg) => {
   console.log('[Renderer]', msg)
@@ -1216,6 +1234,10 @@ ipcMain.handle('player:sub-off', () => { getMpv()?.subOff() })
 ipcMain.handle('player:set-channels', (_e, arg = {}) => { getMpv()?.setChannels(arg.channels, arg.channelIndex) })
 // Input y estado para el OSC cuando mpv está embebido en la ventana.
 ipcMain.handle('player:mouse', (_e, arg = {}) => { getMpv()?.mouse(arg.x, arg.y) })
+// Click con coordenadas: el par `mouse x y` + `keypress` puede llegar al OSC
+// con la posición del evento anterior (colas de input distintas). `clickat`
+// lleva las coordenadas en el mismo mensaje — hit-testing determinista.
+ipcMain.handle('player:click', (_e, arg = {}) => { getMpv()?.oscPush('clickat', { x: arg.x, y: arg.y }) })
 ipcMain.handle('player:key', (_e, arg = {}) => { getMpv()?.key(arg.name) })
 ipcMain.handle('player:osc-state', (_e, arg = {}) => { getMpv()?.oscPush('state', arg) })
 ipcMain.handle('player:osc-menu', (_e, arg = {}) => { getMpv()?.oscPush('menu', arg) })
@@ -1391,10 +1413,23 @@ function createWindow() {
     event.preventDefault()
   })
 
+  // Origen real de cada petición, capturado ANTES de reescribirlo abajo.
+  // El ACAO que valida Chromium es contra el origen del iniciador
+  // (localhost en dev, loopback del proxy en embeds), no contra el header
+  // Origin que inyectamos para el servidor — por eso hay que recordarlo.
+  const corsOriginByReq = new Map()
+  const rememberOrigin = (id, headers) => {
+    const o = headers['Origin'] || headers['origin'] || ''
+    if (!o) return
+    corsOriginByReq.set(id, o)
+    if (corsOriginByReq.size > 500) corsOriginByReq.delete(corsOriginByReq.keys().next().value)
+  }
+
   // Intercept requests to inject correct Origin/Referer and bypass CORS
   win.webContents.session.webRequest.onBeforeSendHeaders((details, cb) => {
     const url = details.url || ''
     const headers = { ...details.requestHeaders }
+    rememberOrigin(details.id, headers)
     // Inject correct Origin/Referer for known providers
     if (/atresplayer\.com|atresmedia\.com|atres-live/i.test(url)) {
       headers['Origin'] = 'https://www.atresplayer.com'
@@ -1459,14 +1494,17 @@ function createWindow() {
         }
       }
     }
-    // For Mediaset/DAI CDN streams (rawvod, link.api), preserve specific origin
-    // for cookies (hdntl). For API calls (services-ott-prod-fe), use * so the
-    // renderer can make POST requests (login, playback check) without CORS errors.
+    // For Mediaset/DAI CDN streams (rawvod, link.api, doubleclick), echo the
+    // REAL request origin so credentialed fetches (hdntl cookies) also pass.
+    // El origen fijo mediasetinfinity.es rompía las llamadas propias de la app
+    // (p.ej. el POST DAI a pubads.g.doubleclick.net desde localhost → CORS).
+    const reqOrigin = corsOriginByReq.get(details.id)
+    corsOriginByReq.delete(details.id)
     if (/rawvod\.mediaset|link\.api\.eu\.theplatform|dai\.google\.com|doubleclick\.net/i.test(url)) {
-      headers['Access-Control-Allow-Origin'] = ['https://www.mediasetinfinity.es']
+      headers['Access-Control-Allow-Origin'] = [reqOrigin || 'https://www.mediasetinfinity.es']
       headers['Access-Control-Allow-Credentials'] = ['true']
     } else {
-      headers['Access-Control-Allow-Origin'] = ['*']
+      headers['Access-Control-Allow-Origin'] = [reqOrigin || '*']
     }
     headers['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS']
     headers['Access-Control-Allow-Headers'] = ['*']

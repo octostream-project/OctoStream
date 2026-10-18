@@ -4,7 +4,7 @@ import { Search, Youtube, Clock, Eye, X, History, Filter, ArrowUpDown, Heart } f
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
 import { searchYouTubeFull, resolveYouTubeStream, prefetchYouTubeStream, suggestYouTube, dedupeYouTubeItems, getChannelInfo } from '../utils/youtube.js'
-import { isAndroidNative } from '../utils/platform.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { useStore } from '../store/useStore.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
@@ -253,20 +253,30 @@ export default function YouTube() {
 
     setLoadingMore(true)
     try {
-      const res = await searchYouTubeFull(q, nextPage)
-      if (res === null || res.error) {
-        // Fallo del plugin/extractor: conservar nextPage para poder reintentar.
-        setError(`No se pudo cargar la página ${page + 1}${res?.error ? `: ${res.error}` : ''}`)
-      } else if (res.items.length > 0) {
-        setError(null)
-        setResults(prev => dedupeYouTubeItems([...prev, ...res.items]))
-        setNextPage(res.nextPage)
-        setPage(p => p + 1)
-      } else {
-        // Página vacía: puede haber más continuaciones (YouTube a veces
-        // devuelve páginas solo con items no-vídeo que el extractor filtra).
-        setNextPage(res.nextPage)
+      // YouTube a veces devuelve continuaciones vacías o solo con items
+      // no-vídeo (shelves, canales) que el extractor filtra → items=0.
+      // Se consumen hasta 4 continuaciones seguidas antes de rendirse;
+      // sin el bucle un solo salto vacío dejaba el botón sin efecto.
+      let np = nextPage
+      for (let hop = 0; hop < 4 && np; hop++) {
+        const res = await searchYouTubeFull(q, np)
+        if (res === null || res.error) {
+          // Fallo del plugin/extractor: conservar nextPage para poder reintentar.
+          setError(`No se pudo cargar la página ${page + 1}${res?.error ? `: ${res.error}` : ''}`)
+          return
+        }
+        if (res.items.length > 0) {
+          setError(null)
+          setResults(prev => dedupeYouTubeItems([...prev, ...res.items]))
+          setNextPage(res.nextPage)
+          setPage(p => p + 1)
+          return
+        }
+        np = res.nextPage
       }
+      // Continuaciones agotadas o todas vacías
+      setNextPage(np)
+      if (!np) setError(null)
     } finally {
       setLoadingMore(false)
     }
@@ -315,7 +325,9 @@ export default function YouTube() {
       setResolving(null)
     }
   }
-  handlePlayVideoRef.current = handlePlayVideo
+  useEffect(() => {
+    handlePlayVideoRef.current = handlePlayVideo
+  })
 
   // Apply filters and sort to search results
   const filteredResults = useMemo(() => {
@@ -327,13 +339,15 @@ export default function YouTube() {
       .sort(sortFn)
   }, [results, durationFilter, sortBy])
 
-  if (!isAndroidNative()) {
+  // En desktop la superficie la da yt-dlp por IPC (electron/youtube.cjs) —
+  // misma API que el plugin Android. Solo la web pura no tiene extractor.
+  if (!isAndroidNative() && !isElectron()) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8 text-center">
         <Youtube size={48} className="text-red-500" />
         <h2 className="text-xl font-bold text-white">YouTube</h2>
         <p className="text-dark-400 text-sm max-w-md">
-          La búsqueda y reproducción de YouTube está disponible solo en Android (usa NewPipeExtractor).
+          La búsqueda y reproducción de YouTube está disponible en la app (Android y escritorio).
         </p>
       </div>
     )

@@ -93,6 +93,7 @@ describe('playStream', () => {
       subtitles: null,
       episodes: null,
       episodeIndex: -1,
+      seasons: null,
       longBuffering: false,
       fastStart: false,
       loadingText: null,

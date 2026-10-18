@@ -733,6 +733,50 @@ export default function Details() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, location.state?.autoplay, historyItem, savedProgress, savedTime])
 
+  // Carga pura de episodios de una temporada (caché → provider → TMDB →
+  // placeholders por episodeCount). Devuelve el array sin tocar la ficha —
+  // la usan handleSelectSeason y el cambio de temporada desde el player.
+  const fetchSeasonEpisodes = async (seasonNumber) => {
+    const cacheKey = `${meta.id}-s${seasonNumber}`
+    if (episodesCacheRef.current[cacheKey]) return episodesCacheRef.current[cacheKey]
+    const providerEpisodes = (Array.isArray(meta.episodes) ? meta.episodes : [])
+      .filter(ep => Number(ep.season || 1) === Number(seasonNumber))
+    if (providerEpisodes.length > 0) {
+      episodesCacheRef.current[cacheKey] = providerEpisodes
+      return providerEpisodes
+    }
+    let episodes = null
+    try {
+      episodes = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber })
+    } catch (e) {
+      console.warn('[Details] Failed to load season episodes:', e?.message)
+    }
+    if (!episodes || episodes.length === 0) {
+      const count = meta.seasonsList?.find(s => s.seasonNumber === seasonNumber)?.episodeCount || 0
+      episodes = []
+      for (let i = 1; i <= count; i++) {
+        episodes.push({
+          id: `${meta.id}-s${seasonNumber}e${i}`,
+          name: `Episodio ${i}`,
+          season: seasonNumber,
+          episode: i,
+          description: '',
+          poster: null,
+        })
+      }
+    }
+    episodesCacheRef.current[cacheKey] = episodes
+    return episodes
+  }
+
+  // Chips de temporada del reproductor nativo ('seasonSelected'): carga los
+  // episodios de esa temporada sin tocar la ficha y los devuelve con su
+  // marca de "visto" — VideoPlayer los empuja al panel con setEpisodes().
+  const handleLoadSeasonForPlayer = async (seasonNumber) => {
+    const eps = await fetchSeasonEpisodes(seasonNumber)
+    return eps?.map(ep => ({ ...ep, watched: isEpWatched(ep.season, ep.episode) }))
+  }
+
   // Load episodes for a season from TMDB (con caché y cancelación)
   const handleSelectSeason = async (season) => {
     setSelectedSeason(season)
@@ -819,6 +863,17 @@ export default function Details() {
     // los streams ya llegaran (el timeout resuelve con finalStreams).
     const stale = () => episodeLoadIdRef.current !== loadId
     setSelectedEpisode(ep)
+    // Episodio elegido desde el panel del player en OTRA temporada: la ficha
+    // debe seguir la temporada del episodio que suena o episodeList/
+    // nextEpisode/apuntan a la temporada anterior y el autoplay se rompe.
+    // fetchSeasonEpisodes ya tiene la lista en caché (el panel la cargó).
+    if (ep.season != null && Number(selectedEpisode?.season) !== Number(ep.season)) {
+      fetchSeasonEpisodes(ep.season).then(eps => {
+        setSeasonEpisodes(eps || [])
+        const sMeta = meta.seasonsList?.find(s => s.seasonNumber === ep.season)
+        if (sMeta) setSelectedSeason(sMeta)
+      })
+    }
     setEpisodeLoading(true)
     setEpisodeError(null)
     setEpisodeStreams([])
@@ -1220,6 +1275,9 @@ export default function Details() {
           onZapChannel={handleZapChannel}
           nextEpisode={nextEpisode}
           episodes={playerEpisodes}
+          // Chips T1/T2… del panel nativo: cambio de temporada sin salir del
+          // player — carga los episodios y los empuja con setEpisodes().
+          onLoadSeason={handleLoadSeasonForPlayer}
           onPlayEpisode={(ep) => handlePlayEpisode(ep, { forcePlay: true })}
           onPlayNext={onPlayNext}
           onClose={() => {

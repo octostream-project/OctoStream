@@ -23,6 +23,7 @@ export interface ResolveResult {
   dashUrl?: string
   hlsUrl?: string
   subtitles?: SubtitleTrack[]
+  isLive?: boolean
 }
 
 export interface SearchOptions {

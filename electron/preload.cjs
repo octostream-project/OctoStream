@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('octostream', {
     // Input embebido (--wid): el hijo nativo no recibe eventos, el renderer
     // los reenvía. oscState/oscMenu empujan UI state al OSC estilo Android.
     mouse: (x, y) => ipcRenderer.invoke('player:mouse', { x, y }),
+    click: (x, y) => ipcRenderer.invoke('player:click', { x, y }),
     key: (name) => ipcRenderer.invoke('player:key', { name }),
     oscState: (arg) => ipcRenderer.invoke('player:osc-state', arg),
     oscMenu: (arg) => ipcRenderer.invoke('player:osc-menu', arg),
@@ -55,6 +56,8 @@ contextBridge.exposeInMainWorld('octostream', {
   // Fullscreen de la ventana (mismo comportamiento que el player Android).
   setFullscreen: (on) => ipcRenderer.invoke('win:fullscreen', on),
   isFullscreen: () => ipcRenderer.invoke('win:fullscreen-state'),
+  // Mini reproductor PiP de escritorio (ventana pequeña siempre-encima).
+  pipWindow: (on) => ipcRenderer.invoke('win:pip', on),
   onFullscreenChange: (cb) => {
     const wrapped = (_e, on) => cb(on)
     ipcRenderer.on('win:fullscreen-changed', wrapped)

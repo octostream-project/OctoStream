@@ -299,6 +299,7 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - Android usa NewPipeExtractor vía el plugin `@octostream/youtube`; en
   Linux/Windows el equivalente es **yt-dlp** empaquetado
   (`electron/youtube.cjs` + IPC `youtube:*` + `window.octostream.youtube`).
+  La página `YouTube.jsx` se habilita con `isAndroidNative() || isElectron()`.
 - Binarios: `scripts/fetch-ytdlp.mjs` → `build/ytdlp/<platform>-<arch>/`
   (verifica SHA2-256SUMS de la release) → `extraResources` →
   `resources/ytdlp/...`.
@@ -307,8 +308,12 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   a instancias Invidious cuando YouTube devuelve bot-check ("Sign in to
   confirm you're not a bot"). Commit fijado + sha256 de los .py verificados.
 - `googlevideo.com` está en el bypass de WARP (como `direct:true` en
-  Android): por el túnel devuelve 429.
-- Con WARP activo, yt-dlp sale por `--proxy socks5h://127.0.0.1:1819`.
+  Android): por el túnel devuelve 429. **yt-dlp tampoco va por WARP**: las
+  URLs firmadas llevan el `ip=` de quien resuelve — resolver por el túnel y
+  reproducir directo rompe por IP mismatch (igual que Atresmedia).
+- VOD de YouTube ya casi nunca da formatos progresivos — `resolve()` usa el
+  `manifest_url` HLS (master hls_variant con A+V+subs); el primer formato
+  `m3u8` puede ser solo audio (itag 233/234), nunca elegirlo a ciegas.
 
 ## Posibles próximos pasos
 

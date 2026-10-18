@@ -352,11 +352,9 @@ class MpvSession {
       }
     }, POSITION_EVENT_MS)
     this.posTimer.unref?.()
-    // Keybinds de zapping (PGUP/PGDWN: saltan a canal previo/siguiente) y
     // Esc → quit (paridad con el botón atrás de Android: cierra el player
     // y vuelve a la ficha — el evento 'closed' dispara onClose en la app).
-    await this._cmd('keybind', 'PGUP', 'script-message octo-zap -1').catch(() => {})
-    await this._cmd('keybind', 'PGDWN', 'script-message octo-zap 1').catch(() => {})
+    // El zapping PGUP/PGDWN lo hace el OSC (octo-osc.lua) — no duplicar.
     await this._cmd('keybind', 'ESC', 'quit').catch(() => {})
     await this._applyOpts(opts)
     this._loadUrl(opts)

@@ -8,6 +8,7 @@ import { sanitizeHttpUrl } from './sanitizeUrl.js'
 let stateListener = null
 let zapListener = null
 let episodeSelectListener = null
+let seasonSelectListener = null
 
 // ─── Reproductor nativo de escritorio (mpv por IPC, electron/mpv.cjs) ───────
 // Misma superficie que el plugin ExoPlayer: playStream/switchChannel/pause/
@@ -32,7 +33,9 @@ export function isMpvEmbedded() { return mpvActive && mpvEmbedded }
 /** Empuja estado/menú al OSC de mpv embebido. */
 export function mpvOscState(obj) { mpvApi()?.oscState?.(obj) }
 export function mpvOscMenu(obj) { mpvApi()?.oscMenu?.(obj) }
+export function mpvPip(on) { return window.octostream?.pipWindow?.(on) }
 export function mpvMouse(x, y) { mpvApi()?.mouse?.(x, y) }
+export function mpvClick(x, y) { mpvApi()?.click?.(x, y) }
 export function mpvKey(name) { mpvApi()?.key?.(name) }
 
 // The native Cast button delegates to the existing web Cast implementation.
@@ -53,6 +56,9 @@ if (isAndroidNative()) {
   })
   ExoPlayer.addListener('episodeSelected', (event) => {
     if (episodeSelectListener) episodeSelectListener(event)
+  })
+  ExoPlayer.addListener('seasonSelected', (event) => {
+    if (seasonSelectListener) seasonSelectListener(event)
   })
   ExoPlayer.addListener('castRequested', (event) => {
     console.info('[ExoPlayer] castRequested received', event?.title || '')
@@ -121,6 +127,7 @@ export async function playStream(options, onStateChange) {
   stateListener = onStateChange
   zapListener = options.onZap || null
   episodeSelectListener = options.onEpisodeSelect || null
+  seasonSelectListener = options.onSeasonSelect || null
   return ExoPlayer.play({
     url,
     streamType: options.streamType || 'hls',
@@ -144,6 +151,7 @@ export async function playStream(options, onStateChange) {
     subtitles: options.subtitles || null,
     episodes: options.episodes || null,
     episodeIndex: options.episodeIndex ?? -1,
+    seasons: options.seasons || null,
     longBuffering: options.longBuffering === true,
     fastStart: options.fastStart === true,
     loadingText: options.loadingText || null,
@@ -204,13 +212,15 @@ export async function setChannels(options) {
 
 /**
  * Update the season episode list in the native player without reopening it.
- * Powers the "episodes" side panel (episode zapping for series).
+ * Powers the "episodes" side panel (episode zapping for series) and answers
+ * 'seasonSelected' — `season` tells the panel which chip the list belongs to.
  */
 export async function setEpisodes(options) {
   if (!isAndroidNative()) return
   return ExoPlayer.setEpisodes({
     episodes: options.episodes || null,
     episodeIndex: options.episodeIndex ?? -1,
+    season: options.season || 0,
   })
 }
 

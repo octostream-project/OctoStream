@@ -32,6 +32,9 @@ export interface PlayOptions {
   episodes?: Array<{ name?: string; season?: number; episode?: number; watched?: boolean }>
   /** Índice del episodio en reproducción dentro de `episodes` */
   episodeIndex?: number
+  /** Series: catálogo de temporadas — chips T1/T2… en el panel; tocar un
+   *  chip emite 'seasonSelected' y JS recarga episodios vía setEpisodes */
+  seasons?: Array<number | { season?: number; seasonNumber?: number }>
   /** Fuentes lentas (P2P/torrent): amplía el timeout de buffering a 90s y los reintentos */
   longBuffering?: boolean
   /** Texto de la pantalla de carga inicial (por defecto "Cargando enlace…") */
@@ -68,11 +71,21 @@ export interface EpisodeSelectedEvent {
   index: number
   season: number
   episode: number
+  /** Título del episodio (permite construir el objeto ep si JS cambió de lista) */
+  name?: string
+}
+
+export interface SeasonSelectedEvent {
+  /** Temporada elegida en los chips del panel — JS carga sus episodios
+   *  y responde con setEpisodes({episodes, season}) sin cerrar el player */
+  season: number
 }
 
 export interface SetEpisodesOptions {
   episodes?: Array<{ name?: string; season?: number; episode?: number; watched?: boolean }>
   episodeIndex?: number
+  /** Temporada a la que pertenece la lista (actualiza el chip activo) */
+  season?: number
 }
 
 export interface CastRequestedEvent {
@@ -212,6 +225,9 @@ export interface ExoPlayerPlugin {
     remove: () => void
   }> | { remove: () => void }
   addListener(eventName: 'episodeSelected', listener: (event: EpisodeSelectedEvent) => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  addListener(eventName: 'seasonSelected', listener: (event: SeasonSelectedEvent) => void): Promise<{
     remove: () => void
   }> | { remove: () => void }
   addListener(eventName: 'castRequested', listener: (event: CastRequestedEvent) => void): Promise<{
