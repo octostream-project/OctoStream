@@ -127,7 +127,9 @@ export async function playStream(options, onStateChange) {
   if (!url) throw new Error('URL de stream no válida')
   // Si el túnel está activado pero aún subiendo, el socket fail-open saldría
   // por la física — con links debrid IP-bound eso rompe la reproducción.
-  if (options.bypassVpn !== true) await waitForVpnTunnel()
+  if (options.bypassVpn !== true) {
+    await waitForVpnTunnel(30000, { required: options.requireVpn === true })
+  }
   stateListener = onStateChange
   zapListener = options.onZap || null
   episodeSelectListener = options.onEpisodeSelect || null
@@ -182,7 +184,9 @@ export async function switchChannel(options) {
   }
   const url = sanitizeHttpUrl(options.url)
   if (!url) return
-  if (options.bypassVpn !== true) await waitForVpnTunnel()
+  if (options.bypassVpn !== true) {
+    await waitForVpnTunnel(30000, { required: options.requireVpn === true })
+  }
   return ExoPlayer.switchChannel({
     url,
     streamType: options.streamType || 'hls',

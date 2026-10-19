@@ -17,27 +17,31 @@ const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.ne
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
-// Gate fail-closed: con el túnel Riseup activado pero aún sin CONNECTED
-// (arranque o re-connect), un request normal saldría por la WiFi física —
-// los unlock IP-bound (AllDebrid) quedarían ligados a la IP real y el CDN
-// rechazaría el stream por el túnel. Se espera al CONNECTED (máx ~12s).
-// Si el túnel nunca llega, se sigue por la física tras el timeout y no se
-// vuelve a esperar durante 60s para no colgar cada request con VPN rota.
-let vpnGateGaveUpAt = 0
-export async function waitForVpnTunnel(maxMs = 12000) {
+// Gate fail-closed: cuando Riseup está configurado para auto-conectar, no
+// permitimos que requests IP-bound escapen por la red física antes del CONNECTED.
+export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {}) {
   if (!isAndroidNative()) return
-  if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
-  if (Date.now() - vpnGateGaveUpAt < 60000) return
-  try {
-    const t0 = Date.now()
-    while (Date.now() - t0 < maxMs) {
-      const st = await CloudProxy.riseupTunnelStatus()
-      if (!st || st.connected) return
-      if (!st.connecting) return // servicio parado: no espera
-      await new Promise(r => setTimeout(r, 400))
+  if (!required) {
+    try {
+      if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
+    } catch { return }
+  }
+  const deadline = Date.now() + maxMs
+  while (Date.now() < deadline) {
+    let st
+    try {
+      st = await CloudProxy.riseupTunnelStatus()
+    } catch {
+      const error = new Error('Riseup VPN status unavailable; request blocked to prevent IP leak')
+      error.code = 'VPN_NOT_CONNECTED'
+      throw error
     }
-    vpnGateGaveUpAt = Date.now()
-  } catch { /* sin status → sin gate */ }
+    if (st?.connected) return
+    await new Promise(r => setTimeout(r, 400))
+  }
+  const error = new Error('Riseup VPN is not connected; request blocked to prevent IP leak')
+  error.code = 'VPN_NOT_CONNECTED'
+  throw error
 }
 async function nativeRequest(opts) {
   if (opts.bypassVpn || isGeoHost(opts.url)) {
@@ -89,7 +93,7 @@ export function shortSignal(signal, ms) {
  * @param {Object} headers
  * @param {AbortSignal} [signal] - optional abort signal (web/fetch only)
  */
-export async function httpGetJson(url, headers = {}, signal, bypassVpn = false) {
+export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, strictNative = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     const isGz = url.endsWith('.gz')
@@ -109,6 +113,7 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false) 
         throw err
       }
     } catch (e) {
+      if (strictNative || e?.code === 'VPN_NOT_CONNECTED') throw e
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) {

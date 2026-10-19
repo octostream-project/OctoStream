@@ -14,6 +14,7 @@
 
 import { getItemSync, removeItemSync } from '../../utils/storage.js'
 import { pickTorrentEntries } from '../../utils/torrentPick.js'
+import { httpGetJson, httpPostJson, waitForVpnTunnel } from '../../utils/httpClient.js'
 
 const API_BASE = 'https://api.alldebrid.com/v4'
 // /v4/magnet/status está discontinuado: el estado de magnets vive en v4.1.
@@ -23,12 +24,12 @@ const AGENT = 'octostream_stream'
 // Solo host para logs: las URLs de unlock llevan token en el query.
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
-// Timeout por defecto: sin él un endpoint colgado bloquea la resolución
-// (el withTimeout del manager abandona la espera pero el fetch sigue vivo).
-const fetchT = (url, opts = {}) => fetch(url, {
-  ...opts,
-  signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
-})
+// All AllDebrid API calls require the Riseup tunnel on Android: the provider
+// records the source IP and binds unlocked links to it.
+async function apiGetJson(url) {
+  await waitForVpnTunnel(30000, { required: true })
+  return httpGetJson(url, {}, undefined, false, true)
+}
 
 // RealDebrid fue eliminado del proyecto: limpia el token persistido de
 // instalaciones viejas para que no quede credencial huérfana en el dispositivo.
@@ -67,9 +68,7 @@ export function isAlldebridEnabled() {
 export async function getPin() {
   try {
     const url = `${API_BASE}/pin/get?agent=${AGENT}`
-    const res = await fetchT(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await apiGetJson(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       pin: data.data.pin,
@@ -87,9 +86,7 @@ export async function getPin() {
 export async function checkPin(pin, check) {
   try {
     const url = `${API_BASE}/pin/check?agent=${AGENT}&pin=${encodeURIComponent(pin)}&check=${encodeURIComponent(check)}`
-    const res = await fetchT(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await apiGetJson(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       activated: data.data.activated === true,
@@ -120,13 +117,22 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
   const key = getAlldebridApiKey()
   if (!key) throw new Error('AllDebrid API key not configured')
 
+  // AllDebrid binds unlocked URLs to the request IP. Never send unlock/status
+  // requests over the physical Spanish network if Riseup is not connected.
   const url = apiUrl(endpoint, method === 'GET' ? params : {}, base)
-  const res = await fetchT(url, method === 'POST'
-    ? { method: 'POST', body: new URLSearchParams(params) }
-    : {})
-  if (!res.ok) throw new Error(`AllDebrid API error: ${res.status}`)
-
-  const data = await res.json()
+  let data
+  if (method === 'POST') {
+    await waitForVpnTunnel(30000, { required: true })
+    data = await httpPostJson(
+      url,
+      new URLSearchParams(params).toString(),
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+      true,
+    )
+  } else {
+    data = await apiGetJson(url)
+  }
+  if (!data || typeof data !== 'object') throw new Error('AllDebrid API returned invalid JSON')
   if (data.status !== 'success') {
     const code = data.error?.code || ''
     // On bad API key, clear it and re-authenticate via PIN flow

@@ -11,6 +11,13 @@ vi.mock('./platform.js', () => ({
   isAndroidNative: vi.fn(),
 }))
 
+vi.mock('./cloudProxy.js', () => ({
+  CloudProxy: {
+    directFetch: vi.fn(),
+    riseupTunnelStatus: vi.fn(),
+  },
+}))
+
 import { CapacitorHttp } from '@capacitor/core'
 import { isAndroidNative } from './platform.js'
 import {
@@ -18,7 +25,9 @@ import {
   httpGetText,
   httpPostJson,
   httpGetBlob,
+  waitForVpnTunnel,
 } from './httpClient.js'
+import { CloudProxy } from './cloudProxy.js'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -54,6 +63,7 @@ describe('httpGetJson', () => {
       responseType: 'text',
       connectTimeout: 15000,
       readTimeout: 20000,
+      bypassVpn: false,
     })
   })
 
@@ -62,6 +72,24 @@ describe('httpGetJson', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
 
     await expect(httpGetJson('https://api.example.com/data')).rejects.toThrow('HTTP 500')
+  })
+
+  it('does not fall back to WebView fetch when native-only is requested', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CapacitorHttp.request.mockRejectedValue(new Error('native request failed'))
+    globalThis.fetch = vi.fn()
+
+    await expect(httpGetJson('https://api.example.com/data', {}, undefined, false, true))
+      .rejects.toThrow('native request failed')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('blocks required VPN requests if Riseup is not connected', async () => {
+    isAndroidNative.mockReturnValue(true)
+
+    await expect(waitForVpnTunnel(0, { required: true }))
+      .rejects.toMatchObject({ code: 'VPN_NOT_CONNECTED' })
+    expect(CloudProxy.riseupTunnelStatus).not.toHaveBeenCalled()
   })
 })
 

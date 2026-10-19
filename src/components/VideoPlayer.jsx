@@ -742,6 +742,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         // TDT sale por la red física; debrid queda en el túnel
         // (el unlock ligó el link a la IP de Riseup).
         bypassVpn: stream.bypassVpn === true,
+        requireVpn: !!(stream.originalDebridUrl || stream.viaDebrid),
         longBuffering: isTorrent,
         // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
         // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.

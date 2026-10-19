@@ -14,6 +14,7 @@ import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
+import { waitForVpnTunnel } from '../utils/httpClient.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
 import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check } from 'lucide-react'
@@ -143,6 +144,9 @@ async function unlockDebrid(url) {
 // Mensaje legible según el error del debrid.
 function debridErrorMessage(err) {
   const e = String(err || '')
+  if (/VPN_NOT_CONNECTED|Riseup VPN (is not connected|status unavailable)/i.test(e)) {
+    return 'Riseup no está conectado. Espera a que la VPN indique “Conectado” y vuelve a intentar; no se envió el enlace para proteger tu IP.'
+  }
   if (/infringing/i.test(e)) return 'AllDebrid bloquea este archivo (DMCA). Prueba otro enlace.'
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
   if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
@@ -515,6 +519,7 @@ export default function Details() {
   }, [type, id, location.state?.autoplay])
 
   const [resolvingStream, setResolvingStream] = useState(false)
+  const [waitingForRiseup, setWaitingForRiseup] = useState(false)
 
   // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
@@ -548,6 +553,16 @@ export default function Details() {
         setEpisodeError('Este enlace requiere AllDebrid. Configúralo en Ajustes → Debrid.')
         return
       }
+      setEpisodeError(null)
+      setWaitingForRiseup(true)
+      try {
+        await waitForVpnTunnel(30000, { required: true })
+      } catch (e) {
+        setEpisodeError(debridErrorMessage(e?.message || e))
+        setWaitingForRiseup(false)
+        return
+      }
+      setWaitingForRiseup(false)
       setResolvingStream(true)
       // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: se prueban
       // varios candidatos EN PARALELO y gana el primero que desbloquee. En
@@ -596,6 +611,7 @@ export default function Details() {
         // El enlace 1fichier original — si la URL firmada caduca en mitad de
         // la reproducción, VideoPlayer re-desbloquea desde aquí.
         originalDebridUrl: resolved.cand.url,
+        viaDebrid: true,
         streamType: inferStreamType(resolved.direct, 'mp4'),
       }
     }
@@ -1304,10 +1320,14 @@ export default function Details() {
       )}
 
       {/* Pantalla de carga mientras se resuelve un servidor/enlace */}
-      {resolvingStream && (
+      {(resolvingStream || waitingForRiseup) && (
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
           <LogoLoader size={80} />
-          <p className="text-white text-base">Resolviendo vídeo…</p>
+          <p className="text-white text-base">
+            {waitingForRiseup
+              ? 'Esperando a que Riseup se conecte; no se enviará el enlace con tu IP española…'
+              : 'Resolviendo vídeo…'}
+          </p>
         </div>
       )}
 
@@ -1631,10 +1651,14 @@ export default function Details() {
               const sortedStreams = sortByLangPriority(streams)
             return (
               <>
-            {resolvingStream && (
+            {(resolvingStream || waitingForRiseup) && (
               <div className="flex items-center gap-2 text-primary-400 mb-4">
                 <OctoLoader size={20} />
-                <span className="text-sm">Resolviendo enlace fresco...</span>
+                <span className="text-sm">
+                  {waitingForRiseup
+                    ? 'Esperando a que Riseup se conecte; no se enviará el enlace con tu IP española...'
+                    : 'Resolviendo enlace fresco...'}
+                </span>
               </div>
             )}
             {streams.length > 6 ? (

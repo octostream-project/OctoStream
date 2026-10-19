@@ -19,6 +19,10 @@ vi.mock('./platform.js', () => ({
   isElectron: vi.fn(() => false),
 }))
 
+vi.mock('./httpClient.js', () => ({
+  waitForVpnTunnel: vi.fn(),
+}))
+
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import {
@@ -74,6 +78,7 @@ describe('playStream', () => {
       url: 'https://example.com/video.m3u8',
       streamType: 'hls',
       direct: false,
+      bypassVpn: false,
       licenseUrl: null,
       headers: {},
       drmHeaders: {},
