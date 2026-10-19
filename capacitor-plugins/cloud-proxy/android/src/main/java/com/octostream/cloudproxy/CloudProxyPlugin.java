@@ -182,6 +182,12 @@ public class CloudProxyPlugin extends Plugin {
     private void doStartEmbedded(PluginCall call, String conf) {
         android.content.Context ctx = getContext();
         try {
+            // Riseup y WARP/aether son EXCLUYENTES: si aether sigue activo
+            // envuelve el tráfico en MASQUE→Cloudflare y la IP de salida
+            // que ven los servicios es WARP, no la de Riseup. Al arrancar
+            // el túnel, aether se desconecta (en bg — stopAether espera
+            // al proceso y no puede bloquear este hilo).
+            new Thread(() -> disconnect(false), "aether-stop").start();
             File confFile = new File(ctx.getCacheDir(), "riseup-user.ovpn");
             java.io.FileWriter w = new java.io.FileWriter(confFile, false);
             w.write(conf);
@@ -298,6 +304,14 @@ public class CloudProxyPlugin extends Plugin {
     @PluginMethod
     public void connect(PluginCall call) {
         Log.i(TAG, "connect() called");
+
+        // Exclusión mutua: si el túnel Riseup está vivo, conectar aether
+        // lo para (si no, la IP de salida sería WARP, no Riseup).
+        if (OctoVpnService.isRunning()) {
+            android.content.Intent stop = new android.content.Intent(getContext(), OctoVpnService.class);
+            stop.setAction(OctoVpnService.ACTION_STOP);
+            getContext().startService(stop);
+        }
 
         final long generation;
         final boolean needsStop;
@@ -974,6 +988,107 @@ public class CloudProxyPlugin extends Plugin {
     /**
      * Checks if the SOCKS5 proxy is responding.
      */
+    // === Geo-bypass: hosts com geobloqueio (TDT/directos espanhóis) saem ===
+    // === pela rede física mesmo com o túnel Riseup activo. ==============
+    private static final java.util.regex.Pattern GEO_HOST = java.util.regex.Pattern.compile(
+        "(^|\\.)(" +
+        "tdtspain\\.com|tdtchannels\\.com|rtve\\.es|mediaset\\.net|mediasetinfinity\\.es|" +
+        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net)$",
+        java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    public static boolean isGeoBypassHost(String url) {
+        try {
+            String host = android.net.Uri.parse(url).getHost();
+            return host != null && GEO_HOST.matcher(host).find();
+        } catch (Exception e) { return false; }
+    }
+
+    /** Rede física (WiFi/dados/ethernet) — nunca a própria VPN. */
+    public static android.net.Network physicalNetwork(android.content.Context ctx) {
+        try {
+            android.net.ConnectivityManager cm =
+                (android.net.ConnectivityManager) ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return null;
+            for (android.net.Network n : cm.getAllNetworks()) {
+                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+                if (nc == null || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) continue;
+                if (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                    || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
+                    || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) return n;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    public static javax.net.SocketFactory physicalSocketFactory(android.content.Context ctx) {
+        android.net.Network n = physicalNetwork(ctx);
+        return n == null ? null : n.getSocketFactory();
+    }
+
+    /**
+     * Fetch fora do túnel: para hosts com geobloqueio a ligação é aberta
+     * na rede física (requer allowBypass no VpnService.Builder).
+     */
+    @PluginMethod
+    public void directFetch(PluginCall call) {
+        final String url = call.getString("url");
+        final String method = call.getString("method", "GET");
+        final JSObject headers = call.getObject("headers");
+        final Object data = call.getData() != null ? call.getData().opt("data") : null;
+        final String responseType = call.getString("responseType", "text");
+        if (url == null || !isGeoBypassHost(url)) {
+            call.reject("directFetch: host não está na lista de geobloqueio");
+            return;
+        }
+        new Thread(() -> {
+            java.net.HttpURLConnection c = null;
+            try {
+                android.net.Network net = physicalNetwork(getContext());
+                java.net.URL u = new java.net.URL(url);
+                c = (java.net.HttpURLConnection) (net != null ? net.openConnection(u) : u.openConnection());
+                int ct = call.getInt("connectTimeout", 15000);
+                int rt = call.getInt("readTimeout", 20000);
+                c.setConnectTimeout(ct); c.setReadTimeout(rt);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestMethod(method);
+                if (headers != null) {
+                    java.util.Iterator<String> it = headers.keys();
+                    while (it.hasNext()) {
+                        String k = it.next();
+                        try { c.setRequestProperty(k, headers.getString(k)); } catch (Exception ignored) {}
+                    }
+                }
+                if (data != null && !"GET".equalsIgnoreCase(method)) {
+                    byte[] bytes = String.valueOf(data).getBytes("UTF-8");
+                    c.setDoOutput(true);
+                    c.getOutputStream().write(bytes);
+                }
+                int code = c.getResponseCode();
+                java.io.InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                if (in != null) { byte[] buf = new byte[16384]; int n; while ((n = in.read(buf)) > 0) bos.write(buf, 0, n); }
+                byte[] raw = bos.toByteArray();
+                JSObject ret = new JSObject();
+                ret.put("status", code);
+                JSObject hh = new JSObject();
+                for (java.util.Map.Entry<String, java.util.List<String>> e : c.getHeaderFields().entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty())
+                        hh.put(e.getKey(), e.getValue().get(0));
+                }
+                ret.put("headers", hh);
+                ret.put("url", c.getURL().toString());
+                ret.put("data", "blob".equals(responseType)
+                    ? android.util.Base64.encodeToString(raw, android.util.Base64.NO_WRAP)
+                    : new String(raw, java.nio.charset.StandardCharsets.UTF_8));
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("directFetch: " + e.getMessage());
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }, "direct-fetch").start();
+    }
+
     private boolean isSocksProxyUp() {
         // Check both SOCKS5 (1819) and HTTP CONNECT (1820) proxy ports
         for (int port : new int[]{SOCKS_PORT, HTTP_PROXY_PORT}) {

@@ -4600,6 +4600,8 @@ public class ExoPlayerPlugin extends Plugin {
                     || host.equals("rtve.es") || host.endsWith(".rtve.es")
                     || host.equals("mediaset.net") || host.endsWith(".mediaset.net")
                     || host.equals("mediasetinfinity.es") || host.endsWith(".mediasetinfinity.es")
+                    || host.equals("atresplayer.com") || host.endsWith(".atresplayer.com")
+                    || host.equals("atresmedia.com") || host.endsWith(".atresmedia.com")
                     || host.equals("dai.google.com") || host.endsWith(".dai.google.com")
                     || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net");
         } catch (Exception ignored) {
@@ -6220,6 +6222,31 @@ public class ExoPlayerPlugin extends Plugin {
     private DataSource.Factory buildStreamDataSourceFactory(String url, Map<String, String> headers,
             boolean direct, boolean forceBypassProxy) {
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        // Directos com geobloqueio (TDT/RTVE/Atresmedia…): com o túnel
+        // Riseup activo sairiam por França e o CDN bloqueava. Com
+        // allowBypass() no Builder, atar o socket à rede física tira-os
+        // do túnel — a IP vista pelo CDN volta a ser a real.
+        if (isTdtSpainDomain(url) && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
+            javax.net.SocketFactory sf =
+                com.octostream.cloudproxy.CloudProxyPlugin.physicalSocketFactory(getContext());
+            if (sf != null) {
+                try {
+                    OkHttpClient.Builder geoClient = new OkHttpClient.Builder()
+                            .connectTimeout(15, TimeUnit.SECONDS)
+                            .readTimeout(30, TimeUnit.SECONDS)
+                            .followRedirects(true)
+                            .followSslRedirects(true)
+                            .socketFactory(sf);
+                    OkHttpDataSource.Factory geoFactory = new OkHttpDataSource.Factory((Call.Factory) geoClient.build())
+                            .setUserAgent(ua);
+                    if (!headers.isEmpty()) geoFactory.setDefaultRequestProperties(headers);
+                    Log.i(TAG, "Geo-bypass: stream atado à rede física (fora do túnel VPN)");
+                    return new DefaultDataSource.Factory(getContext(), geoFactory);
+                } catch (Exception e) {
+                    Log.e(TAG, "geo-bypass factory failed — stream segue o caminho normal", e);
+                }
+            }
+        }
         if (shouldUseWarpProxy(url, direct, forceBypassProxy)) {
             try {
                 String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();

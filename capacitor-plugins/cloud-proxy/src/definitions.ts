@@ -47,4 +47,20 @@ export interface CloudProxyPlugin {
 
   /** RiseupVPN remote-API status. */
   riseupTunnelStatus(): Promise<{ installed: boolean; connected: boolean; hasEngine: boolean }>;
+
+  /**
+   * Fetch a URL bound to the physical network (WiFi/cellular), bypassing
+   * the Riseup VPN tunnel. Restricted to geo-blocked hosts (TDT/RTVE/
+   * Atresmedia/Mediaset…) so live TV keeps working while the VPN is on.
+   * Returns a CapacitorHttp-shaped {status, headers, data} response.
+   */
+  directFetch(options: {
+    url: string;
+    method?: string;
+    headers?: Record<string, string>;
+    data?: unknown;
+    responseType?: string;
+    connectTimeout?: number;
+    readTimeout?: number;
+  }): Promise<{ status: number; headers: Record<string, string>; data: unknown; url?: string }>;
 }

@@ -223,6 +223,11 @@ public class OctoVpnService extends VpnService {
             // sistema sigue directo. aether (hijo de la app, mismo uid)
             // enruta igual → la cadena app→aether→Riseup se mantiene.
             b.addAllowedApplication(getPackageName());
+            // Permite que la propia app ate sockets a la red física
+            // (Network.getSocketFactory/openConnection) — necesario para
+            // sacar del túnel los directos geobloqueados (TDT/Atresmedia).
+            b.allowBypass();
+            mTun = b.establish();
             mTun = b.establish();
             return mTun;
         } catch (Exception e) {

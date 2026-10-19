@@ -5,6 +5,27 @@
 
 import { CapacitorHttp } from '@capacitor/core'
 import { isAndroidNative } from './platform.js'
+import { CloudProxy } from './cloudProxy.js'
+
+// Hosts com geobloqueio (directos TDT/RTVE/Atresmedia/Mediaset e ads).
+// Com o túnel Riseup activo, os pedidos sairiam por França e o CDN
+// bloqueava/ligava a URL a uma IP estrangeira. CapacitorHttp não consegue
+// atar sockets a uma rede, por isso estes hosts vão por
+// CloudProxy.directFetch — HttpURLConnection aberto na Network física
+// (requer allowBypass() no VpnService.Builder).
+const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$/i
+function isGeoHost(url) {
+  try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
+}
+async function nativeRequest(opts) {
+  if (isGeoHost(opts.url)) {
+    try {
+      const r = await CloudProxy.directFetch(opts)
+      if (r && typeof r.status === 'number') return r
+    } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
+  }
+  return CapacitorHttp.request(opts)
+}
 
 const DEFAULT_UA = 'OctoStream/1.0'
 
@@ -51,7 +72,7 @@ export async function httpGetJson(url, headers = {}, signal) {
     const isGz = url.endsWith('.gz')
     let response
     try {
-      response = await CapacitorHttp.request({
+      response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'GET',
         url,
@@ -120,7 +141,7 @@ export async function httpGetJson(url, headers = {}, signal) {
 export async function httpPostJson(url, body, headers = {}, form = false, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
-    const response = await CapacitorHttp.request({
+    const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
       method: 'POST',
       url,
@@ -164,7 +185,7 @@ export async function httpGetWithHeaders(url, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
-      const response = await CapacitorHttp.request({
+      const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'GET',
         url,
@@ -207,7 +228,7 @@ export async function httpPostText(url, body, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
-      const response = await CapacitorHttp.request({
+      const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'POST',
         url,
@@ -247,7 +268,7 @@ export async function httpPostWithHeaders(url, body, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
-      const response = await CapacitorHttp.request({
+      const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'POST',
         url,
@@ -303,7 +324,7 @@ export async function httpGetBlob(url, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
-      const response = await CapacitorHttp.request({
+      const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'GET',
         url,
@@ -338,7 +359,7 @@ export async function httpGetBlobWithHeaders(url, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
-      const response = await CapacitorHttp.request({
+      const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
         method: 'GET',
         url,

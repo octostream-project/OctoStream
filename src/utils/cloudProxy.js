@@ -23,4 +23,10 @@ export const CloudProxy = {
   disconnect: () => api().disconnect(),
   disconnectBackground: () => api().disconnectBackground(),
   getStatus: () => api().getStatus(),
+  // Fetch ligado à rede física (fora do túnel Riseup). Só existe no
+  // Android; rejeita noutras plataformas — o chamador deve fazer fallback.
+  directFetch: (opts) =>
+    typeof api().directFetch === 'function'
+      ? api().directFetch(opts)
+      : Promise.reject(new Error('directFetch unsupported')),
 }
