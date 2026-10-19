@@ -173,7 +173,7 @@ public class OctoVpnService extends VpnService {
                 String[] p = mLocalIpV6.split("/");
                 b.addAddress(p[0], Integer.parseInt(p[1]));
             }
-            if (mMtu > 0) b.setMtu(mtu());
+            b.setMtu(mtu());
             if (mDns.isEmpty()) {
                 // Riseup no empuja DNS — los suyos dentro del túnel.
                 b.addDnsServer("10.11.12.13").addDnsServer("10.11.12.14");

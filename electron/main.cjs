@@ -70,7 +70,6 @@ function probePort(port) {
     socket.connect(port, AETHER_SOCKS_HOST)
   })
 }
-function probeAether() { return probePort(AETHER_SOCKS_PORT) }
 async function isAetherProxyUp() {
   return (await probePort(AETHER_SOCKS_PORT)) && (await probePort(AETHER_HTTP_PORT))
 }

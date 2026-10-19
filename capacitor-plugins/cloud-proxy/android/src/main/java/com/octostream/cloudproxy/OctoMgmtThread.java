@@ -12,7 +12,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
-import java.util.LinkedList;
 
 /**
  * Management socket de openvpn — port simplificado del
@@ -29,7 +28,6 @@ public class OctoMgmtThread implements Runnable {
     private LocalSocket mClient;
     private OutputStream mOut;
     private volatile boolean mClosed = false;
-    private final LinkedList<FileDescriptor> mFds = new LinkedList<>();
 
     public OctoMgmtThread(OctoVpnService svc, String sockPath) {
         mService = svc;
@@ -83,7 +81,9 @@ public class OctoMgmtThread implements Runnable {
             String state = line.split(",").length > 1 ? line.split(",")[1] : "";
             if ("CONNECTED".equals(state)) OctoVpnService.setConnectedState(true);
             else if ("EXITING".equals(state) || "DISCONNECTED".equals(state)) OctoVpnService.setConnectedState(false);
-        } else if (line.contains("need '")) {
+        } else if (line.contains("Need '") || line.contains("need '")) {
+            // openvpn emite ">PASSWORD:Need 'X' valor" — N mayúscula en
+            // las peticiones; matchear ambas por robustez.
             processNeed(line);
         } else if (line.startsWith("SUCCESS:")) {
             Log.d(TAG, "mgmt: " + line);
@@ -184,7 +184,6 @@ public class OctoMgmtThread implements Runnable {
         } catch (Exception e) {
             Log.w(TAG, "ancillary read: " + e.getMessage());
         }
-        if (!mFds.isEmpty()) return mFds.pollFirst();
         return null;
     }
 
