@@ -309,17 +309,12 @@ public class SyncServerPlugin extends Plugin {
                             "application/json", "{\"ok\":false}");
                     } else {
                         loadPaired();
-                        JSONObject known = pairedDevices.get(devId);
-                        if (known != null) {
-                            JSONObject ok = new JSONObject();
-                            ok.put("ok", true);
-                            ok.put("token", known.optString("token"));
-                            ok.put("deviceId", deviceId);
-                            ok.put("alias", deviceAlias);
-                            ok.put("fingerprint", deviceFingerprint);
-                            res = newFixedLengthResponse(Response.Status.OK,
-                                "application/json", ok.toString());
-                        } else if (deniedDevices.contains(devId)) {
+                        // deviceId conocido: NO devolver el token — el
+                        // deviceId es público (UDP/ping) y cualquiera en la
+                        // LAN podría pedirlo. Un cliente legítimo ya guarda
+                        // su token y no re-empareja; un re-pair pasa por
+                        // aprobación como un dispositivo nuevo.
+                        if (deniedDevices.contains(devId)) {
                             res = newFixedLengthResponse(Response.Status.FORBIDDEN,
                                 "application/json", "{\"ok\":false,\"denied\":true}");
                         } else {

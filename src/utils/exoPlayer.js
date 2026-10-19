@@ -128,7 +128,7 @@ export async function playStream(options, onStateChange) {
   // Si el túnel está activado pero aún subiendo, el socket fail-open saldría
   // por la física — con links debrid IP-bound eso rompe la reproducción.
   if (options.bypassVpn !== true) {
-    await waitForVpnTunnel(30000, { required: options.requireVpn === true })
+    await waitForVpnTunnel(30000, { required: localStorage.getItem('octostream_riseup_autoconnect') === 'true' })
   }
   stateListener = onStateChange
   zapListener = options.onZap || null
@@ -185,7 +185,7 @@ export async function switchChannel(options) {
   const url = sanitizeHttpUrl(options.url)
   if (!url) return
   if (options.bypassVpn !== true) {
-    await waitForVpnTunnel(30000, { required: options.requireVpn === true })
+    await waitForVpnTunnel(30000, { required: localStorage.getItem('octostream_riseup_autoconnect') === 'true' })
   }
   return ExoPlayer.switchChannel({
     url,
@@ -276,6 +276,9 @@ export async function stopPlayback() {
     // y la sesión mpv nativa si estaba activa.
     if (isElectron()) {
       stateListener = null
+      zapListener = null
+      episodeSelectListener = null
+      seasonSelectListener = null
       window.octostream?.embed?.closeAll?.().catch?.(() => {})
       if (mpvActive) {
         mpvActive = false
@@ -287,6 +290,7 @@ export async function stopPlayback() {
   stateListener = null
   zapListener = null
   episodeSelectListener = null
+  seasonSelectListener = null
   return ExoPlayer.stop()
 }
 

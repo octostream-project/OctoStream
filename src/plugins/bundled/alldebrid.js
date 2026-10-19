@@ -258,7 +258,9 @@ export async function getMagnetStatus(magnetId) {
     }
   } catch (e) {
     console.warn('[AllDebrid] getMagnetStatus failed:', e?.message)
-    return { status: 'error' }
+    // api_error = fallo de red/API (transitorio) — resolveMagnetRemote no
+    // debe borrar el magnet ante esto; solo ante error REAL del magnet.
+    return { status: 'api_error' }
   }
 }
 
@@ -359,8 +361,11 @@ export function isAlldebridSupported(url) {
   // 1fichier.xyz/etc. como etiqueta completa del host.
   let hostname = ''
   try { hostname = new URL(url).hostname.toLowerCase() } catch { return false }
+  const parts = hostname.split('.')
   return SUPPORTED_DOMAINS.some(d =>
     d.includes('.')
       ? hostname === d || hostname.endsWith('.' + d)
-      : hostname.split('.').includes(d))
+      // Etiqueta suelta: solo como dominio registrable (1fichier.<tld>) o
+      // subdominio directo de él — 1fichier.evil.com ya NO casa.
+      : parts[parts.length - 2] === d)
 }

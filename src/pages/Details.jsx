@@ -10,6 +10,7 @@ import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
+import { isTorboxEnabled, unlockLink as tbUnlockLink } from '../plugins/bundled/torbox.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
@@ -138,6 +139,13 @@ async function unlockDebrid(url) {
       if (r?.error) lastError = `AllDebrid: ${r.error}`
     } catch (e) { lastError = e?.message; console.warn('[Details] AllDebrid unlock failed:', e?.message) }
   }
+  if (isTorboxEnabled()) {
+    try {
+      const r = await tbUnlockLink(url)
+      if (r?.link) return { link: r.link }
+      if (r?.error) lastError = lastError || `TorBox: ${r.error}`
+    } catch (e) { lastError = lastError || e?.message; console.warn('[Details] TorBox unlock failed:', e?.message) }
+  }
   return { link: null, error: lastError }
 }
 
@@ -150,7 +158,9 @@ function debridErrorMessage(err) {
   if (/infringing/i.test(e)) return 'AllDebrid bloquea este archivo (DMCA). Prueba otro enlace.'
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
   if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
-  return 'No se pudo desbloquear el enlace (debrid). Prueba otro servidor.'
+  // Diagnóstico: el mensaje genérico ocultaba el error real de la API
+  // (p. ej. bloqueo por IP del túnel). Se muestra el motivo crudo.
+  return `No se pudo desbloquear el enlace (debrid): ${e || 'error desconocido'}`
 }
 
 // Sort streams by language priority. Streams with no language go last.
@@ -992,6 +1002,12 @@ export default function Details() {
   // al terminar. El lock evita solapar switchChannel (el audio se pierde).
   const zappingLockRef = useRef(false)
   const pendingZapRef = useRef(null)
+  const zapAbortRef = useRef(null) // cancela resoluciones lentas al zappear
+  const zapAbortNew = () => {
+    if (zapAbortRef.current) zapAbortRef.current.abort()
+    zapAbortRef.current = new AbortController()
+    return zapAbortRef.current.signal
+  }
   const handleZapChannel = async (event) => {
     const ch = liveChannelsRef.current[event.index]
     if (!ch) return
@@ -1006,13 +1022,16 @@ export default function Details() {
         // (solo el último canal, no cada canal por el que se pasa)
         currentChannelRef.current = target
         try {
-          const streams = await pluginManager.getStreams(target.type || 'live', target.id, target.name)
+          const signal = zapAbortNew()
+          const streams = await pluginManager.getStreams(target.type || 'live', target.id, target.name, signal)
+          if (signal.aborted) continue
           const stream = streams?.[0]
           if (stream?.url) {
             await switchChannel({
               url: stream.url,
               streamType: stream.streamType || 'hls',
               direct: stream.direct === true,
+              bypassVpn: stream.bypassVpn === true,
               headers: stream.headers || {},
               title: target.name,
               channelIndex: index,
@@ -1317,6 +1336,22 @@ export default function Details() {
           }}
           onEnded={handleEnded}
         />
+      )}
+
+      {/* Error de resolución debrid/etc: overlay fijo — el banner inline
+          solo existía dentro de la vista de episodio y en películas el
+          error se tragaba sin mostrarse. */}
+      {episodeError && (
+        <div className="fixed bottom-6 left-4 right-4 z-[75] flex items-center gap-2 text-red-400 text-sm bg-red-500/15 border border-red-500/40 rounded-lg p-3 backdrop-blur">
+          <AlertCircle size={16} className="flex-shrink-0" />
+          <span className="flex-1">{episodeError}</span>
+          <button
+            onClick={() => setEpisodeError(null)}
+            className="text-dark-400 hover:text-white text-xs"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {/* Pantalla de carga mientras se resuelve un servidor/enlace */}

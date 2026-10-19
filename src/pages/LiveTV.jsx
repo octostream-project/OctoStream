@@ -382,6 +382,7 @@ export default function LiveTV() {
                 url: stream.url,
                 streamType: stream.streamType || 'hls',
                 direct: stream.direct === true,
+                bypassVpn: stream.bypassVpn === true,
                 headers: stream.headers || {},
                 title: target.name,
                 channelIndex: index,

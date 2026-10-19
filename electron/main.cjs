@@ -1,7 +1,7 @@
 // Silence Fontconfig warnings (harmless on some Linux distros)
 process.env.FONTCONFIG_PATH = process.env.FONTCONFIG_PATH || '/etc/fonts'
 
-const { app, BrowserWindow, shell, session, ipcMain, components } = require('electron')
+const { app, BrowserWindow, shell, session, ipcMain, components, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -10,6 +10,7 @@ const os = require('os')
 const { spawn, execSync } = require('child_process')
 const crypto = require('crypto')
 const { URL } = require('url')
+const dns = require('dns')
 const { SyncServer } = require('./sync-server.cjs')
 const Youtube = require('./youtube.cjs')
 const Embed = require('./embed.cjs')
@@ -385,14 +386,17 @@ function agentFor(target, isHttps) {
 // Get local network IP (for Chromecast access to proxy)
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
+  const cands = []
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address
+        cands.push(iface.address)
       }
     }
   }
-  return '127.0.0.1'
+  // Preferir 192.168.x (LAN doméstica) sobre 10.x/172.16-31.x (Docker/VPN).
+  const lan = cands.find(ip => ip.startsWith('192.168.'))
+  return lan || cands[0] || '127.0.0.1'
 }
 
 const secureHttpsAgent = new https.Agent({ keepAlive: true })
@@ -451,9 +455,28 @@ function validProxyTarget(rawUrl) {
     const host = target.hostname.replace(/^\[|\]$/g, '').toLowerCase()
     if (host === 'localhost' || host.endsWith('.local') || host === '0.0.0.0' || host === '::1' || host.startsWith('127.') || host.startsWith('10.') || host.startsWith('192.168.') || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^fc|^fd|^fe80:/i.test(host)) return null
     return target
+    // NOTA: para resolver el SSRF por DNS rebinding habría que validar la IP
+    // resuelta — se hace vía lookup en proxyGet/proxyPost (ver abajo).
   } catch {
     return null
   }
+}
+
+// lookup anti-SSRF: tras resolver el hostname se verifica que la IP no sea
+// privada/loopback/link-local — un dominio público que resuelva a IP interna
+// (DNS rebinding) queda bloqueado en el request real.
+function safeLookup(hostname, options, cb) {
+  dns.lookup(hostname, { ...options, all: true }, (err, addrs) => {
+    if (err) return cb(err)
+    const bad = addrs.find(a => {
+      const ip = a.address
+      return ip.startsWith('127.') || ip === '0.0.0.0' || ip === '::1'
+        || ip.startsWith('10.') || ip.startsWith('192.168.') || /^169\.254\./.test(ip)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^f[cd]|^fe80:/i.test(ip)
+    })
+    if (bad) return cb(new Error('Blocked private IP: ' + hostname))
+    cb(null, options && options.all ? addrs : addrs[0].address, options && options.all ? undefined : addrs[0].family)
+  })
 }
 
 // Log only host:port — stream URLs carry signed tokens/cookies.
@@ -537,6 +560,7 @@ function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders, clientHeaders) {
   }
 
   options.agent = agentFor(target, isHttps)
+  options.lookup = safeLookup // anti-SSRF: validar IP resuelta
 
   const lib = isHttps ? https : http
 
@@ -651,8 +675,8 @@ function proxyFetch(targetUrl, res, proxyPrefix, extraHeaders, clientHeaders) {
         })
         const rewrittenBody = rewritten.join('\n')
         // El body reescrito incrusta el token del proxy — no loguearlo en claro.
-        console.log('[Proxy] m3u8 rewritten (first 500 chars):\n',
-          rewrittenBody.substring(0, 500).split(PROXY_TOKEN).join('[TOKEN]'))
+        // Solo conteo — el body lleva URLs firmadas del CDN remoto.
+        console.log('[Proxy] m3u8 rewritten, lines:', rewritten.length)
         delete respHeaders['Content-Length']
         respHeaders['Content-Length'] = Buffer.byteLength(rewrittenBody)
         res.writeHead(proxyRes.statusCode || 200, respHeaders)
@@ -727,6 +751,7 @@ function proxyPost(targetUrl, postBody, postHeaders, res) {
 
   const baseHeaders = headersForHost(target.hostname)
   const headers = { ...baseHeaders, ...postHeaders }
+  delete headers.host; delete headers['transfer-encoding']; delete headers['x-forwarded-for']
   const bodyData = Buffer.isBuffer(postBody) ? postBody : (typeof postBody === 'string' ? postBody : JSON.stringify(postBody))
   headers['Content-Length'] = Buffer.byteLength(bodyData)
   if (!headers['Content-Type']) headers['Content-Type'] = 'application/json'
@@ -740,6 +765,7 @@ function proxyPost(targetUrl, postBody, postHeaders, res) {
   }
 
   options.agent = agentFor(target, isHttps)
+  options.lookup = safeLookup // anti-SSRF: validar IP resuelta
   const lib = isHttps ? https : http
 
   const proxyReq = lib.request(options, (proxyRes) => {
@@ -902,16 +928,16 @@ function startProxyServer() {
       if (servePackagedApp(parsed.pathname, res)) return
     }
 
-    if (parsed.pathname === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ status: 'ok' }))
-      return
-    }
-
     const suppliedToken = parsed.searchParams.get('token') || req.headers['x-octostream-proxy-token']
     if (suppliedToken !== PROXY_TOKEN) {
       res.writeHead(403)
       res.end('Forbidden')
+      return
+    }
+
+    if (parsed.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ status: 'ok' }))
       return
     }
 
@@ -950,7 +976,7 @@ function startProxyServer() {
         }
       })
       req.on('end', () => {
-        if (!tooLarge) proxyPost(targetUrl, body, extraHeaders, res)
+        if (!tooLarge) proxyPost(targetUrl, body, sanitizeProxyHeaders(extraHeaders), res)
       })
       return
     }
@@ -1483,6 +1509,7 @@ ipcMain.handle('update:open', (_e, arg) => {
 // que el AppImage para permitir rename atómico). Progreso → octo:update:progress.
 ipcMain.handle('update:download', async (e, arg) => {
   const url = typeof arg === 'string' ? arg : arg?.url
+  const expectedSha = (typeof arg === 'object' && arg?.sha256) ? String(arg.sha256).toLowerCase() : ''
   if (!url || !/^https:\/\/github\.com\//i.test(url)) return { ok: false, error: 'url no permitida' }
   try {
     const name = path.basename(new URL(url).pathname) || 'octostream-update.bin'
@@ -1514,6 +1541,15 @@ ipcMain.handle('update:download', async (e, arg) => {
       return { ok: false, error: String(err.message || err) }
     }
     await new Promise((res, rej) => { file.end(res); file.on('error', rej) })
+    // Integridad: el manifest publica sha256 por asset — sin match no
+    // instalar nada (auto-update ejecuta el binario descargado).
+    if (expectedSha) {
+      const got = crypto.createHash('sha256').update(fs.readFileSync(dest)).digest('hex')
+      if (got !== expectedSha) {
+        try { fs.unlinkSync(dest) } catch {}
+        return { ok: false, error: 'sha256 mismatch: descarga corrupta o manipulada' }
+      }
+    }
     return { ok: true, path: dest, size: done }
   } catch (err) {
     return { ok: false, error: String(err.message || err) }
@@ -1626,7 +1662,10 @@ function createWindow() {
   })
 
   win.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('http://localhost:5173') || url.startsWith('file://')) return
+    // El build empaquetado carga http://127.0.0.1:PROXY_PORT/app/ — sin
+    // permitirlo las recargas/navegación same-origin quedan bloqueadas.
+    if (url.startsWith('http://localhost:5173') || url.startsWith('file://')
+        || url.startsWith(`http://127.0.0.1:${PROXY_PORT}`)) return
     event.preventDefault()
   })
 

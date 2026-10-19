@@ -18,5 +18,8 @@
     "CapacitorCookies": {
       "enabled": true
     }
+  },
+  "android": {
+    "loggingBehavior": "debug"
   }
 }

@@ -34,6 +34,10 @@ export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {})
       if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
     } catch { return }
   }
+  // Auto-reconnect: si el servicio murió (proceso matado por el SO) y el
+  // autoconnect está activo, re-disparar el connect una vez en vez de
+  // esperar a un túnel que nadie va a levantar.
+  let reconnectTried = false
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
     let st
@@ -45,6 +49,14 @@ export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {})
       throw error
     }
     if (st?.connected) return
+    if (!st?.connecting && !reconnectTried
+        && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
+      reconnectTried = true
+      try {
+        const { connectRiseupTunnel } = await import('./riseupVpn.js')
+        connectRiseupTunnel().catch(() => {})
+      } catch { /* sin módulo — seguir esperando */ }
+    }
     await new Promise(r => setTimeout(r, 400))
   }
   const error = new Error('Riseup VPN is not connected; request blocked to prevent IP leak')
@@ -58,7 +70,11 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
-  if (!isVpnBootstrapHost(opts.url)) await waitForVpnTunnel()
+  // VPN activada -> TODAS las peticiones por el tunel (fail-closed, nunca
+  // fail-open por la fisica); VPN apagada -> red normal / WARP.
+  if (!isVpnBootstrapHost(opts.url)) {
+    await waitForVpnTunnel(30000, { required: localStorage.getItem('octostream_riseup_autoconnect') === 'true' })
+  }
   return CapacitorHttp.request(opts)
 }
 
@@ -278,15 +294,9 @@ export async function httpPostText(url, body, headers = {}, signal) {
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return response.data
     } catch (e) {
-      if (e?.name === 'AbortError') throw e
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'User-Agent': DEFAULT_UA, ...headers },
-        body,
-        signal,
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.text()
+      // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
+      // submit). Abort/errores nativos se propagan al caller.
+      throw e
     }
   }
   const res = await fetch(url, {
@@ -318,18 +328,9 @@ export async function httpPostWithHeaders(url, body, headers = {}, signal) {
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return { data: response.data || '', headers: response.headers || {} }
     } catch (e) {
-      if (e?.name === 'AbortError') throw e
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'User-Agent': DEFAULT_UA, ...headers },
-        body,
-        signal,
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const text = await res.text()
-      const hdrs = {}
-      res.headers.forEach((v, k) => { hdrs[k] = v })
-      return { data: text, headers: hdrs }
+      // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
+      // submit). Errores nativos se propagan al caller.
+      throw e
     }
   }
   const res = await fetch(url, {

@@ -21,7 +21,7 @@
 // User-Agent/Referer van por las propiedades dedicadas `user-agent` /
 // `referrer`, que viajan sin plegar — ver _applyOpts().
 
-const { spawn } = require('node:child_process')
+const { spawn, execSync } = require('node:child_process')
 const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -58,7 +58,9 @@ function findMpv() {
       if (c.includes(path.sep) || c.includes('/')) {
         if (fs.existsSync(c)) { cachedExe = c; return c }
       } else {
-        cachedExe = c; return c // nombre desnudo: spawn lo resuelve por PATH
+        // Nombre desnudo: verificar que exista en PATH antes de mentir
+        const check = process.platform === 'win32' ? `where ${c}` : `command -v ${c}`
+        if (execSync(check, { stdio: 'ignore' }) != null) { cachedExe = c; return c }
       }
     } catch {}
   }
@@ -395,6 +397,7 @@ class MpvSession {
 
   async switch(opts = {}) {
     if (!this.running) return this.open(opts)
+    if (opts.channels) this.channels = opts.channels
     if (opts.channelIndex != null) this.channelIndex = opts.channelIndex
     await this._applyOpts(opts)
     this._loadUrl(opts)
@@ -402,7 +405,7 @@ class MpvSession {
   }
 
   setChannels(channels, channelIndex) {
-    this.channels = channels || null
+    this.channels = channels || this.channels || null
     if (channelIndex != null) this.channelIndex = channelIndex
   }
 

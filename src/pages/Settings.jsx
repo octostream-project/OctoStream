@@ -97,6 +97,9 @@ export default function Settings() {
   // AllDebrid API key
   const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
   const [adSaved, setAdSaved] = useState(false)
+  // TorBox API key
+  const [tbApiKey, setTbApiKey] = useState(localStorage.getItem('octostream_torbox_key') || '')
+  const [tbSaved, setTbSaved] = useState(false)
 
   // HDFull credentials
   const [hdfullUser, setHdfullUser] = useState(localStorage.getItem('octostream_hdfull_username') || '')
@@ -452,6 +455,17 @@ export default function Settings() {
     }
     setAdSaved(true)
     setTimeout(() => setAdSaved(false), 2000)
+  }
+
+  const handleTbSave = () => {
+    const key = tbApiKey.trim()
+    if (!key) {
+      localStorage.removeItem('octostream_torbox_key')
+    } else {
+      localStorage.setItem('octostream_torbox_key', key)
+    }
+    setTbSaved(true)
+    setTimeout(() => setTbSaved(false), 2000)
   }
 
   // --- AllDebrid PIN flow ---
@@ -1426,11 +1440,73 @@ export default function Settings() {
           </div>
 
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="text-white font-bold">TorBox API Key</h3>
+                <p className="text-dark-400 text-sm mt-1">
+                  Debrid alternativo a AllDebrid — desbloquea los mismos enlaces si AllDebrid falla
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="password"
+                value={tbApiKey}
+                onChange={e => setTbApiKey(e.target.value)}
+                placeholder="Introduce tu TorBox API key"
+                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+              />
+              {tbSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm">
+                  <Check size={16} />
+                  Guardado
+                </div>
+              )}
+              <button
+                onClick={handleTbSave}
+                className="w-full bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg px-4 py-3 transition-colors"
+              >
+                Guardar TorBox
+              </button>
+            </div>
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en torbox.app (servicio de pago)</li>
+                <li>Ve a Settings → API</li>
+                <li>Copia tu API key</li>
+                <li>Pégala arriba</li>
+              </ol>
+              <a
+                href="https://torbox.app/settings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
+              >
+                Ir a torbox.app
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">AllDebrid API Key</span>
                 {localStorage.getItem('octostream_alldebrid_key') ? (
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Check size={14} /> Configurada
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-dark-500">
+                    <AlertCircle size={14} /> No configurada
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-dark-400">TorBox API Key</span>
+                {localStorage.getItem('octostream_torbox_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>

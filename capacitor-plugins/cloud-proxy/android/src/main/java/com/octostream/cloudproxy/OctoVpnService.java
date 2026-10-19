@@ -226,8 +226,9 @@ public class OctoVpnService extends VpnService {
             // Permite que la propia app ate sockets a la red física
             // (Network.getSocketFactory/openConnection) — necesario para
             // sacar del túnel los directos geobloqueados (TDT/Atresmedia).
-            b.allowBypass();
-            mTun = b.establish();
+            // allowBypass solo existe en API 29+ — en 24-28 crashea con
+            // NoSuchMethodError y el túnel no sube nunca.
+            if (Build.VERSION.SDK_INT >= 29) b.allowBypass();
             mTun = b.establish();
             return mTun;
         } catch (Exception e) {
@@ -295,6 +296,18 @@ public class OctoVpnService extends VpnService {
             if (Build.VERSION.SDK_INT >= 33) stopForeground(STOP_FOREGROUND_REMOVE);
             else stopForeground(true);
         } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // El usuario quitó la app de recents: eso es "cerrar de verdad" —
+        // minimizar/rotar no llegan aquí y el túnel sigue vivo. Se para la
+        // VPN y se limpia el flag para que el arranque en frío no la revive
+        // si el autoconnect de JS está apagado.
+        getSharedPreferences("octo_vpn", MODE_PRIVATE).edit().putBoolean("enabled", false).apply();
+        new Thread(this::stopVpn, "ovpn-stop-task").start();
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override

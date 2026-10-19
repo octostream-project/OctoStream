@@ -212,13 +212,9 @@ class SyncServer {
         try { j = JSON.parse(body) } catch { j = null }
         const devId = j?.deviceId
         if (!devId) { this._json(res, 400, { ok: false }, origin); return }
-        const known = this.pairedDevices.get(devId)
-        if (known) {
-          this._json(res, 200, {
-            ok: true, token: known.token,
-            deviceId: this.deviceId, alias: this.deviceAlias, fingerprint: this.deviceFingerprint,
-          }, origin)
-        } else if (this.deniedDevices.has(devId)) {
+        // deviceId conocido: no devolver el token — es público por UDP/ping;
+        // un re-pair pasa por aprobación como un dispositivo nuevo.
+        if (this.deniedDevices.has(devId)) {
           this._json(res, 403, { ok: false, denied: true }, origin)
         } else {
           if (!this.pendingPairs.has(devId)) {

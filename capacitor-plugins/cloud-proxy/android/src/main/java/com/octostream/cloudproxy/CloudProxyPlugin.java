@@ -269,14 +269,11 @@ public class CloudProxyPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // Batería: al cerrar la app se apaga también el túnel Riseup —
-        // motor embebido (ACTION_STOP) y/o API remota (disconnect).
-        try {
-            android.content.Intent stop = new android.content.Intent(getContext(), OctoVpnService.class);
-            stop.setAction(OctoVpnService.ACTION_STOP);
-            getContext().startService(stop);
-        } catch (Exception ignored) {}
-        try { if (mOvpnApi != null) mOvpnApi.disconnect(); } catch (Exception ignored) {}
+        // NO apagar el túnel Riseup aquí: handleOnDestroy dispara también en
+        // recreaciones de Activity (rotación, config change) y al minimizar,
+        // y matar el servicio tumba la VPN sin que el usuario lo pida. Solo
+        // el toggle de Settings (ACTION_STOP → enabled=false) la para. Si el
+        // SO mata el proceso, START_STICKY + conf cacheado lo reaniman.
         try {
             if (mOvpnConn != null) {
                 getContext().getApplicationContext().unbindService(mOvpnConn);

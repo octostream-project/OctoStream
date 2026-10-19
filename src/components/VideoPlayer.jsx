@@ -863,6 +863,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                 console.log('[Player] Re-resolved URL, retrying:', urlHost(fresh))
                 playArgs.url = fresh
                 playArgs.streamType = inferStreamType(fresh, playArgs.streamType)
+                // La URL vieja caducó: reanudar en la posición actual, no
+                // en el startTime original (que volvería al inicio).
+                if (currentTimeRef.current > 0) playArgs.startTime = currentTimeRef.current
                 playStream(playArgs, onPlaybackState).catch(e => {
                   console.warn('[Player] retry after re-resolve failed:', e?.message)
                   if (!cancelled && !closedRef.current) {
