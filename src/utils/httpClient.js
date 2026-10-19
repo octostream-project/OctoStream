@@ -21,6 +21,39 @@ async function requireWarpForNativeTraffic(url) {
   error.code = 'WARP_NOT_CONNECTED'
   throw error
 }
+// Bootstrap de Riseup: generar el .ovpn exige salir a riseup.net ANTES de
+// que exista el túnel — estas peticiones salen directas siempre.
+const VPN_BOOTSTRAP_HOST_RE = /(^|\.)riseup\.net$/i
+function isVpnBootstrapHost(url) {
+  try { return VPN_BOOTSTRAP_HOST_RE.test(new URL(url).hostname) } catch { return false }
+}
+// Gate fail-closed: con Riseup en autoconnect, nada sale por la física
+// antes del CONNECTED (evita fugas de IP en peticiones IP-bound).
+export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {}) {
+  if (!isAndroidNative()) return
+  if (!required) {
+    try {
+      if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
+    } catch { return }
+  }
+  const deadline = Date.now() + maxMs
+  while (Date.now() < deadline) {
+    let st
+    try {
+      st = await CloudProxy.riseupTunnelStatus()
+    } catch {
+      const error = new Error('Riseup VPN status unavailable; request blocked to prevent IP leak')
+      error.code = 'VPN_NOT_CONNECTED'
+      throw error
+    }
+    if (st?.connected) return
+    await new Promise(r => setTimeout(r, 400))
+  }
+  const error = new Error('Riseup VPN is not connected; request blocked to prevent IP leak')
+  error.code = 'VPN_NOT_CONNECTED'
+  throw error
+}
+
 async function nativeRequest(opts) {
   if (opts.bypassVpn || isGeoHost(opts.url)) {
     try {
@@ -28,6 +61,13 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
+  // Riseup tiene prioridad sobre WARP cuando está en autoconnect.
+  try {
+    if (!isVpnBootstrapHost(opts.url)
+        && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
+      await waitForVpnTunnel(30000, { required: true })
+    }
+  } catch {}
   // Con autoconexión activa, no se permite que CapacitorHttp salga en claro
   // si el proxy Aether todavía no está arriba.
   await requireWarpForNativeTraffic(opts.url)

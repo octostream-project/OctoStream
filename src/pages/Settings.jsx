@@ -7,6 +7,7 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
+import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
@@ -93,6 +94,11 @@ export default function Settings() {
   const traktPinPollingRef = useRef(false)
 
   // TorBox API key
+  const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
+  const [adSaved, setAdSaved] = useState(false)
+  const [riseupState, setRiseupState] = useState('disconnected')
+  const [riseupBusy, setRiseupBusy] = useState(false)
+  const [riseupMsg, setRiseupMsg] = useState('')
   const [tbApiKey, setTbApiKey] = useState(localStorage.getItem('octostream_torbox_key') || '')
   const [tbSaved, setTbSaved] = useState(false)
 
@@ -283,6 +289,41 @@ export default function Settings() {
     }
     setTbSaved(true)
     setTimeout(() => setTbSaved(false), 2000)
+  }
+
+  const handleAdSave = () => {
+    const key = adApiKey.trim()
+    if (!key) localStorage.removeItem('octostream_alldebrid_key')
+    else localStorage.setItem('octostream_alldebrid_key', key)
+    setAdSaved(true)
+    setTimeout(() => setAdSaved(false), 2000)
+  }
+
+  useEffect(() => {
+    riseupTunnelStatus().then(st => {
+      if (st.connected) setRiseupState('connected')
+      else if (st.connecting) setRiseupState('connecting')
+    }).catch(() => {})
+  }, [])
+
+  const toggleRiseup = async () => {
+    setRiseupBusy(true); setRiseupMsg('')
+    try {
+      if (riseupState === 'connected' || riseupState === 'connecting') {
+        await disconnectRiseupTunnel()
+        localStorage.setItem('octostream_riseup_autoconnect', 'false')
+        setRiseupState('disconnected')
+      } else {
+        localStorage.setItem('octostream_riseup_autoconnect', 'true')
+        setRiseupState('connecting')
+        await connectRiseupTunnel()
+        setRiseupState('connected')
+        setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico sale por él.')
+      }
+    } catch (e) {
+      setRiseupMsg(e?.message || 'Error con RiseupVPN')
+      setRiseupState('disconnected')
+    } finally { setRiseupBusy(false) }
   }
 
   // --- Trakt PIN flow (OAuth device auth) ---
@@ -1094,6 +1135,47 @@ export default function Settings() {
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <div className="flex items-start justify-between mb-3">
               <div>
+                <h3 className="text-white font-bold">AllDebrid API Key</h3>
+                <p className="text-dark-400 text-sm mt-1">
+                  Desbloquea hosters y torrents al instante (streaming directo, sin esperar descarga)
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="password"
+                value={adApiKey}
+                onChange={e => setAdApiKey(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAdSave()}
+                placeholder="Introduce tu AllDebrid API key"
+                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+              />
+              {adSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm">
+                  <Check size={16} />
+                  Guardado
+                </div>
+              )}
+              <button
+                onClick={handleAdSave}
+                className="w-full bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg px-4 py-3 transition-colors"
+              >
+                Guardar AllDebrid
+              </button>
+            </div>
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en alldebrid.com (servicio de pago)</li>
+                <li>Ve a alldebrid.com/apikeys</li>
+                <li>Copia tu API key y pégala arriba</li>
+              </ol>
+            </div>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-start justify-between mb-3">
+              <div>
                 <h3 className="text-white font-bold">TorBox API Key</h3>
                 <p className="text-dark-400 text-sm mt-1">
                   Desbloquea enlaces compatibles y torrents con TorBox
@@ -1164,6 +1246,27 @@ export default function Settings() {
       {/* Tab: Red */}
       {activeTab === 'red' && (
         <div className="space-y-6">
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-white font-bold">RiseupVPN</h3>
+                <p className="text-dark-400 text-sm">
+                  Túnel OpenVPN integrado — todo el tráfico sale por Francia cuando está activo
+                </p>
+              </div>
+              <button
+                onClick={toggleRiseup}
+                disabled={riseupBusy}
+                className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${riseupState !== 'disconnected' ? 'bg-primary-600' : 'bg-dark-700'} ${riseupBusy ? 'opacity-50' : ''}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${riseupState !== 'disconnected' ? 'translate-x-6' : ''}`} />
+              </button>
+            </div>
+            {riseupState === 'connecting' && <p className="text-amber-300 text-sm">Conectando…</p>}
+            {riseupState === 'connected' && <p className="text-green-400 text-sm">Conectado — tráfico por el túnel</p>}
+            {riseupMsg && <p className="text-dark-400 text-sm mt-1">{riseupMsg}</p>}
+          </div>
+
           {/* Cloudflare WARP */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">

@@ -18,9 +18,10 @@ import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isTorboxEnabled, isTorboxSupported, isTorboxSearchEnabled, unlockLink as tbUnlockLink, resolveMagnet as tbResolveMagnet, resolveUsenet as tbResolveUsenet } from '../torbox.js'
+import { isAlldebridEnabled, isAlldebridSupported, unlockLink as adUnlockLink, resolveMagnet as adResolveMagnet } from '../alldebrid.js'
 
 // TorBox es el único servicio debrid configurado.
-const anyDebridEnabled = () => isTorboxEnabled()
+const anyDebridEnabled = () => isTorboxEnabled() || isAlldebridEnabled()
 import { inferStreamType } from '../../../utils/streamType.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
@@ -154,6 +155,14 @@ async function debridUnlock(url) {
   if (/mega\.nz\/embed\//i.test(url)) {
     debridUrl = url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')
   }
+  if (isAlldebridEnabled() && isAlldebridSupported(debridUrl)) {
+    try {
+      const result = await adUnlockLink(debridUrl)
+      if (result?.link) return { link: result.link, via: 'AllDebrid' }
+    } catch (e) {
+      logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
+    }
+  }
   if (!isTorboxEnabled() || !isTorboxSupported(debridUrl)) return null
   try {
     const result = await tbUnlockLink(debridUrl)
@@ -177,12 +186,21 @@ async function debridResolveUsenet(link) {
 }
 
 async function debridResolveMagnet(url) {
+  if (isAlldebridEnabled()) {
+    try {
+      const result = await adResolveMagnet(url)
+      if (result?.links?.length) {
+        console.log(`[AllDebrid] Resolved magnet: ${result.links[0]?.name || hostOf(result.links[0]?.link || '')}`)
+        return { links: result.links.map(l => l.link), via: 'AllDebrid' }
+      }
+    } catch (e) { logWarn('[AllDebrid] Failed to resolve magnet:', String(e?.message || e)) }
+  }
   if (!isTorboxEnabled()) return null
   try {
     const result = await tbResolveMagnet(url)
     if (result?.link) {
       console.log(`[TorBox] Resolved magnet: ${result.filename || hostOf(result.link)}`)
-      return { links: [{ link: result.link, name: result.filename || '' }], via: 'TorBox' }
+      return { links: [{ link: result.link, name: result.filename || '' }].map(o => o.link), via: 'TorBox' }
     }
   } catch (e) { logWarn('[TorBox] Failed to resolve magnet:', String(e?.message || e)) }
   return null

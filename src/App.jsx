@@ -114,23 +114,18 @@ export default function App() {
     if (localStorage.getItem('octostream_warp_autoconnect') === null) {
       localStorage.setItem('octostream_warp_autoconnect', 'true')
     }
-    const hadRiseupEnabled = localStorage.getItem('octostream_riseup_autoconnect') === 'true'
-    // Migración de usuarios de Riseup: apaga el servicio embebido y vuelve
-    // a habilitar Aether/WARP una sola vez al arrancar esta versión.
-    if (hadRiseupEnabled) {
-      localStorage.setItem('octostream_riseup_autoconnect', 'false')
-      localStorage.setItem('octostream_warp_autoconnect', 'true')
+    // RiseupVPN tiene prioridad sobre WARP cuando está en autoconnect:
+    // se conecta primero y WARP queda en espera (el gate de httpClient
+    // enruta todo por el túnel).
+    if (localStorage.getItem('octostream_riseup_autoconnect') === 'true'
+        && (isAndroidNative() || isElectron())) {
+      import('./utils/riseupVpn.js').then(({ connectRiseupTunnel, riseupTunnelStatus }) => {
+        riseupTunnelStatus().then(s => {
+          if (!s.connected) connectRiseupTunnel().catch(e => console.warn('[App] Riseup autoconnect:', e?.message))
+        }).catch(() => connectRiseupTunnel().catch(() => {}))
+      }).catch(() => {})
     }
-    try { localStorage.removeItem('octostream_alldebrid_key') } catch {}
     const startWarp = async () => {
-      if (isAndroidNative() || isElectron()) {
-        try {
-          const { disconnectRiseupTunnel } = await import('./utils/riseupVpn.js')
-          await disconnectRiseupTunnel()
-        } catch (e) {
-          console.warn('[App] Riseup shutdown:', e?.message)
-        }
-      }
       const warpAuto = localStorage.getItem('octostream_warp_autoconnect')
       console.log('[App] WARP auto-connect flag:', warpAuto)
       if (warpAuto !== 'true') return

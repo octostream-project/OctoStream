@@ -10,6 +10,7 @@ import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isTorboxEnabled, unlockLink as tbUnlockLink } from '../plugins/bundled/torbox.js'
+import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
@@ -119,16 +120,29 @@ function getLangPriority() {
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
 async function unlockDebrid(url, onProgress) {
-  if (!isTorboxEnabled()) return { link: null, error: 'Configura TorBox en Ajustes → Debrid.' }
-  try {
-    const result = await tbUnlockLink(url, { onProgress })
-    return result?.link
-      ? { link: result.link }
-      : { link: null, error: result?.error || 'TorBox no pudo desbloquear el enlace.' }
-  } catch (e) {
-    console.warn('[Details] TorBox unlock failed:', e?.message)
-    return { link: null, error: e?.message || 'TorBox unlock failed' }
+  const errors = []
+  if (isAlldebridEnabled()) {
+    try {
+      const result = await adUnlockLink(url)
+      if (result?.link) return { link: result.link }
+      errors.push(result?.error || 'AllDebrid no pudo desbloquear el enlace.')
+    } catch (e) {
+      errors.push(e?.message || 'AllDebrid unlock failed')
+    }
   }
+  if (isTorboxEnabled()) {
+    try {
+      const result = await tbUnlockLink(url, { onProgress })
+      if (result?.link) return { link: result.link }
+      errors.push(result?.error || 'TorBox no pudo desbloquear el enlace.')
+    } catch (e) {
+      errors.push(e?.message || 'TorBox unlock failed')
+    }
+  }
+  if (!isAlldebridEnabled() && !isTorboxEnabled()) {
+    return { link: null, error: 'Configura AllDebrid o TorBox en Ajustes → Debrid.' }
+  }
+  return { link: null, error: errors[errors.length - 1] || 'No se pudo desbloquear el enlace.' }
 }
 
 // Mensaje legible según el error del debrid.
