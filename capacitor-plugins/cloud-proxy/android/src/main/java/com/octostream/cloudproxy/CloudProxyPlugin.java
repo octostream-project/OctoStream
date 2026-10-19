@@ -1042,8 +1042,11 @@ public class CloudProxyPlugin extends Plugin {
         final JSObject headers = call.getObject("headers");
         final Object data = call.getData() != null ? call.getData().opt("data") : null;
         final String responseType = call.getString("responseType", "text");
-        if (url == null || !isGeoBypassHost(url)) {
-            call.reject("directFetch: host não está na lista de geobloqueio");
+        // bypassVpn (resolve TDT): URLs assinadas ligam-se ao IP que resolve —
+        // qualquer host pode precisar de sair pela rede física.
+        final boolean bypassVpn = call.getBoolean("bypassVpn", false);
+        if (url == null || (!bypassVpn && !isGeoBypassHost(url))) {
+            call.reject("directFetch: host not in geo-bypass list");
             return;
         }
         new Thread(() -> {

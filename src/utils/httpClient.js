@@ -18,7 +18,7 @@ function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
 async function nativeRequest(opts) {
-  if (isGeoHost(opts.url)) {
+  if (opts.bypassVpn || isGeoHost(opts.url)) {
     try {
       const r = await CloudProxy.directFetch(opts)
       if (r && typeof r.status === 'number') return r
@@ -66,7 +66,7 @@ export function shortSignal(signal, ms) {
  * @param {Object} headers
  * @param {AbortSignal} [signal] - optional abort signal (web/fetch only)
  */
-export async function httpGetJson(url, headers = {}, signal) {
+export async function httpGetJson(url, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     const isGz = url.endsWith('.gz')
@@ -78,6 +78,7 @@ export async function httpGetJson(url, headers = {}, signal) {
         url,
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
         responseType: isGz ? 'blob' : 'text',
+        bypassVpn,
       })
       if (response.status >= 400) {
         const err = new Error(`HTTP ${response.status}`)
@@ -138,11 +139,12 @@ export async function httpGetJson(url, headers = {}, signal) {
 /**
  * POST JSON with platform-aware HTTP client.
  */
-export async function httpPostJson(url, body, headers = {}, form = false, signal) {
+export async function httpPostJson(url, body, headers = {}, form = false, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
+      bypassVpn,
       method: 'POST',
       url,
       headers: { 'User-Agent': DEFAULT_UA, ...headers },
@@ -172,8 +174,8 @@ export async function httpPostJson(url, body, headers = {}, form = false, signal
 /**
  * Fetch text with platform-aware HTTP client.
  */
-export async function httpGetText(url, headers = {}, signal) {
-  const { data } = await httpGetWithHeaders(url, headers, signal)
+export async function httpGetText(url, headers = {}, signal, bypassVpn = false) {
+  const { data } = await httpGetWithHeaders(url, headers, signal, bypassVpn)
   return data
 }
 
@@ -181,7 +183,7 @@ export async function httpGetText(url, headers = {}, signal) {
  * GET text and return both body text and response headers.
  * Used for login flows that need to capture Set-Cookie headers.
  */
-export async function httpGetWithHeaders(url, headers = {}, signal) {
+export async function httpGetWithHeaders(url, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
@@ -191,6 +193,7 @@ export async function httpGetWithHeaders(url, headers = {}, signal) {
         url,
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
         responseType: 'text',
+        bypassVpn,
       })
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return { data: response.data || '', headers: response.headers || {} }

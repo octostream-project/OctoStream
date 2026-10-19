@@ -1,6 +1,6 @@
 // HTTP helpers for TDT Spain (platform-aware).
 
-import { httpGetJson, httpGetText, httpPostJson } from '../../../utils/httpClient.js'
+import { httpGetJson, httpGetText, httpPostJson as httpPostJsonImpl } from '../../../utils/httpClient.js'
 import { logWarn } from '../../../utils/logger.js'
 import { isAndroidNative } from '../../../utils/platform.js'
 import { proxied } from './constants.js'
@@ -8,7 +8,7 @@ import { proxied } from './constants.js'
 export async function fetchGzJson(url) {
   const fetchUrl = proxied(url)
   try {
-    return await httpGetJson(fetchUrl, { 'Accept-Encoding': 'gzip' })
+    return await httpGetJson(fetchUrl, { 'Accept-Encoding': 'gzip' }, undefined, true)
   } catch (e) {
     if (typeof DecompressionStream !== 'undefined' && !isAndroidNative()) {
       try {
@@ -29,11 +29,13 @@ export async function fetchGzJson(url) {
 }
 
 export async function fetchJson(url, headers = {}) {
-  return httpGetJson(proxied(url), headers)
+  return httpGetJson(proxied(url), headers, undefined, true)
 }
 
 export async function fetchText(url, headers = {}) {
-  return httpGetText(proxied(url), headers)
+  return httpGetText(proxied(url), headers, undefined, true)
 }
 
-export { httpPostJson }
+export function httpPostJson(url, body, headers = {}, form = false, signal) {
+  return httpPostJsonImpl(url, body, headers, form, signal, true)
+}
