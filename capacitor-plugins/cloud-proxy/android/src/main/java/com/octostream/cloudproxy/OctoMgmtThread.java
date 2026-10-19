@@ -79,6 +79,7 @@ public class OctoMgmtThread implements Runnable {
     }
 
     private void handle(String line) {
+        Log.d(TAG, "mgmt line: " + line);
         if (line.startsWith(">STATE:")) {
             // machine-readable: >STATE:ts,STATE,...
             String state = line.split(",").length > 1 ? line.split(",")[1] : "";
@@ -129,9 +130,20 @@ public class OctoMgmtThread implements Runnable {
                 break;
             }
             case "IFCONFIG": {
+                // Formatos reales: "ip peer mtu" | "ip peer netmask mtu" |
+                // "ip netmask". El MTU es el último token si es numérico;
+                // la netmask el token "255.x" (si no hay → peer → /32 p2p).
                 String[] parts = extra.split(" ");
-                int mtu = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
-                if (parts.length >= 2) mService.setLocalIp(parts[0], parts[1], mtu);
+                String ip = parts[0];
+                String maskOrPeer = parts.length >= 2 ? parts[1] : null;
+                int mtu = 0;
+                for (int i = 1; i < parts.length; i++) {
+                    if (parts[i].startsWith("255.")) maskOrPeer = parts[i];
+                    else if (i == parts.length - 1 && i > 1) {
+                        try { mtu = Integer.parseInt(parts[i]); } catch (NumberFormatException ignored) {}
+                    }
+                }
+                if (maskOrPeer != null) mService.setLocalIp(ip, maskOrPeer, mtu);
                 break;
             }
             case "IFCONFIG6": {
