@@ -1,18 +1,18 @@
 {
-  "versionCode": 198,
-  "versionName": "1.98",
+  "versionCode": 199,
+  "versionName": "1.99",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-arm64-v8a.apk",
-  "sha256": "81cc1f75a9e4f71b1442a43f3f6f5d09d99fad2e5237abfa3b53dd88f2e060e9",
-  "notes": "TorBox ya funciona sin AllDebrid: los checks de debrid aceptan cualquiera de los dos",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.99/octostream-1.99-arm64-v8a.apk",
+  "sha256": "5889a90dfcd1eeec4ced77f832abc57e51a4a3d9a719d903ae926ed28fda40c7",
+  "notes": "Fix TorBox: endpoint webdl/createwebdownload (era createtorrent, daba 404)",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.99/octostream-1.99-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.99/octostream-1.99-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.99/octostream-1.99-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "81cc1f75a9e4f71b1442a43f3f6f5d09d99fad2e5237abfa3b53dd88f2e060e9",
-    "armeabi-v7a": "12f74ce873c81e7be5c6fcf6572daefcb9e390e7af9be2c45fb7a2f240c8bec8",
-    "x86_64": "3510e84d5db084bda2038a0cd4e640f755211d1afb9068431e01ee2563d8665f"
+    "arm64-v8a": "5889a90dfcd1eeec4ced77f832abc57e51a4a3d9a719d903ae926ed28fda40c7",
+    "armeabi-v7a": "5d0dba9bd8f27693ca5b2475dcca32cc89f2daabb6d8674b12ab7ca89dee1941",
+    "x86_64": "afcd0f4a4370ac3dcbbe8b44c7cb9beb12070ae1bf6efc2e05b6c1ff06f93c54"
   }
 }

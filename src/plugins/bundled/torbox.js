@@ -47,7 +47,7 @@ async function apiFetch(path, { method = 'GET', params = {}, body, timeoutMs = 2
  */
 export async function unlockLink(url) {
   try {
-    const created = await apiFetch('/webdl/createtorrent', { method: 'POST', body: { link: url } })
+    const created = await apiFetch('/webdl/createwebdownload', { method: 'POST', body: { link: url } })
     const id = created?.webdownload_id ?? created?.id
     if (id == null) return { link: null, error: 'sin id de job' }
     // Poll mylist hasta que esté cached/ready (cache hits son instantáneos)
