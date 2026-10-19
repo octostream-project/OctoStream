@@ -168,7 +168,10 @@ async function configureAetherProxy() {
 }
 
 async function aetherConnect() {
-  if (aetherState.connected && await isAetherProxyUp()) {
+  // Validar el túnel real, no solo los puertos — un aether zombie escucha
+  // en :1819 con el data-plane muerto y devolver "connected" le diría a la
+  // UI que todo va bien mientras cada request muere contra un proxy roto.
+  if (aetherState.connected && await isAetherTunnelAlive()) {
     return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
   }
   if (aetherState.connecting) {

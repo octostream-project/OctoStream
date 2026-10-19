@@ -15,6 +15,20 @@ const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64']
 const LIBS = ['libovpnexec.so', 'libopenvpn.so']
 
 const tmp = path.join('/tmp', 'de.blinkt.openvpn.apk')
+// SHA-256 del APK publicado en F-Droid (de.blinkt.openvpn 219). Verifica
+// la integridad antes de extraer los .so — mismos binarios firmados que
+// la app oficial; sin pin se descargaría lo que pusiera el mirror/CDN.
+const EXPECTED_SHA256 = 'REEMPLAZAR_CON_SHA256_REAL'
+function apkHash() {
+  const h = crypto.createHash('sha256')
+  h.update(fs.readFileSync(tmp))
+  return h.digest('hex')
+}
+const crypto = await import('node:crypto')
+if (fs.existsSync(tmp) && apkHash() !== EXPECTED_SHA256) {
+  console.warn('APK cacheado con hash distinto — re-descargando')
+  fs.unlinkSync(tmp)
+}
 if (!fs.existsSync(tmp)) {
   console.log('Descargando', APK_URL)
   const out = fs.createWriteStream(tmp)
@@ -32,5 +46,11 @@ for (const abi of ABIS) {
     execFileSync('unzip', ['-o', '-j', tmp, `lib/${abi}/${lib}`, '-d', dir], { stdio: 'inherit' })
   }
   console.log(abi, '→', fs.readdirSync(dir).filter(f => f.endsWith('.so')).join(', '))
+}
+const actual = apkHash()
+if (EXPECTED_SHA256.startsWith('REEMPLAZAR')) {
+  console.warn('Hash actual del APK descargado:', actual, '— fíjalo en EXPECTED_SHA256')
+} else if (actual !== EXPECTED_SHA256) {
+  throw new Error(`sha256 del APK no coincide (esperado ${EXPECTED_SHA256}, got ${actual})`)
 }
 console.log('Listo — los .so quedan en jniLibs (se commitean como libaether.so).')

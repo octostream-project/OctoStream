@@ -36,6 +36,9 @@ public class OctoMgmtThread implements Runnable {
 
     public boolean openServer() {
         try {
+            // El socket file sobrevive a un crash del proceso → EADDRINUSE
+            // en la reconexión. Borrarlo antes de bind.
+            new java.io.File(mSockPath).delete();
             LocalSocket s = new LocalSocket();
             s.bind(new LocalSocketAddress(mSockPath, LocalSocketAddress.Namespace.FILESYSTEM));
             mServer = new LocalServerSocket(s.getFileDescriptor());
@@ -49,7 +52,7 @@ public class OctoMgmtThread implements Runnable {
 
     private void sendCmd(String cmd) {
         try {
-            if (mOut != null) mOut.write((cmd + "\n").getBytes());
+            if (mOut != null) { mOut.write((cmd + "\n").getBytes()); mOut.flush(); }
         } catch (Exception e) {
             Log.w(TAG, "mgmt write failed: " + e.getMessage());
         }
@@ -107,6 +110,7 @@ public class OctoMgmtThread implements Runnable {
             case "PROTECTFD": {
                 FileDescriptor fd = pollAncillary();
                 if (fd != null) protectFd(fd);
+                else status = "cancel"; // sin fd → openvpn no puede proteger su socket
                 break;
             }
             case "DNSSERVER":
@@ -132,7 +136,7 @@ public class OctoMgmtThread implements Runnable {
             }
             case "IFCONFIG6": {
                 String[] parts = extra.split(" ");
-                if (parts.length >= 1) mService.setLocalIpV6(parts[0]);
+                if (parts.length >= 2) mService.setLocalIpV6(parts[0], parts[1]);
                 break;
             }
             case "PERSIST_TUN_ACTION":

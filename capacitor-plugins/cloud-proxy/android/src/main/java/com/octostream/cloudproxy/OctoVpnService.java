@@ -61,7 +61,8 @@ public class OctoVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopVpn();
+            // stopVpn hace waitFor(4s) — nunca en el hilo main (ANR).
+            new Thread(this::stopVpn, "ovpn-stop").start();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -79,7 +80,10 @@ public class OctoVpnService extends VpnService {
             NotificationChannel ch = new NotificationChannel(chId, "RiseupVPN", NotificationManager.IMPORTANCE_LOW);
             nm.createNotificationChannel(ch);
         }
-        Notification n = new Notification.Builder(this, Build.VERSION.SDK_INT >= 26 ? chId : null)
+        Notification.Builder nb = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, chId)
+                : new Notification.Builder(this); // ctor de 2 args no existe < 26
+        Notification n = nb
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentTitle("RiseupVPN activo")
                 .setContentText("OctoStream protege la conexión")
@@ -90,6 +94,10 @@ public class OctoVpnService extends VpnService {
 
     private void runVpn(String confPath) {
         try {
+            // El servicio es singleton — resetear la config acumulada o la
+            // sesión anterior deja rutas/DNS/IP fantasma en el nuevo tun.
+            mDns.clear(); mRoutes.clear(); mRoutes6.clear();
+            mLocalIp = null; mLocalBits = 32; mMtu = 0; mLocalIpV6 = null;
             // Socket de management: LocalServerSocket en el FS de la app —
             // openvpn conecta a él vía la línea `management <path> unix`.
             String sockPath = new File(getCacheDir(), "ovpn-mgmt").getAbsolutePath();
@@ -106,6 +114,9 @@ public class OctoVpnService extends VpnService {
             File conf = new File(getCacheDir(), "ovpn-android.conf");
             try (FileWriter w = new FileWriter(conf, false)) {
                 String userConf = new String(java.nio.file.Files.readAllBytes(new File(confPath).toPath()));
+                // El conf crudo lleva la clave privada inline — borrarlo en
+                // cuanto se lee (el servicio usa solo la copia saneada).
+                new File(confPath).delete();
                 w.write(sanitizeConf(userConf));
                 w.write("\nmanagement " + sockPath + " unix\n");
                 w.write("management-client\n");
@@ -158,7 +169,7 @@ public class OctoVpnService extends VpnService {
     }
 
     private static final java.util.regex.Pattern DANGEROUS = java.util.regex.Pattern.compile(
-        "(?im)^\\s*(up|down|ipchange|route-up|route-pre-down|down-pre|client-connect|client-disconnect|learn-address|auth-user-pass-verify|script-security|plugin|management|management-client|management-query-passwords|management-signal|log-append|syslog)\\b.*$");
+        "(?im)^\\s*(up|down|ipchange|route-up|route-pre-down|down-pre|client-connect|client-disconnect|learn-address|auth-user-pass-verify|script-security|plugin|tls-verify|client-config-dir|management|management-client|management-query-passwords|management-signal|log-append|syslog)\\b.*$");
 
     private static String sanitizeConf(String conf) {
         return DANGEROUS.matcher(conf).replaceAll("");
@@ -215,14 +226,18 @@ public class OctoVpnService extends VpnService {
         mRoutes.add(new int[]{bits, Integer.parseInt(o[0]), Integer.parseInt(o[1]), Integer.parseInt(o[2]), Integer.parseInt(o[3])});
     }
     public void addRouteV6(String ip, String prefix) { mRoutes6.add(ip + "/" + prefix.trim()); }
-    public void setLocalIp(String ip, String mask, int mtu) {
+    /** IFCONFIG: arg2 es netmask (topología subnet) o peer-ip (p2p → /32). */
+    public void setLocalIp(String ip, String maskOrPeer, int mtu) {
         mLocalIp = ip;
-        int m = 0;
-        for (String s : mask.split("\\.")) m += Integer.bitCount(Integer.parseInt(s));
-        mLocalBits = m;
+        if (maskOrPeer.startsWith("255.")) {
+            int m = 0;
+            for (String s : maskOrPeer.split("\\.")) m += Integer.bitCount(Integer.parseInt(s));
+            mLocalBits = m;
+        } else mLocalBits = 32;
         if (mtu > 0) mMtu = mtu;
     }
-    public void setLocalIpV6(String addr) { mLocalIpV6 = addr; }
+    /** IFCONFIG6: openvpn manda "ip prefix" separados — se unen a ip/prefix. */
+    public void setLocalIpV6(String ip, String prefix) { mLocalIpV6 = ip + "/" + prefix.trim(); }
     public void setMtu(int mtu) { if (mtu > 0) mMtu = mtu; }
     public boolean protectFd(int fd) { return protect(fd); }
 

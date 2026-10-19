@@ -170,10 +170,7 @@ public class CloudProxyPlugin extends Plugin {
     private void ovpnPermResult(PluginCall call, androidx.activity.result.ActivityResult result) {
         PluginCall pending = mPendingEmbeddedCall;
         mPendingEmbeddedCall = null;
-        if (pending == null) {
-            call.reject("sin connect pendiente");
-            return;
-        }
+        if (pending == null) return; // call ya resuelta — no rechazar dos veces
         if (result.getResultCode() == android.app.Activity.RESULT_OK
                 && mPendingOvpnConf != null) {
             doStartEmbedded(pending, mPendingOvpnConf);
@@ -192,7 +189,8 @@ public class CloudProxyPlugin extends Plugin {
             android.content.Intent intent = new android.content.Intent(ctx, OctoVpnService.class);
             intent.setAction(OctoVpnService.ACTION_START);
             intent.putExtra(OctoVpnService.EXTRA_CONF, confFile.getAbsolutePath());
-            ctx.startService(intent);
+            if (android.os.Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent);
+            else ctx.startService(intent);
             call.resolve(new JSObject().put("status", "connected"));
         } catch (Exception e) {
             Log.e(TAG, "riseupConnectEmbedded failed", e);
@@ -273,6 +271,12 @@ public class CloudProxyPlugin extends Plugin {
             getContext().startService(stop);
         } catch (Exception ignored) {}
         try { if (mOvpnApi != null) mOvpnApi.disconnect(); } catch (Exception ignored) {}
+        try {
+            if (mOvpnConn != null) {
+                getContext().getApplicationContext().unbindService(mOvpnConn);
+                mOvpnConn = null; mOvpnApi = null;
+            }
+        } catch (Exception ignored) {}
         // Clean up proxy settings when the app is destroyed.
         // stopAether() does process.waitFor(5s) — running it on the main
         // thread here would risk an ANR, so the teardown goes to a
