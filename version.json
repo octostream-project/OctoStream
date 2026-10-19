@@ -1,18 +1,18 @@
 {
-  "versionCode": 200,
-  "versionName": "2.0",
+  "versionCode": 202,
+  "versionName": "2.02",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.0/octostream-2.0-arm64-v8a.apk",
-  "sha256": "bd4ec0d5bebffd9c97d2b0a1b27c5faa525fffb3d20e0d6677ad6a83d302ce33",
-  "notes": "TorBox: POSTs form-urlencoded (API rechazaba JSON, 422). VPN: autoconnect persiste al conectar, no tras el poll",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-arm64-v8a.apk",
+  "sha256": "929f7336d98265de6a5116cd9b68ecf243d4bb7426504ceab546ad97900cd650",
+  "notes": "TorBox: param zip_link (devolvia .zip, error 404/player), poll download_ready, POSTs form-urlencoded",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.0/octostream-2.0-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.0/octostream-2.0-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.0/octostream-2.0-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "bd4ec0d5bebffd9c97d2b0a1b27c5faa525fffb3d20e0d6677ad6a83d302ce33",
-    "armeabi-v7a": "d1a215c5ba6368fb4bb79feecd3d7c5baef38a72d4234162235ddc53ae056869",
-    "x86_64": "b6a9d6202b0fdcdca181bf958927225d2242a079570ed50afffc11358fa16112"
+    "arm64-v8a": "929f7336d98265de6a5116cd9b68ecf243d4bb7426504ceab546ad97900cd650",
+    "armeabi-v7a": "a55780c84bd598a3001ee13a233744fef10d970a9d093fabbd78b2ed6213cc6f",
+    "x86_64": "1d4eae8d1f9ebdf3269abfdf5ef0bc71ef54e482a3f97c610b600998acb6284f"
   }
 }

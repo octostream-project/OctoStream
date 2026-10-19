@@ -59,13 +59,16 @@ export async function unlockLink(url) {
       const list = await apiFetch('/webdl/mylist', { params: { bypass_cache: 'true' } })
       const item = (Array.isArray(list) ? list : []).find(w => w?.id === id || w?.webdownload_id === id)
       const st = item?.download_state || item?.status || ''
-      if (/cached|completed|finished|success/i.test(st)) {
-        const r = await apiFetch('/webdl/requestdl', { params: { token: getTorboxApiKey(), web_id: String(id), zip: 'false' } })
+      // TorBox marca listo con download_ready:true o estados completed/cached
+      if (item?.download_ready === true || item?.download_state === 'completed'
+          || /cached|finished|success|ready|processed|seeding/i.test(st)) {
+        const r = await apiFetch('/webdl/requestdl', { params: { token: getTorboxApiKey(), web_id: String(id), zip_link: 'false' } })
         const link = typeof r === 'string' ? r : (r?.download_link || r?.link || r?.url || null)
         if (link) return { link, filename: item?.name || '' }
         return { link: null, error: 'requestdl sin URL' }
       }
       if (/failed|error|dead|invalid/i.test(st)) return { link: null, error: `job ${st}` }
+      if (item?.progress != null && i % 5 === 0) console.log('[TorBox] webdl', Math.round(item.progress * 100) + '%')
     }
     return { link: null, error: 'timeout esperando job' }
   } catch (e) {
@@ -88,12 +91,13 @@ export async function resolveMagnet(magnet, { fileFilter } = {}) {
       const list = await apiFetch('/torrents/mylist', { params: { bypass_cache: 'true' } })
       const t = (Array.isArray(list) ? list : []).find(w => w?.id === tid || w?.torrent_id === tid)
       const st = t?.download_state || t?.status || ''
-      if (/cached|completed|finished|success/i.test(st)) {
+      if (t?.download_ready === true || t?.download_state === 'completed'
+          || /cached|finished|success|ready|processed|seeding/i.test(st)) {
         const files = Array.isArray(t?.files) ? t.files : []
         const pick = fileFilter ? files.find(fileFilter) : null
         const file = pick || files.filter(f => /\.(mp4|mkv|avi|mov|m4v)$/i.test(f?.name || '')).sort((a, b) => (b?.size || 0) - (a?.size || 0))[0] || files.sort((a, b) => (b?.size || 0) - (a?.size || 0))[0]
         if (!file) return { link: null, error: 'sin fichero' }
-        const r = await apiFetch('/torrents/requestdl', { params: { token: getTorboxApiKey(), torrent_id: String(tid), file_id: String(file.id ?? file.file_id ?? 0), zip: 'false' } })
+        const r = await apiFetch('/torrents/requestdl', { params: { token: getTorboxApiKey(), torrent_id: String(tid), file_id: String(file.id ?? file.file_id ?? 0), zip_link: 'false' } })
         const link = typeof r === 'string' ? r : (r?.download_link || r?.link || r?.url || null)
         if (link) return { link, filename: file.name || t?.name || '' }
         return { link: null, error: 'requestdl sin URL' }
