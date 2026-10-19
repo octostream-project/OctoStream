@@ -182,10 +182,10 @@ public class OctoMgmtThread implements Runnable {
                 break;
             }
             case "PERSIST_TUN_ACTION":
-                // openvpn NO acepta "ok" — exige NOOP/OPEN_AFTER_CLOSE/
-                // OPEN_BEFORE_CLOSE. NOOP: no persistimos el tun entre
-                // reconexiones, openvpn pedirá OPENTUN de nuevo.
-                status = "NOOP";
+                // openvpn 2.7 solo acepta OPEN_BEFORE_CLOSE/OPEN_AFTER_CLOSE
+                // (NOOP también es 'unrecognised'). Persistimos el tun —
+                // mTun sigue abierto en el service entre reconexiones.
+                status = "OPEN_BEFORE_CLOSE";
                 break;
             case "OPENTUN":
                 if (!sendTunFd(extra)) status = "cancel";
