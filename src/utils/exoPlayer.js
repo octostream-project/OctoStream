@@ -132,6 +132,7 @@ export async function playStream(options, onStateChange) {
     url,
     streamType: options.streamType || 'hls',
     direct: options.direct === true,
+    bypassVpn: options.bypassVpn === true,
     licenseUrl: options.licenseUrl || null,
     headers: options.headers || {},
     drmHeaders: options.drmHeaders || {},
@@ -181,6 +182,7 @@ export async function switchChannel(options) {
     url,
     streamType: options.streamType || 'hls',
     direct: options.direct === true,
+    bypassVpn: options.bypassVpn === true,
     headers: options.headers || {},
     title: options.title || '',
     channelIndex: options.channelIndex ?? -1,
@@ -293,6 +295,7 @@ export async function playPip(options) {
       url,
       streamType: options.streamType || 'hls',
       direct: options.direct === true,
+    bypassVpn: options.bypassVpn === true,
       headers: options.headers || {},
       title: options.title || '',
     })

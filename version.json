@@ -1,18 +1,18 @@
 {
-  "versionCode": 191,
-  "versionName": "1.91",
+  "versionCode": 192,
+  "versionName": "1.92",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-arm64-v8a.apk",
-  "sha256": "ba3935b3995c83351ac42127ecaa5081ed12d899232bc088efe7f4aaaccb6526",
-  "notes": "HDFull en geo-bypass: login y streams salen por IP real, no por Francia",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-arm64-v8a.apk",
+  "sha256": "cdee3b3c1137eec21631a2d26e19052d0de1fcc06e109e328f249cc6617826ba",
+  "notes": "Todo por la VPN salvo TDT: debrid/YouTube/deportes vuelven al tunel; solo tdtspain sale por IP real",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ba3935b3995c83351ac42127ecaa5081ed12d899232bc088efe7f4aaaccb6526",
-    "armeabi-v7a": "6baadee62f9dc73acfef7f83c1e30af49bfac03829d15bb37487c3ef52c6b274",
-    "x86_64": "5472ce5465b8953af699d0c8313074911afeb4516a0e0b07038b81186b798a6a"
+    "arm64-v8a": "cdee3b3c1137eec21631a2d26e19052d0de1fcc06e109e328f249cc6617826ba",
+    "armeabi-v7a": "1713d8caf2c6fd08a12b23493c28008267ac20dd264b6f8fe34c75ef6f72338d",
+    "x86_64": "a5e775351e4c9a8ae0711bcaa1da7b8a01cda834f827bf81938c8d0e4e95f540"
   }
 }

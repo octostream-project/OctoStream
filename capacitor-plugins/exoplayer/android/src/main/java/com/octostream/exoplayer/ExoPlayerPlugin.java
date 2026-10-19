@@ -150,6 +150,7 @@ public class ExoPlayerPlugin extends Plugin {
     private Map<String, String> currentHeaders = new HashMap<>();
     private String currentStreamType = "hls";
     private boolean currentDirect = false;
+    private boolean currentBypassVpn = false;
     // True for a short window after closePlayer() so the dialog's
     // dispatchKeyEvent can swallow the leaked ACTION_UP/ACTION_DOWN of the
     // same Back press that closed the dialog. Without this, the leaked key
@@ -3369,6 +3370,7 @@ public class ExoPlayerPlugin extends Plugin {
 
         String streamType = call.getString("streamType", "hls");
         boolean direct = call.getBoolean("direct", false);
+        boolean bypassVpn = call.getBoolean("bypassVpn", false);
         String licenseUrl = call.getString("licenseUrl", null);
         JSONObject headersJson = call.getObject("headers", new JSObject());
         JSONObject drmHeadersJson = call.getObject("drmHeaders", new JSObject());
@@ -3451,6 +3453,7 @@ public class ExoPlayerPlugin extends Plugin {
                 longBuffering = longBuf;
                 fastStart = fastStartFlag;
                 streamLoadingText = loadText != null && !loadText.isEmpty() ? loadText : "Cargando enlace…";
+                currentBypassVpn = bypassVpn;
                 openPlayer(url, streamType, direct, licenseUrl, headersJson, drmHeadersJson, title,
                            playerModeForCall, channels, chanIndex, epgNowStr, epgNextStr, epgStart, epgEnd,
                            logo, imdbId, mediaSeason, mediaEpisode, episodes, epIndex, seasons);
@@ -6039,6 +6042,7 @@ public class ExoPlayerPlugin extends Plugin {
                 currentUrl = url != null ? url : "";
                 String streamType = call.getString("streamType", "hls");
                 boolean direct = call.getBoolean("direct", false);
+        boolean bypassVpn = call.getBoolean("bypassVpn", false);
                 String title = call.getString("title", "");
                 int idx = call.getInt("channelIndex", channelIndex);
                 String now = call.getString("epgNow", null);
@@ -6057,6 +6061,7 @@ public class ExoPlayerPlugin extends Plugin {
                 Map<String, String> headers = parseHeaders(headersJson);
                 currentStreamType = streamType;
                 currentDirect = direct;
+                currentBypassVpn = bypassVpn;
                 currentHeaders = headers;
                 lastSourceUsedWarp = shouldUseWarpProxy(url, direct, false);
                 DataSource.Factory dsFactory = buildStreamDataSourceFactory(url, headers, direct, false);
@@ -6131,6 +6136,7 @@ public class ExoPlayerPlugin extends Plugin {
         }
         String type = call.getString("streamType", "hls");
         boolean direct = call.getBoolean("direct", false);
+        boolean bypassVpn = call.getBoolean("bypassVpn", false);
         Map<String, String> headers = parseHeaders(call.getObject("headers", new JSObject()));
         String title = call.getString("title", "");
         mainHandler.post(() -> {
@@ -6228,9 +6234,10 @@ public class ExoPlayerPlugin extends Plugin {
         // Riseup activo sairiam por França e o CDN bloqueava. Com
         // allowBypass() no Builder, atar o socket à rede física tira-os
         // do túnel — a IP vista pelo CDN volta a ser a real.
-        // 'direct' ya marca streams que necesitan la IP real (TDT,
-        // YouTube) — incluye CDNs fuera de la lista de hosts geo.
-        if ((isTdtSpainDomain(url) || direct)
+        // bypassVpn = streams que necesitan la IP real (TDT) — los enlaces
+        // 'direct' de debrid NO entran: quedan ligados a la IP del unlock
+        // (Riseup) y el CDN rechaza si el stream sale por otra IP.
+        if ((isTdtSpainDomain(url) || currentBypassVpn)
                 && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
             javax.net.SocketFactory sf =
                 com.octostream.cloudproxy.CloudProxyPlugin.physicalSocketFactory(getContext());

@@ -739,6 +739,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         // Los torrents van por el servidor local (127.0.0.1) — nunca por WARP —
         // y toleran stalls largos mientras llegan las piezas.
         direct: stream.direct === true || isTorrent,
+        // TDT sale por la red física; debrid queda en el túnel
+        // (el unlock ligó el link a la IP de Riseup).
+        bypassVpn: stream.bypassVpn === true,
         longBuffering: isTorrent,
         // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
         // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.

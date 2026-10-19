@@ -391,7 +391,7 @@ export class PluginManager {
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
         if (streams && streams.length > 0) {
-          return streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain' }))
+          return streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' }))
         }
         return []
       } catch (e) {
@@ -458,7 +458,7 @@ export class PluginManager {
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch: pluginOnBatch }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
         if (streams && streams.length > 0) {
-          const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain' })).filter(noTorrent)
+          const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' })).filter(noTorrent)
           allStreams = allStreams.filter(s => s.pluginId !== plugin.id)
           allStreams = allStreams.concat(tagged)
           if (onBatch) onBatch(allStreams)
