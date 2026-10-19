@@ -109,17 +109,27 @@ public class CloudProxyPlugin extends Plugin {
         }
     }
 
+    /** Motor embebido: true si libovpnexec.so viene en jniLibs. */
+    private boolean hasEmbeddedOvpn() {
+        return new File(getContext().getApplicationInfo().nativeLibraryDir, "libovpnexec.so").isFile();
+    }
+
     /**
      * Conecta el túnel RiseupVPN con el .ovpn generado en JS.
+     * Motor embebido primero (VpnService propio + libovpnexec.so); si el
+     * binario falta, fallback a la API remota de OpenVPN for Android.
      * @param call {config: string} — contenido .ovpn con PEMs inline.
-     *   status: connected | consent (autoriza la app en el diálogo y reintenta)
-     *   | need-vpn-permission (acepta el permiso VPN del sistema y reintenta)
+     *   status: connected | need-vpn-permission | consent (API remota)
      */
     @PluginMethod
     public void riseupConnect(PluginCall call) {
         final String conf = call.getString("config");
         if (conf == null || conf.isEmpty()) {
             call.reject("config required");
+            return;
+        }
+        if (hasEmbeddedOvpn()) {
+            riseupConnectEmbedded(call, conf);
             return;
         }
         if (!isOvpnAppInstalled()) {
@@ -134,6 +144,33 @@ public class CloudProxyPlugin extends Plugin {
                 call.reject("bind a OpenVPN falló: " + e.getMessage());
             }
         }, "ovpn-bind").start();
+    }
+
+    /** Motor embebido: VpnService propio + proceso libovpnexec.so. */
+    private void riseupConnectEmbedded(PluginCall call, String conf) {
+        android.content.Context ctx = getContext();
+        // Permiso VPN del sistema (una sola vez por app).
+        android.content.Intent prepare = android.net.VpnService.prepare(ctx);
+        if (prepare != null) {
+            prepare.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(prepare);
+            call.resolve(new JSObject().put("status", "need-vpn-permission"));
+            return;
+        }
+        try {
+            File confFile = new File(ctx.getCacheDir(), "riseup-user.ovpn");
+            java.io.FileWriter w = new java.io.FileWriter(confFile, false);
+            w.write(conf);
+            w.close();
+            android.content.Intent intent = new android.content.Intent(ctx, OctoVpnService.class);
+            intent.setAction(OctoVpnService.ACTION_START);
+            intent.putExtra(OctoVpnService.EXTRA_CONF, confFile.getAbsolutePath());
+            ctx.startService(intent);
+            call.resolve(new JSObject().put("status", "connected"));
+        } catch (Exception e) {
+            Log.e(TAG, "riseupConnectEmbedded failed", e);
+            call.reject("riseupConnectEmbedded: " + e.getMessage());
+        }
     }
 
     private void doOvpnConnect(PluginCall call) {
@@ -168,6 +205,11 @@ public class CloudProxyPlugin extends Plugin {
     @PluginMethod
     public void riseupDisconnect(PluginCall call) {
         try {
+            if (hasEmbeddedOvpn() || OctoVpnService.isRunning()) {
+                android.content.Intent intent = new android.content.Intent(getContext(), OctoVpnService.class);
+                intent.setAction(OctoVpnService.ACTION_STOP);
+                getContext().startService(intent);
+            }
             if (mOvpnApi != null) mOvpnApi.disconnect();
             mOvpnConnected = false;
             call.resolve(new JSObject().put("status", "disconnected"));
@@ -179,9 +221,13 @@ public class CloudProxyPlugin extends Plugin {
     @PluginMethod
     public void riseupTunnelStatus(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("installed", isOvpnAppInstalled());
-        ret.put("connected", mOvpnConnected);
-        ret.put("hasEngine", mOvpnApi != null);
+        boolean embedded = hasEmbeddedOvpn();
+        ret.put("installed", embedded || isOvpnAppInstalled());
+        ret.put("embedded", embedded);
+        ret.put("connected", embedded ? OctoVpnService.isConnected() : mOvpnConnected);
+        ret.put("connecting", OctoVpnService.isRunning() && !OctoVpnService.isConnected());
+        ret.put("error", OctoVpnService.getLastError());
+        ret.put("hasEngine", embedded || mOvpnApi != null);
         call.resolve(ret);
     }
 
