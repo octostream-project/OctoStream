@@ -12,6 +12,19 @@ const path = require('path')
 
 const state = { proc: null, connecting: false, connected: false, error: '', log: '' }
 
+// Directivas openvpn que ejecutan código o abren canales de control —
+// el .ovpn viene del renderer y pkexec lo corre como ROOT: un
+// `up "/bin/sh -c '…'"` o `plugin evil.so` sería escalada de
+// privilegios. Se eliminan del conf antes de escribirlo.
+const DANGEROUS_DIRECTIVES = /^\s*(up|down|ipchange|route-up|route-pre-down|down-pre|client-connect|client-disconnect|learn-address|auth-user-pass-verify|script-security|plugin|management|management-client|management-query-passwords|management-signal|log-append|syslog)\b/i
+
+function sanitizeOvpnConf(conf) {
+  return String(conf)
+    .split('\n')
+    .filter(line => !DANGEROUS_DIRECTIVES.test(line))
+    .join('\n')
+}
+
 function findOpenvpn() {
   const candidates = (process.env.PATH || '').split(path.delimiter)
     .map(d => path.join(d, 'openvpn'))
@@ -54,10 +67,14 @@ async function connect(confText) {
   state.connecting = true
   state.error = ''
   state.log = ''
-  // El .ovpn lleva la clave privada inline → tmp con 0600 y se borra al salir.
-  const confPath = path.join(os.tmpdir(), `octostream-riseup-${process.pid}.conf`)
+  // Sanitizar el conf (viene del renderer; pkexec lo ejecuta como root).
+  const safeConf = sanitizeOvpnConf(confText)
+  // El .ovpn lleva la clave privada inline → dir tmp aleatorio 0700 +
+  // fichero 0600, sin nombre predecible (evita symlink/TOCTOU en /tmp).
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-ovpn-'))
+  const confPath = path.join(tmpDir, 'riseup.conf')
   try {
-    fs.writeFileSync(confPath, confText, { mode: 0o600 })
+    fs.writeFileSync(confPath, safeConf, { mode: 0o600 })
     // --route-noexec evita que el tun capture el tráfico hasta que el
     // handshake va — no, lo dejamos enrutar todo: es una capa de
     // seguridad sistema-completo (la app incluida, aether sale por aquí).
@@ -68,7 +85,7 @@ async function connect(confText) {
         state.proc = null
         state.connected = false
         state.connecting = false
-        try { fs.unlinkSync(confPath) } catch {}
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {}
       }
     })
     const onData = (c) => {
@@ -99,7 +116,7 @@ async function connect(confText) {
     state.error = e.message
     state.connecting = false
     if (state.proc) { try { state.proc.kill() } catch {} state.proc = null }
-    try { fs.unlinkSync(confPath) } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {}
     return { status: 'error', error: e.message }
   }
 }

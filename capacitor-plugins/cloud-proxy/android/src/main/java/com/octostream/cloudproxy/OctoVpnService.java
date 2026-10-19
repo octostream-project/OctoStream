@@ -100,11 +100,14 @@ public class OctoVpnService extends VpnService {
                 stopSelf();
                 return;
             }
-            // android.conf = conf del usuario + líneas de management.
+            // android.conf = conf del usuario sanitizado + management.
+            // El conf viene del JS: se eliminan directivas que ejecutan
+            // código (up/down/plugin) o abren un management alternativo
+            // (conflicto con el nuestro — directiva duplicada).
             File conf = new File(getCacheDir(), "ovpn-android.conf");
             try (FileWriter w = new FileWriter(conf, false)) {
                 String userConf = new String(java.nio.file.Files.readAllBytes(new File(confPath).toPath()));
-                w.write(userConf);
+                w.write(sanitizeConf(userConf));
                 w.write("\nmanagement " + sockPath + " unix\n");
                 w.write("management-client\n");
                 w.write("machine-readable-output\n");
@@ -155,6 +158,13 @@ public class OctoVpnService extends VpnService {
         }
     }
 
+    private static final java.util.regex.Pattern DANGEROUS = java.util.regex.Pattern.compile(
+        "(?im)^\\s*(up|down|ipchange|route-up|route-pre-down|down-pre|client-connect|client-disconnect|learn-address|auth-user-pass-verify|script-security|plugin|management|management-client|management-query-passwords|management-signal|log-append|syslog)\\b.*$");
+
+    private static String sanitizeConf(String conf) {
+        return DANGEROUS.matcher(conf).replaceAll("");
+    }
+
     public ParcelFileDescriptor openTun() {
         try {
             Builder b = new Builder();
@@ -175,6 +185,10 @@ public class OctoVpnService extends VpnService {
                 b.addRoute(p[0], Integer.parseInt(p[1]));
             }
             if (mRoutes.isEmpty()) b.addRoute("0.0.0.0", 0); // todo por el túnel si el server no empuja
+            // Fuga IPv6: sin ruta ::/0 el tráfico v6 del dispositivo sale
+            // por la IP real aunque v4 vaya por la VPN. La ruta entra al
+            // tun y muere ahí (fail-closed) — Riseup no da v6 por OpenVPN.
+            b.addRoute("::", 0);
             mTun = b.establish();
             return mTun;
         } catch (Exception e) {
