@@ -188,6 +188,10 @@ public class OctoVpnService extends VpnService {
             // por la IP real aunque v4 vaya por la VPN. La ruta entra al
             // tun y muere ahí (fail-closed) — Riseup no da v6 por OpenVPN.
             b.addRoute("::", 0);
+            // Solo el tráfico de ESTA app va por el túnel — el resto del
+            // sistema sigue directo. aether (hijo de la app, mismo uid)
+            // enruta igual → la cadena app→aether→Riseup se mantiene.
+            b.addAllowedApplication(getPackageName());
             mTun = b.establish();
             return mTun;
         } catch (Exception e) {
