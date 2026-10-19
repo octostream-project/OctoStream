@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Visibilidad de paquete + intent para la API remota de
+         OpenVPN for Android (de.blinkt.openvpn) — fallback si el motor
+         embebido no está. -->
+    <queries>
+        <package android:name="de.blinkt.openvpn" />
+        <intent>
+            <action android:name="de.blinkt.openvpn.api.IOpenVPNAPIService" />
+        </intent>
+    </queries>
+
+    <application>
+        <!-- VpnService propio: motor openvpn embebido (libovpnexec.so en
+             jniLibs) para el túnel RiseupVPN. -->
+        <service
+            android:name=".OctoVpnService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
