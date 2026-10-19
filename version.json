@@ -1,18 +1,18 @@
 {
-  "versionCode": 202,
-  "versionName": "2.02",
+  "versionCode": 203,
+  "versionName": "2.03",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-arm64-v8a.apk",
-  "sha256": "929f7336d98265de6a5116cd9b68ecf243d4bb7426504ceab546ad97900cd650",
-  "notes": "TorBox: param zip_link (devolvia .zip, error 404/player), poll download_ready, POSTs form-urlencoded",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-arm64-v8a.apk",
+  "sha256": "ef9ed974a3a629da38820d2bb6320bc4d0368abfabfa1c80c344eb26ffb2d25a",
+  "notes": "TorBox: mostrar detalle del error HTTP 500; listado TorBox dividido en Pendientes y Finalizadas en Ajustes \u2192 Debrid.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.02/octostream-2.02-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "929f7336d98265de6a5116cd9b68ecf243d4bb7426504ceab546ad97900cd650",
-    "armeabi-v7a": "a55780c84bd598a3001ee13a233744fef10d970a9d093fabbd78b2ed6213cc6f",
-    "x86_64": "1d4eae8d1f9ebdf3269abfdf5ef0bc71ef54e482a3f97c610b600998acb6284f"
+    "arm64-v8a": "ef9ed974a3a629da38820d2bb6320bc4d0368abfabfa1c80c344eb26ffb2d25a",
+    "armeabi-v7a": "ce0c90075fff16244bb71e40d99523b8d5aebd8a49e3b0c14a70fa43bec4dc9f",
+    "x86_64": "ba2531938ef2f96048e156336584248e980d440f5d0a7fa219f081cbc40da147"
   }
 }

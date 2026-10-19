@@ -96,6 +96,23 @@ function effectiveSignal(signal) {
   return signal || defaultTimeoutSignal()
 }
 
+function httpError(response) {
+  const status = response?.status || 0
+  let detail = response?.data
+  if (typeof detail === 'string') {
+    try { detail = JSON.parse(detail) } catch {}
+  }
+  if (detail && typeof detail === 'object') {
+    detail = detail.detail || detail.message || detail.error || detail.code
+  }
+  const suffix = typeof detail === 'string'
+    ? `: ${detail.replace(/https?:\/\/\S+/gi, '[url]').slice(0, 180)}`
+    : ''
+  const error = new Error(`HTTP ${status}${suffix}`)
+  error.httpStatus = status
+  return error
+}
+
 // Señal que aborta cuando lo hace la externa o al cumplirse `ms`.
 // Para sondas de dominio: un candidato caído no puede bloquear los demás
 // durante los 20s del timeout por defecto.
@@ -132,18 +149,14 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
         bypassVpn,
       })
       if (response.status >= 400) {
-        const err = new Error(`HTTP ${response.status}`)
-        err.httpStatus = response.status
-        throw err
+        throw httpError(response)
       }
     } catch (e) {
       if (strictNative || e?.code === 'VPN_NOT_CONNECTED') throw e
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) {
-        const err = new Error(`HTTP ${res.status}`)
-        err.httpStatus = res.status
-        throw err
+        throw httpError({ status: res.status, data: typeof res.text === 'function' ? await res.text() : '' })
       }
       try { return await res.json() } catch { throw new Error('Respuesta no es JSON válido') }
     }
@@ -181,9 +194,7 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
 
   const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
   if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`)
-    err.httpStatus = res.status
-    throw err
+    throw httpError({ status: res.status, data: typeof res.text === 'function' ? await res.text() : '' })
   }
   try { return await res.json() } catch { throw new Error('Respuesta no es JSON válido') }
 }
@@ -206,9 +217,7 @@ export async function httpPostJson(url, body, headers = {}, form = false, signal
       responseType: 'json',
     })
     if (response.status >= 400) {
-      const err = new Error(`HTTP ${response.status}`)
-      err.httpStatus = response.status
-      throw err
+      throw httpError(response)
     }
     try { return typeof response.data === 'string' ? JSON.parse(response.data) : response.data }
     catch { throw new Error('Respuesta no es JSON válido') }
@@ -219,7 +228,10 @@ export async function httpPostJson(url, body, headers = {}, form = false, signal
     body: form ? body : JSON.stringify(body),
     signal,
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) throw httpError({
+    status: response.status,
+    data: typeof response.text === 'function' ? await response.text() : '',
+  })
   try { return await response.json() } catch { throw new Error('Respuesta no es JSON válido') }
 }
 

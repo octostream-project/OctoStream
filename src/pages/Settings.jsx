@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
+import { getTorboxDownloads } from '../plugins/bundled/torbox.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
@@ -100,6 +101,9 @@ export default function Settings() {
   // TorBox API key
   const [tbApiKey, setTbApiKey] = useState(localStorage.getItem('octostream_torbox_key') || '')
   const [tbSaved, setTbSaved] = useState(false)
+  const [tbDownloads, setTbDownloads] = useState({ pending: [], completed: [] })
+  const [tbDownloadsLoading, setTbDownloadsLoading] = useState(false)
+  const [tbDownloadsError, setTbDownloadsError] = useState('')
 
   // HDFull credentials
   const [hdfullUser, setHdfullUser] = useState(localStorage.getItem('octostream_hdfull_username') || '')
@@ -469,6 +473,18 @@ export default function Settings() {
     }
     setTbSaved(true)
     setTimeout(() => setTbSaved(false), 2000)
+  }
+
+  const handleTbDownloadsRefresh = async () => {
+    setTbDownloadsLoading(true)
+    setTbDownloadsError('')
+    try {
+      setTbDownloads(await getTorboxDownloads())
+    } catch (e) {
+      setTbDownloadsError(e?.message || 'No se pudieron cargar las descargas de TorBox')
+    } finally {
+      setTbDownloadsLoading(false)
+    }
   }
 
   // --- AllDebrid PIN flow ---
@@ -1489,6 +1505,70 @@ export default function Settings() {
                 Ir a torbox.app
                 <ExternalLink size={14} />
               </a>
+            </div>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-white font-bold">Descargas TorBox</h3>
+                <p className="text-dark-400 text-sm">Pendientes y finalizadas en una sola vista</p>
+              </div>
+              <button
+                onClick={handleTbDownloadsRefresh}
+                disabled={tbDownloadsLoading || !tbApiKey.trim()}
+                className="btn-secondary flex-shrink-0 disabled:opacity-50"
+              >
+                {tbDownloadsLoading ? <OctoLoader size={16} /> : <RefreshCw size={16} />}
+                Actualizar
+              </button>
+            </div>
+            {!tbApiKey.trim() && (
+              <p className="text-dark-500 text-sm">Guarda primero tu API key de TorBox.</p>
+            )}
+            {tbDownloadsError && (
+              <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                {tbDownloadsError}
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {[
+                { title: 'Pendientes', items: tbDownloads.pending, tone: 'text-amber-300' },
+                { title: 'Finalizadas', items: tbDownloads.completed, tone: 'text-green-300' },
+              ].map(group => (
+                <section key={group.title} className="rounded-lg border border-dark-700 bg-dark-900/40 p-4">
+                  <h4 className={`mb-3 font-semibold ${group.tone}`}>
+                    {group.title} <span className="text-dark-500">({group.items.length})</span>
+                  </h4>
+                  {group.items.length === 0 ? (
+                    <p className="text-sm text-dark-500">
+                      {tbDownloadsLoading ? 'Cargando…' : 'No hay elementos'}
+                    </p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {group.items.map(item => {
+                        const pct = Math.max(0, Math.min(100, item.progress > 1 ? item.progress : item.progress * 100))
+                        return (
+                          <li key={`${item.kind}-${item.id}`} className="min-w-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="min-w-0 truncate text-sm text-white" title={item.name}>{item.name}</span>
+                              <span className="flex-shrink-0 text-xs text-dark-400">
+                                {item.kind === 'torrent' ? 'Torrent' : 'Enlace'}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-dark-500">{item.state}</p>
+                            {!item.finished && item.progress > 0 && (
+                              <div className="mt-2 h-1.5 overflow-hidden rounded bg-dark-700">
+                                <div className="h-full bg-primary-500" style={{ width: `${pct}%` }} />
+                              </div>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </section>
+              ))}
             </div>
           </div>
 

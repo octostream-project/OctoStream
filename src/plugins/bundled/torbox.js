@@ -20,6 +20,40 @@ export function isTorboxEnabled() {
   return !!getTorboxApiKey()
 }
 
+export async function getTorboxDownloads() {
+  const [webDownloads, torrents] = await Promise.all([
+    apiFetch('/webdl/mylist', { params: { bypass_cache: 'true', limit: '100' } }),
+    apiFetch('/torrents/mylist', { params: { bypass_cache: 'true', limit: '100' } }),
+  ])
+  const listOf = (value, ...keys) => {
+    if (Array.isArray(value)) return value
+    for (const key of keys) if (Array.isArray(value?.[key])) return value[key]
+    return []
+  }
+  const normalize = (items, kind) => (Array.isArray(items) ? items : []).map(item => {
+    const state = String(item?.download_state || item?.status || item?.state || '')
+    const finished = item?.download_ready === true
+      || /cached|completed|finished|success|ready|processed|seeding/i.test(state)
+    return {
+      id: String(item?.id ?? item?.webdownload_id ?? item?.torrent_id ?? `${kind}-${Math.random()}`),
+      name: item?.name || item?.filename || item?.link || `${kind === 'webdl' ? 'Enlace' : 'Torrent'} ${item?.id ?? ''}`,
+      kind,
+      state: state || (finished ? 'completed' : 'pending'),
+      progress: Number(item?.progress ?? item?.progress_percentage ?? 0),
+      finished,
+      size: Number(item?.size || item?.downloaded || 0),
+    }
+  })
+  const all = [
+    ...normalize(listOf(webDownloads, 'webdownloads', 'downloads', 'items'), 'webdl'),
+    ...normalize(listOf(torrents, 'torrents', 'items'), 'torrent'),
+  ]
+  return {
+    pending: all.filter(item => !item.finished),
+    completed: all.filter(item => item.finished),
+  }
+}
+
 export function clearTorboxToken() {
   try { localStorage.removeItem('octostream_torbox_key') } catch {}
 }
@@ -30,12 +64,20 @@ async function apiFetch(path, { method = 'GET', params = {}, body, timeoutMs = 2
   await waitForVpnTunnel(30000, { required: true })
   const url = `${API}${path}?${new URLSearchParams(params).toString()}`
   const headers = { Authorization: `Bearer ${key}` }
-  const data = method === 'POST'
-    // TorBox espera application/x-www-form-urlencoded, no JSON (422).
-    ? await httpPostJson(url, new URLSearchParams(body || {}).toString(),
-        { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        true, undefined, false, true)
-    : await httpGetJson(url, headers, undefined, false, true)
+  let data
+  try {
+    data = method === 'POST'
+      // TorBox espera application/x-www-form-urlencoded, no JSON (422).
+      ? await httpPostJson(url, new URLSearchParams(body || {}).toString(),
+          { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+          true, undefined, false, true)
+      : await httpGetJson(url, headers, undefined, false, true)
+  } catch (e) {
+    // El path ayuda a identificar un 500 del proveedor sin exponer key ni URL.
+    const wrapped = new Error(`TorBox ${method} ${path}: ${e?.message || 'error HTTP'}`)
+    wrapped.httpStatus = e?.httpStatus
+    throw wrapped
+  }
   if (!data || typeof data !== 'object') throw new Error('Respuesta no es JSON válido')
   if (data.success === false || data.error) {
     const msg = typeof data.error === 'string' ? data.error : (data.error?.code || data.detail || 'error')
