@@ -1,18 +1,18 @@
 {
-  "versionCode": 203,
-  "versionName": "2.03",
+  "versionCode": 204,
+  "versionName": "2.04",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-arm64-v8a.apk",
-  "sha256": "ef9ed974a3a629da38820d2bb6320bc4d0368abfabfa1c80c344eb26ffb2d25a",
-  "notes": "TorBox: mostrar detalle del error HTTP 500; listado TorBox dividido en Pendientes y Finalizadas en Ajustes \u2192 Debrid.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-arm64-v8a.apk",
+  "sha256": "14dac1d17d9cc2e90376716c8581624010dcefbadedf06e19a349dcd316e8127",
+  "notes": "Traduce el error de TorBox cuando el enlace original est\u00e1 offline, inaccesible o requiere sesi\u00f3n.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.03/octostream-2.03-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ef9ed974a3a629da38820d2bb6320bc4d0368abfabfa1c80c344eb26ffb2d25a",
-    "armeabi-v7a": "ce0c90075fff16244bb71e40d99523b8d5aebd8a49e3b0c14a70fa43bec4dc9f",
-    "x86_64": "ba2531938ef2f96048e156336584248e980d440f5d0a7fa219f081cbc40da147"
+    "arm64-v8a": "14dac1d17d9cc2e90376716c8581624010dcefbadedf06e19a349dcd316e8127",
+    "armeabi-v7a": "0de94a52dedca3b73545d2e92ba741b6237fa391c02377334a0d06f1732e3758",
+    "x86_64": "c4860d3983959336acb1ba34e662ea3dada1e6f8b61019eddd29e58bfcc4da24"
   }
 }

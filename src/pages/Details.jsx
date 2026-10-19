@@ -156,6 +156,9 @@ function debridErrorMessage(err) {
     return 'Riseup no está conectado. Espera a que la VPN indique “Conectado” y vuelve a intentar; no se envió el enlace para proteger tu IP.'
   }
   if (/infringing/i.test(e)) return 'AllDebrid bloquea este archivo (DMCA). Prueba otro enlace.'
+  if (/error scanning this link|offline or inaccessible|try a different link/i.test(e)) {
+    return 'TorBox no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor; si AllDebrid está configurado, OctoStream también lo intentará.'
+  }
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
   if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
   // Diagnóstico: el mensaje genérico ocultaba el error real de la API
