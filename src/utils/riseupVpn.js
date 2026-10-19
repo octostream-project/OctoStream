@@ -66,17 +66,19 @@ async function fetchWithRetry(fn, tries = 3) {
   throw lastErr
 }
 
-const PINNED_KEY = 'octostream_riseup_server'
+// Servidor fijo Riseup: Francia, mismo IP de salida en TODOS los
+// dispositivos. vpn02-par si está en la lista; si cae, el primer
+// gateway de París que publique la API (orden determinista — todos
+// los dispositivos convergen en el mismo).
+const FRANCE_GW_IP = '51.159.197.108' // vpn02-par.riseup.net
 
 /**
  * Genera un perfil .ovpn de RiseupVPN con certificado de cliente nuevo.
  * @param {{noIpv6?: boolean, singleRemote?: boolean, signal?: AbortSignal}} opts
- *   singleRemote: fija UNA línea remote (mismo servidor siempre — se
- *   guarda en localStorage la primera vez). Requisito del túnel embebido.
  * @returns {Promise<{conf: string, gateways: number}>}
  */
 export async function generateRiseupOvpn(opts = {}) {
-  const { noIpv6 = false, singleRemote = false, signal } = opts
+  const { noIpv6 = false, singleRemote = true, signal } = opts
   // 1. Cert de cliente (clave privada + cert en un solo PEM) + CA.
   //    La API de riseup es lenta a veces — reintenta como el script.
   const [keyCert, caCert, eip] = await Promise.all([
@@ -91,7 +93,7 @@ export async function generateRiseupOvpn(opts = {}) {
 
   // 2. Gateways con transporte openvpn → líneas `remote <ip> <port>`.
   const gateways = Array.isArray(eip?.gateways) ? eip.gateways : []
-  const remotes = []
+  const entries = []
   for (const g of gateways) {
     const ip = g?.ip_address
     if (!ip) continue
@@ -99,26 +101,27 @@ export async function generateRiseupOvpn(opts = {}) {
     for (const t of transports) {
       if (!String(t?.type || '').includes('openvpn')) continue
       for (const port of t?.ports || []) {
-        remotes.push(`remote ${ip} ${port} # ${g.host || ''} (${g.location || ''})`)
+        entries.push({
+          line: `remote ${ip} ${port} # ${g.host || ''} (${g.location || ''})`,
+          ip, host: g.host || '', location: g.location || '', port,
+        })
       }
     }
   }
-  if (!remotes.length) throw new Error('Riseup no devolvió gateways OpenVPN')
+  if (!entries.length) throw new Error('Riseup no devolvió gateways OpenVPN')
 
-  // 3. Montar el .ovpn: remote lines antes de remote-random + bloques PEM.
-  //    singleRemote → fija UN servidor (misma IP siempre — el usuario lo
-  //    pidió explícitamente); la elección se persiste en localStorage.
-  let chosenRemotes = remotes
+  // 3. Remotes: con singleRemote (defecto) → UN gateway de Francia, la
+  //    misma IP de salida para todo dispositivo. Puerto 1194 preferido.
+  let chosenRemotes
   if (singleRemote) {
-    let pinned = null
-    try { pinned = JSON.parse(localStorage.getItem(PINNED_KEY) || 'null') } catch { /* sin pin previo */ }
-    if (pinned && remotes.includes(pinned)) {
-      chosenRemotes = [pinned]
-    } else {
-      pinned = remotes[0] // primer gateway — fijo desde ahora
-      try { localStorage.setItem(PINNED_KEY, JSON.stringify(pinned)) } catch { /* sin storage */ }
-      chosenRemotes = [pinned]
-    }
+    const fr = entries.filter(e => /paris|france/i.test(e.location) || /-par\./i.test(e.host))
+    const pick =
+      entries.find(e => e.ip === FRANCE_GW_IP && String(e.port) === '1194') ||
+      fr.find(e => String(e.port) === '1194') || fr[0] ||
+      entries.find(e => String(e.port) === '1194') || entries[0]
+    chosenRemotes = [pick.line]
+  } else {
+    chosenRemotes = entries.map(e => e.line)
   }
   let conf = TEMPLATE.replace(/remote <IP> <PORT>\n/, chosenRemotes.join('\n') + '\n')
   if (singleRemote) conf = conf.replace('remote-random\n', '')
