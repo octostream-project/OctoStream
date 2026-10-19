@@ -162,6 +162,9 @@ export default function Settings() {
         // El motor embebido resuelve al arrancar el servicio — el túnel
         // tarda ~5-15s en negociar (openvpn TCP). Polling hasta CONNECTED
         // o error para que el toggle refleje el estado real.
+        // Persistir autoconnect ya — si el usuario sale de Ajustes antes de
+        // que llegue el CONNECTED, el flag queda y la VPN sigue viva.
+        localStorage.setItem('octostream_riseup_autoconnect', 'true')
         setRiseupMsg('Arrancando túnel OpenVPN…')
         const deadline = Date.now() + 45000
         while (Date.now() < deadline) {

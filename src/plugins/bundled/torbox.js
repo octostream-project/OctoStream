@@ -31,7 +31,10 @@ async function apiFetch(path, { method = 'GET', params = {}, body, timeoutMs = 2
   const url = `${API}${path}?${new URLSearchParams(params).toString()}`
   const headers = { Authorization: `Bearer ${key}` }
   const data = method === 'POST'
-    ? await httpPostJson(url, body || {}, headers, false, undefined, false, true)
+    // TorBox espera application/x-www-form-urlencoded, no JSON (422).
+    ? await httpPostJson(url, new URLSearchParams(body || {}).toString(),
+        { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+        true, undefined, false, true)
     : await httpGetJson(url, headers, undefined, false, true)
   if (!data || typeof data !== 'object') throw new Error('Respuesta no es JSON válido')
   if (data.success === false || data.error) {
