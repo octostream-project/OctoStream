@@ -148,6 +148,7 @@ export default function Settings() {
     if (riseupState === 'connected' || riseupState === 'connecting') {
       await disconnectRiseupTunnel()
       setRiseupState('disconnected')
+      localStorage.setItem('octostream_riseup_autoconnect', 'false')
       return
     }
     setRiseupState('connecting')
@@ -157,6 +158,8 @@ export default function Settings() {
       if (r.status === 'connected') {
         setRiseupState('connected')
         setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
+        // Conectar manualmente = recordar autoconnect (como hace WARP).
+        localStorage.setItem('octostream_riseup_autoconnect', 'true')
       } else if (r.status === 'consent') {
         setRiseupState('disconnected')
         setRiseupMsg('Autoriza OctoStream en el diálogo de OpenVPN y pulsa de nuevo.')

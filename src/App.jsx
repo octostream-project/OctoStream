@@ -145,6 +145,18 @@ export default function App() {
       }).catch(() => {})
     }
 
+    // RiseupVPN: auto-conectar si el usuario lo activó (se pone a 'true'
+    // al conectar manualmente en Settings). La primera vez que falta el
+    // permiso el diálogo del sistema aparece en el arranque — necesario
+    // para poder conectar en frío después.
+    if (localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
+      import('./utils/riseupVpn.js').then(({ connectRiseupTunnel, riseupTunnelStatus }) => {
+        riseupTunnelStatus().then(s => {
+          if (!s.connected) connectRiseupTunnel().catch(() => {})
+        }).catch(() => {})
+      }).catch(() => {})
+    }
+
     // Plan de carga en background (TMDB → anime → deportes): precalienta las
     // cachés en orden para que cada sección abra al instante. Espera a WARP
     // internamente — no compite con el primer pintado ni filtra la IP.
