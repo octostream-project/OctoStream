@@ -4610,9 +4610,7 @@ public class ExoPlayerPlugin extends Plugin {
                     || host.equals("atresplayer.com") || host.endsWith(".atresplayer.com")
                     || host.equals("atresmedia.com") || host.endsWith(".atresmedia.com")
                     || host.equals("dai.google.com") || host.endsWith(".dai.google.com")
-                    || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net")
-                    // HDFull rota TLDs (.today .love .sbs .one .buzz .org) + www3/new
-                    || host.contains("hdfull.");
+                    || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net");
         } catch (Exception ignored) {
             return false;
         }
@@ -4667,9 +4665,9 @@ public class ExoPlayerPlugin extends Plugin {
         } else if (lowerUrl.contains(".mpd")) {
             effectiveType = "dash";
         }
-        // Debrid download links (alldebrid.com/d/, CDN *.debrid.it) are
-        // direct file downloads — no playlist aunque streamType diga "hls".
-        if (lowerUrl.contains("download.alldebrid.com") || lowerUrl.contains("alldebrid.com/d/")
+        // TorBox download links are direct files — no playlist aunque el
+        // streamType del proveedor diga "hls".
+        if (lowerUrl.contains("download.torbox.app") || lowerUrl.contains("torbox.app/download")
                 || lowerUrl.matches(".*\\.debrid\\.(it|al|com|cx)/.*")) {
             if (!effectiveType.equals("dash")) {
                 effectiveType = "mp4";
@@ -6234,13 +6232,8 @@ public class ExoPlayerPlugin extends Plugin {
     private DataSource.Factory buildStreamDataSourceFactory(String url, Map<String, String> headers,
             boolean direct, boolean forceBypassProxy) {
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-        // Directos com geobloqueio (TDT/RTVE/Atresmedia…): com o túnel
-        // Riseup activo sairiam por França e o CDN bloqueava. Com
-        // allowBypass() no Builder, atar o socket à rede física tira-os
-        // do túnel — a IP vista pelo CDN volta a ser a real.
-        // bypassVpn = streams que necesitan la IP real (TDT) — los enlaces
-        // 'direct' de debrid NO entran: quedan ligados a la IP del unlock
-        // (Riseup) y el CDN rechaza si el stream sale por otra IP.
+        // Directos geo-bloqueados (TDT/RTVE/Atresmedia…) salen por la red
+        // física; el resto, incluidos TorBox y YouTube, usa Aether/WARP.
         if ((isTdtSpainDomain(url) || currentBypassVpn)
                 && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
             javax.net.SocketFactory sf =

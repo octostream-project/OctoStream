@@ -985,13 +985,12 @@ public class CloudProxyPlugin extends Plugin {
     /**
      * Checks if the SOCKS5 proxy is responding.
      */
-    // === Geo-bypass: hosts com geobloqueio (TDT/directos espanhóis) saem ===
-    // === pela rede física mesmo com o túnel Riseup activo. ==============
+    // TV georestricted domains use the physical network; other app traffic
+    // goes through the Aether/WARP HTTP proxy.
     private static final java.util.regex.Pattern GEO_HOST = java.util.regex.Pattern.compile(
         "(^|\\.)(" +
         "tdtspain\\.com|tdtchannels\\.com|rtve\\.es|mediaset\\.net|mediasetinfinity\\.es|" +
-        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net|" +
-        "hdfull\\.[a-z]{2,10})$",
+        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net)$",
         java.util.regex.Pattern.CASE_INSENSITIVE);
 
     public static boolean isGeoBypassHost(String url) {

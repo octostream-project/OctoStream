@@ -114,13 +114,26 @@ export default function App() {
     if (localStorage.getItem('octostream_warp_autoconnect') === null) {
       localStorage.setItem('octostream_warp_autoconnect', 'true')
     }
-    const warpAuto = localStorage.getItem('octostream_warp_autoconnect')
-    // Riseup y WARP son excluyentes: si el túnel Riseup va a auto-conectar,
-    // WARP no debe conectar (mataría la VPN y la IP de salida sería
-    // Cloudflare en vez de Riseup).
-    const riseupAuto = localStorage.getItem('octostream_riseup_autoconnect') === 'true'
-    console.log('[App] WARP auto-connect flag:', warpAuto)
-    if (warpAuto === 'true' && !riseupAuto) {
+    const hadRiseupEnabled = localStorage.getItem('octostream_riseup_autoconnect') === 'true'
+    // Migración de usuarios de Riseup: apaga el servicio embebido y vuelve
+    // a habilitar Aether/WARP una sola vez al arrancar esta versión.
+    if (hadRiseupEnabled) {
+      localStorage.setItem('octostream_riseup_autoconnect', 'false')
+      localStorage.setItem('octostream_warp_autoconnect', 'true')
+    }
+    try { localStorage.removeItem('octostream_alldebrid_key') } catch {}
+    const startWarp = async () => {
+      if (isAndroidNative() || isElectron()) {
+        try {
+          const { disconnectRiseupTunnel } = await import('./utils/riseupVpn.js')
+          await disconnectRiseupTunnel()
+        } catch (e) {
+          console.warn('[App] Riseup shutdown:', e?.message)
+        }
+      }
+      const warpAuto = localStorage.getItem('octostream_warp_autoconnect')
+      console.log('[App] WARP auto-connect flag:', warpAuto)
+      if (warpAuto !== 'true') return
       CloudProxy.getStatus().then(s => {
         console.log('[App] WARP status:', s.connected)
         if (!s.connected) {
@@ -148,18 +161,7 @@ export default function App() {
         }
       }).catch(() => {})
     }
-
-    // RiseupVPN: auto-conectar si el usuario lo activó (se pone a 'true'
-    // al conectar manualmente en Settings). La primera vez que falta el
-    // permiso el diálogo del sistema aparece en el arranque — necesario
-    // para poder conectar en frío después.
-    if (localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
-      import('./utils/riseupVpn.js').then(({ connectRiseupTunnel, riseupTunnelStatus }) => {
-        riseupTunnelStatus().then(s => {
-          if (!s.connected) connectRiseupTunnel().catch(() => {})
-        }).catch(() => {})
-      }).catch(() => {})
-    }
+    startWarp()
 
     // Plan de carga en background (TMDB → anime → deportes): precalienta las
     // cachés en orden para que cada sección abra al instante. Espera a WARP
@@ -218,17 +220,6 @@ export default function App() {
       if (warpPauseTimerRef.current) {
         clearTimeout(warpPauseTimerRef.current)
         warpPauseTimerRef.current = null
-      }
-      if (localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
-        setWarpBlocking(false)
-        // Túnel Riseup activo: aether fue desconectado por la VPN — limpiar
-        // el proxy para que las peticiones no mueran contra 127.0.0.1:1820.
-        try {
-          const s = await CloudProxy.getStatus()
-          if (token !== lifecycleToken || paused) return
-          if (!s.connected) await CloudProxy.disconnect()
-        } catch { /* estado del proxy no disponible */ }
-        return
       }
       if (localStorage.getItem('octostream_warp_autoconnect') === 'false') {
         setWarpBlocking(false)
@@ -410,10 +401,7 @@ export default function App() {
   useEffect(() => {
     if (!android) return
     const unsub = subscribeWarpStatus(connected => {
-      // Con el túnel Riseup activo la protección la da la VPN — WARP no
-      // debe bloquear la UI ni auto-reconectar.
-      const riseupOn = localStorage.getItem('octostream_riseup_autoconnect') === 'true'
-      const autoConnect = !riseupOn && localStorage.getItem('octostream_warp_autoconnect') !== 'false'
+      const autoConnect = localStorage.getItem('octostream_warp_autoconnect') !== 'false'
       // Only show overlay if auto-connect is on (WARP is expected to be active).
       // If user manually disconnected, they chose to go without WARP —
       // Home/Details waitForWarp will timeout after 15s and proceed

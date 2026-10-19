@@ -12,7 +12,7 @@ import {
 } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
-import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
+import { unlockLink as torboxUnlockLink } from '../plugins/bundled/torbox.js'
 import { pluginManager } from '../plugins/manager.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { useStore } from '../store/useStore.js'
@@ -546,11 +546,11 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         } catch { /* noop */ }
         return null
       }
-      // Debrid: la URL firmada de AllDebrid caduca/4xx — re-desbloquear el
+      // Debrid: la URL firmada caduca/4xx — re-desbloquear el
       // enlace de host original (1fichier…) para obtener una URL fresca.
       if (stream.originalDebridUrl) {
         try {
-          const r = await adUnlockLink(stream.originalDebridUrl)
+          const r = await torboxUnlockLink(stream.originalDebridUrl)
           const u = r?.link
           if (u && u !== stream.url) return sanitizeUrl(u)
         } catch { /* noop */ }
@@ -739,10 +739,8 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         // Los torrents van por el servidor local (127.0.0.1) — nunca por WARP —
         // y toleran stalls largos mientras llegan las piezas.
         direct: stream.direct === true || isTorrent,
-        // TDT sale por la red física; debrid queda en el túnel
-        // (el unlock ligó el link a la IP de Riseup).
+        // Solo los streams de TV geobloqueados evitan Aether/WARP.
         bypassVpn: stream.bypassVpn === true,
-        requireVpn: !!(stream.originalDebridUrl || stream.viaDebrid),
         longBuffering: isTorrent,
         // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
         // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.

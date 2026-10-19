@@ -18,7 +18,7 @@ function BottomNav() {
     { to: '/sports', icon: Trophy, label: 'Deportes' },
     { to: '/search', icon: Search, label: 'Buscar' },
     { to: '/youtube', icon: Youtube, label: 'YouTube' },
-    { to: '/favorites', icon: Heart, label: 'Favoritos', badge: favoritesCount },
+    { to: '/favorites', icon: Heart, label: 'Mi lista', badge: favoritesCount },
     { to: '/history', icon: Clock, label: 'Historial', badge: historyCount },
     ...(hasSeries ? [{ to: '/calendar', icon: CalendarIcon, label: 'Calendario' }] : []),
     { to: '/settings', icon: SettingsIcon, label: 'Ajustes' },

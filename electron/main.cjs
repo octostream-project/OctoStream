@@ -35,17 +35,15 @@ const AETHER_SOCKS_HOST = '127.0.0.1'
 const AETHER_SOCKS_PORT = 1819
 const AETHER_HTTP_PORT = 1820
 
-// Hosts que nunca van por el túnel — espejo de nonProxyHosts/bypass del
-// plugin Android (TDT/RTVE/Mediaset/Google DAI dan errores bajo WARP, y la
-// LAN debe ir directa para la sincronización OctoStream).
-const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|doubleclick\.net|googlevideo\.com)$/i
+// Geo-restricted TV hosts and LAN stay outside WARP; YouTube and other app
+// traffic use Aether/WARP.
+const AETHER_BYPASS_SUFFIX = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|doubleclick\.net)$/i
 const AETHER_BYPASS_CHROMIUM = [
   '<local>', 'localhost', '127.0.0.1', '*.local',
   '192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '169.254.0.0/16',
   '*.tdtspain.com', '*.tdtchannels.com', '*.rtve.es', '*.mediaset.net',
   '*.mediasetinfinity.es', '*.atresplayer.com', '*.atresmedia.com',
   'dai.google.com', '*.doubleclick.net',
-  '*.googlevideo.com',
 ].join(';')
 function isAetherBypassHost(host) {
   return AETHER_BYPASS_SUFFIX.test(host || '') || /^dai\.google\.com$/i.test(host || '')

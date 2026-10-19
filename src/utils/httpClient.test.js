@@ -18,6 +18,11 @@ vi.mock('./cloudProxy.js', () => ({
   },
 }))
 
+vi.mock('./warpStatus.js', () => ({
+  waitForWarp: vi.fn(async () => true),
+  warpAutoConnectEnabled: vi.fn(() => true),
+}))
+
 import { CapacitorHttp } from '@capacitor/core'
 import { isAndroidNative } from './platform.js'
 import {
@@ -25,9 +30,9 @@ import {
   httpGetText,
   httpPostJson,
   httpGetBlob,
-  waitForVpnTunnel,
 } from './httpClient.js'
 import { CloudProxy } from './cloudProxy.js'
+import { waitForWarp } from './warpStatus.js'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -84,12 +89,13 @@ describe('httpGetJson', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('blocks required VPN requests if Riseup is not connected', async () => {
+  it('blocks native requests when WARP autoconnect is enabled but the proxy is down', async () => {
     isAndroidNative.mockReturnValue(true)
+    waitForWarp.mockResolvedValueOnce(false)
 
-    await expect(waitForVpnTunnel(0, { required: true }))
-      .rejects.toMatchObject({ code: 'VPN_NOT_CONNECTED' })
-    expect(CloudProxy.riseupTunnelStatus).not.toHaveBeenCalled()
+    await expect(httpGetJson('https://api.example.com/data'))
+      .rejects.toMatchObject({ code: 'WARP_NOT_CONNECTED' })
+    expect(CapacitorHttp.request).not.toHaveBeenCalled()
   })
 })
 
