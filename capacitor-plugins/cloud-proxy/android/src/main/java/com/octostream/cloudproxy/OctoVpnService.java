@@ -81,7 +81,8 @@ public class OctoVpnService extends VpnService {
             getSharedPreferences("octo_vpn", MODE_PRIVATE).edit().putBoolean("enabled", true).apply();
         }
         startForegroundWithNotif();
-        new Thread(() -> runVpn(confPath), "ovpn-main").start();
+        final String conf = confPath;
+        new Thread(() -> runVpn(conf), "ovpn-main").start();
         return START_STICKY;
     }
 
