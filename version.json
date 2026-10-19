@@ -1,18 +1,18 @@
 {
-  "versionCode": 179,
-  "versionName": "1.79",
+  "versionCode": 180,
+  "versionName": "1.80",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-arm64-v8a.apk",
-  "sha256": "d960389ec1a4879c023cb0b6a9aed828811a5bbca8122c2ff1fc53cf379686e6",
-  "notes": "Motor OpenVPN embebido + Riseup Francia fijo + hardening seguridad",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.80/octostream-1.80-arm64-v8a.apk",
+  "sha256": "698a7ebb383627bca94784588f35e8610900c819c0447975a3d6a123c6e62779",
+  "notes": "Motor OpenVPN embebido estabilizado: fixes ANR, IFCONFIG, notificación API26, subtype API34+",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.80/octostream-1.80-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.80/octostream-1.80-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.80/octostream-1.80-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "d960389ec1a4879c023cb0b6a9aed828811a5bbca8122c2ff1fc53cf379686e6",
-    "armeabi-v7a": "4507b0d74fd8219e200b1ce8554aa85468f336ece9d1ae3f47b58f1d0b97fe44",
-    "x86_64": "cd3d5a09cade7a85ca3a69d43a34d1e8b2fb1b344eb525e858457ac42f2e8e91"
+    "arm64-v8a": "698a7ebb383627bca94784588f35e8610900c819c0447975a3d6a123c6e62779",
+    "armeabi-v7a": "f2d38062f3a38263eeac884a338826fa875fec21354963cf6b80a40d1a31aab8",
+    "x86_64": "dab54a6389f208167ca6527275da509a07673f2660a286a466b2adc1399f4e32"
   }
 }
