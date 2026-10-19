@@ -156,10 +156,28 @@ export default function Settings() {
     try {
       const r = await connectRiseupTunnel()
       if (r.status === 'connected') {
-        setRiseupState('connected')
-        setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
-        // Conectar manualmente = recordar autoconnect (como hace WARP).
-        localStorage.setItem('octostream_riseup_autoconnect', 'true')
+        // El motor embebido resuelve al arrancar el servicio — el túnel
+        // tarda ~5-15s en negociar (openvpn TCP). Polling hasta CONNECTED
+        // o error para que el toggle refleje el estado real.
+        setRiseupMsg('Arrancando túnel OpenVPN…')
+        const deadline = Date.now() + 45000
+        while (Date.now() < deadline) {
+          const s = await riseupTunnelStatus()
+          if (s.connected) {
+            setRiseupState('connected')
+            setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
+            localStorage.setItem('octostream_riseup_autoconnect', 'true')
+            return
+          }
+          if (s.error) {
+            setRiseupState('disconnected')
+            setRiseupMsg('No se pudo conectar: ' + s.error)
+            return
+          }
+          await new Promise(res => setTimeout(res, 1500))
+        }
+        setRiseupState('disconnected')
+        setRiseupMsg('El túnel no levantó en 45s — revisa el log (OctoVpnService).')
       } else if (r.status === 'consent') {
         setRiseupState('disconnected')
         setRiseupMsg('Autoriza OctoStream en el diálogo de OpenVPN y pulsa de nuevo.')

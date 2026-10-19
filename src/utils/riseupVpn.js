@@ -215,8 +215,13 @@ export async function riseupTunnelStatus() {
     try {
       const { CloudProxy } = await import('@octostream/cloud-proxy')
       const s = await CloudProxy.riseupTunnelStatus()
-      // hasOpenvpn es la condición del toggle en Android: la app OpenVPN
-      return { connected: !!s.connected, connecting: false, hasOpenvpn: !!s.installed }
+      return {
+        connected: !!s.connected,
+        connecting: !!s.connecting,
+        hasOpenvpn: !!s.installed,
+        embedded: !!s.embedded,
+        error: s.error || '',
+      }
     } catch {
       return { connected: false, connecting: false, hasOpenvpn: false }
     }
