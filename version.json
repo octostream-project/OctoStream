@@ -1,18 +1,18 @@
 {
-  "versionCode": 195,
-  "versionName": "1.95",
+  "versionCode": 196,
+  "versionName": "1.96",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.95/octostream-1.95-arm64-v8a.apk",
-  "sha256": "7595ab64a4db6333db39573b5fd7d951d89330df6fd1145c9d6efe6f39b46d04",
-  "notes": "AllDebrid siempre via Riseup: unlock/status usan CapacitorHttp con gate fail-closed (nada sale por la IP real sin VPN); la app muestra espera hasta CONNECTED",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.96/octostream-1.96-arm64-v8a.apk",
+  "sha256": "6ea40da2048a87c0bb06717e4c64de5fb8b4c623fd679dd7194989d7aacbd7d9",
+  "notes": "Fix: la VPN no conectaba \u2014 las peticiones de bootstrap a riseup.net quedaban bloqueadas esperando al propio tunel (deadlock)",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.95/octostream-1.95-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.95/octostream-1.95-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.95/octostream-1.95-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.96/octostream-1.96-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.96/octostream-1.96-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.96/octostream-1.96-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "7595ab64a4db6333db39573b5fd7d951d89330df6fd1145c9d6efe6f39b46d04",
-    "armeabi-v7a": "1682ffcbf9b04f5a350c2e43733a8be8ff149bdae94aeffd982deda745a35464",
-    "x86_64": "edef5511543a0f5dfcc843e4a5c10f13e65ec94645c73007a8f4c9b794dbfe65"
+    "arm64-v8a": "6ea40da2048a87c0bb06717e4c64de5fb8b4c623fd679dd7194989d7aacbd7d9",
+    "armeabi-v7a": "d495382f07d386c9aaa22c73ee5f5b6511bd1a47011ad5ed8fdfbc3b52681a58",
+    "x86_64": "1a5cad6f2d517d92c87965f73d867001d6ca815d6982c34eb915a2409885f721"
   }
 }

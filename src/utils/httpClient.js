@@ -17,6 +17,14 @@ const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.ne
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
+// Bootstrap de Riseup: generar el .ovpn exige salir a riseup.net ANTES de
+// que exista el túnel. Si estas peticiones esperan al CONNECTED se produce
+// un deadlock (el túnel no puede subir sin el perfil que están pidiendo) —
+// deben salir directas siempre.
+const VPN_BOOTSTRAP_HOST_RE = /(^|\.)riseup\.net$/i
+function isVpnBootstrapHost(url) {
+  try { return VPN_BOOTSTRAP_HOST_RE.test(new URL(url).hostname) } catch { return false }
+}
 // Gate fail-closed: cuando Riseup está configurado para auto-conectar, no
 // permitimos que requests IP-bound escapen por la red física antes del CONNECTED.
 export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {}) {
@@ -50,7 +58,7 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
-  await waitForVpnTunnel()
+  if (!isVpnBootstrapHost(opts.url)) await waitForVpnTunnel()
   return CapacitorHttp.request(opts)
 }
 
