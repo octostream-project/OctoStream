@@ -1,18 +1,18 @@
 {
-  "versionCode": 192,
-  "versionName": "1.92",
+  "versionCode": 193,
+  "versionName": "1.93",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-arm64-v8a.apk",
-  "sha256": "cdee3b3c1137eec21631a2d26e19052d0de1fcc06e109e328f249cc6617826ba",
-  "notes": "Todo por la VPN salvo TDT: debrid/YouTube/deportes vuelven al tunel; solo tdtspain sale por IP real",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.93/octostream-1.93-arm64-v8a.apk",
+  "sha256": "685eb09f6e0c35a045e4e3456a74a286d1fa262535f311589b54d954a3b5c8bc",
+  "notes": "Fix debrid: el flag bypassVpn quedaba pegado tras ver TDT y sacaba el stream debrid por la IP real",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.92/octostream-1.92-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.93/octostream-1.93-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.93/octostream-1.93-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.93/octostream-1.93-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "cdee3b3c1137eec21631a2d26e19052d0de1fcc06e109e328f249cc6617826ba",
-    "armeabi-v7a": "1713d8caf2c6fd08a12b23493c28008267ac20dd264b6f8fe34c75ef6f72338d",
-    "x86_64": "a5e775351e4c9a8ae0711bcaa1da7b8a01cda834f827bf81938c8d0e4e95f540"
+    "arm64-v8a": "685eb09f6e0c35a045e4e3456a74a286d1fa262535f311589b54d954a3b5c8bc",
+    "armeabi-v7a": "aaa09d39a3b0a1396d804713157adbd72f5faa62be36141d1178ab61b59d33bc",
+    "x86_64": "00e75138e021b65a64dff101819838c33d39a09cd3361b8898b1ff3b32400537"
   }
 }

@@ -549,6 +549,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Referer", origin + "/");
                                 headers.put("Origin", origin);
                             }
+                            currentBypassVpn = false;
                             openPlayer(directUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                         return;
@@ -663,6 +664,7 @@ public class ExoPlayerPlugin extends Plugin {
                 }
                 relayKeepAlive = true;
                 try {
+                    currentBypassVpn = false;
                     openPlayer(relayUrl, "hls", false, null, new JSObject(), new JSObject(),
                             title, mode, null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 } finally {
@@ -1953,6 +1955,7 @@ public class ExoPlayerPlugin extends Plugin {
                             if (cookies != null && !cookies.isEmpty()) {
                                 headers.put("Cookie", cookies);
                             }
+                            currentBypassVpn = false;
                             openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                     }
@@ -3006,6 +3009,7 @@ public class ExoPlayerPlugin extends Plugin {
             if (cookies != null && !cookies.isEmpty()) {
                 headers.put("Cookie", cookies);
             }
+            currentBypassVpn = false;
             openPlayer(url, st, false, null, headers, new JSObject(), title, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
         });
     }
