@@ -61,13 +61,25 @@ public class OctoVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            getSharedPreferences("octo_vpn", MODE_PRIVATE).edit().putBoolean("enabled", false).apply();
             // stopVpn hace waitFor(4s) — nunca en el hilo main (ANR).
             new Thread(this::stopVpn, "ovpn-stop").start();
             stopSelf();
             return START_NOT_STICKY;
         }
         String confPath = intent != null ? intent.getStringExtra(EXTRA_CONF) : null;
-        if (confPath == null) { stopSelf(); return START_NOT_STICKY; }
+        if (confPath == null) {
+            // Always-on: el sistema re-lanza el servicio sin extra (o con
+            // intent null tras matar el proceso). Si la VPN estaba activada
+            // revivir el túnel con el conf cacheado — sin esto el kill
+            // switch del sistema deja el dispositivo SIN internet.
+            boolean enabled = getSharedPreferences("octo_vpn", MODE_PRIVATE).getBoolean("enabled", false);
+            File cached = new File(getCacheDir(), "ovpn-android.conf");
+            if (enabled && cached.isFile()) confPath = cached.getAbsolutePath();
+            else { stopSelf(); return START_NOT_STICKY; }
+        } else {
+            getSharedPreferences("octo_vpn", MODE_PRIVATE).edit().putBoolean("enabled", true).apply();
+        }
         startForegroundWithNotif();
         new Thread(() -> runVpn(confPath), "ovpn-main").start();
         return START_STICKY;
@@ -114,9 +126,9 @@ public class OctoVpnService extends VpnService {
             File conf = new File(getCacheDir(), "ovpn-android.conf");
             try (FileWriter w = new FileWriter(conf, false)) {
                 String userConf = new String(java.nio.file.Files.readAllBytes(new File(confPath).toPath()));
-                // El conf crudo lleva la clave privada inline — borrarlo en
-                // cuanto se lee (el servicio usa solo la copia saneada).
-                new File(confPath).delete();
+                // Borrar el conf crudo (lleva la clave privada inline) salvo
+                // que sea la propia copia cacheada usada por la revivificación.
+                if (!confPath.equals(conf.getAbsolutePath())) new File(confPath).delete();
                 w.write(sanitizeConf(userConf));
                 w.write("\nmanagement " + sockPath + " unix\n");
                 w.write("management-client\n");
@@ -124,6 +136,13 @@ public class OctoVpnService extends VpnService {
                 w.write("management-signal\n");
             }
 
+            // Un openvpn huérfano de una vida anterior del proceso puede
+            // seguir vivo y re-conectar a nuestro socket de management —
+            // se mataría el real. killall funciona sin root (mismo uid).
+            try {
+                new ProcessBuilder("killall", "-9", "libovpnexec.so").start()
+                    .waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception ignored) {}
             String libDir = getApplicationInfo().nativeLibraryDir;
             File exec = new File(libDir, "libovpnexec.so");
             if (!exec.isFile()) {
@@ -247,6 +266,8 @@ public class OctoVpnService extends VpnService {
         if (mMgmt != null) { mMgmt.close(); mMgmt = null; }
         if (mProcess != null) {
             mProcess.destroy();
+            try { new ProcessBuilder("killall", "-9", "libovpnexec.so").start()
+                    .waitFor(2, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
             try {
                 if (!mProcess.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) mProcess.destroyForcibly();
             } catch (InterruptedException ie) {
