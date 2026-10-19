@@ -6226,7 +6226,10 @@ public class ExoPlayerPlugin extends Plugin {
         // Riseup activo sairiam por França e o CDN bloqueava. Com
         // allowBypass() no Builder, atar o socket à rede física tira-os
         // do túnel — a IP vista pelo CDN volta a ser a real.
-        if (isTdtSpainDomain(url) && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
+        // 'direct' ya marca streams que necesitan la IP real (TDT,
+        // YouTube) — incluye CDNs fuera de la lista de hosts geo.
+        if ((isTdtSpainDomain(url) || direct)
+                && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
             javax.net.SocketFactory sf =
                 com.octostream.cloudproxy.CloudProxyPlugin.physicalSocketFactory(getContext());
             if (sf != null) {
