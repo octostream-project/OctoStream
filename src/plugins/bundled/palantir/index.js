@@ -1,6 +1,6 @@
 // Palantir 3 — catálogo moria (SQLite local, ~29k películas + ~8.8k series).
 // Los enlaces son 1fichier cifrados (AES-OFB, descifrado nativo) y requieren
-// debrid (TorBox) que se resuelve al pulsar play (streamType
+// debrid que se resuelve al pulsar play (streamType
 // 'debrid' → Details.handlePlay).
 import { PluginManifest, createPlugin, CONTENT_TYPES } from '../../base.js'
 import { isAvailable, ensureInstalled, maybeUpdate, getStatus, query, decryptLinks } from './db.js'
@@ -205,7 +205,7 @@ export const palantirFactory = (config) => {
           server: '1fichier',
           pluginName: 'Palantir',
           url,
-          // Marcado para resolución lazy vía TorBox en handlePlay.
+          // Marcado para resolución lazy vía debrid en handlePlay.
           streamType: 'debrid',
           quality: r.calidad || '',
           lang: audio,

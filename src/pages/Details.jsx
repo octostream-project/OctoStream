@@ -9,7 +9,6 @@ import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
-import { isTorboxEnabled, unlockLink as tbUnlockLink } from '../plugins/bundled/torbox.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
@@ -119,43 +118,30 @@ function getLangPriority() {
 
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
-async function unlockDebrid(url, onProgress) {
-  const errors = []
-  if (isAlldebridEnabled()) {
-    try {
-      const result = await adUnlockLink(url)
-      if (result?.link) return { link: result.link }
-      errors.push(result?.error || 'AllDebrid no pudo desbloquear el enlace.')
-    } catch (e) {
-      errors.push(e?.message || 'AllDebrid unlock failed')
-    }
+async function unlockDebrid(url) {
+  if (!isAlldebridEnabled()) return { link: null, error: 'Configura AllDebrid en Ajustes → Debrid.' }
+  try {
+    const result = await adUnlockLink(url)
+    return result?.link
+      ? { link: result.link }
+      : { link: null, error: result?.error || 'AllDebrid no pudo desbloquear el enlace.' }
+  } catch (e) {
+    console.warn('[Details] AllDebrid unlock failed:', e?.message)
+    return { link: null, error: e?.message || 'AllDebrid unlock failed' }
   }
-  if (isTorboxEnabled()) {
-    try {
-      const result = await tbUnlockLink(url, { onProgress })
-      if (result?.link) return { link: result.link }
-      errors.push(result?.error || 'TorBox no pudo desbloquear el enlace.')
-    } catch (e) {
-      errors.push(e?.message || 'TorBox unlock failed')
-    }
-  }
-  if (!isAlldebridEnabled() && !isTorboxEnabled()) {
-    return { link: null, error: 'Configura AllDebrid o TorBox en Ajustes → Debrid.' }
-  }
-  return { link: null, error: errors[errors.length - 1] || 'No se pudo desbloquear el enlace.' }
 }
 
 // Mensaje legible según el error del debrid.
 function debridErrorMessage(err) {
   const e = String(err || '')
   if (/software caused connection abort|ECONNABORTED|connection reset|socket hang up/i.test(e)) {
-    return 'Se cortó la conexión con TorBox y no se recibió confirmación. Comprueba Aether/WARP y revisa Ajustes → Debrid → Descargas TorBox antes de reenviar, por si el trabajo llegó a crearse.'
+    return 'Se cortó la conexión con el servicio debrid y no se recibió confirmación. Comprueba la red y reintenta en unos segundos.'
   }
   if (/error scanning this link|offline or inaccessible|try a different link/i.test(e)) {
-    return 'TorBox no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor.'
+    return 'AllDebrid no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor.'
   }
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
-  if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Revisa la API key y tu suscripción de TorBox en Ajustes → Debrid.'
+  if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Revisa la API key y tu suscripción de AllDebrid en Ajustes → Debrid.'
   // Diagnóstico: el mensaje genérico ocultaba el error real de la API
   // (p. ej. bloqueo por IP del túnel). Se muestra el motivo crudo.
   return `No se pudo desbloquear el enlace (debrid): ${e || 'error desconocido'}`
@@ -527,7 +513,6 @@ export default function Details() {
   }, [type, id, location.state?.autoplay])
 
   const [resolvingStream, setResolvingStream] = useState(false)
-  const [debridProgress, setDebridProgress] = useState(null)
 
   // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
@@ -558,7 +543,7 @@ export default function Details() {
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
       if (!isTorboxEnabled()) {
-        setEpisodeError('Este enlace requiere TorBox. Configúralo en Ajustes → Debrid.')
+        setEpisodeError('Este enlace requiere AllDebrid. Configúralo en Ajustes → Debrid.')
         return
       }
       setEpisodeError(null)
@@ -574,9 +559,8 @@ export default function Details() {
         .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
       const candidates = [stream, ...others].slice(0, 8)
       const errors = []
-      setDebridProgress(null)
       const attempts = candidates.map(cand =>
-        unlockDebrid(cand.url, (p) => setDebridProgress(p)).then(r => {
+        unlockDebrid(cand.url).then(r => {
           if (r?.link) return { cand, direct: r.link }
           errors.push(r?.error || 'unlock failed')
           throw new Error(r?.error || 'unlock failed')
@@ -592,7 +576,7 @@ export default function Details() {
         // llegar a ~2 min en "Resolviendo…"
         // y parecía que el enlace no abría. A los 90s se informa y se puede
         // reintentar.
-        // Tope acorde al poll de TorBox (90 it × 2s ≈ 3 min): un archivo
+        // Tope al esperar debrid: un archivo no cacheado puede tardar.
         // grande sigue descargándose en su CDN y el job persiste — cortar
         // antes dejaba "resolviendo" muerto aunque el progreso avanzara.
         resolved = await Promise.race([
@@ -602,7 +586,6 @@ export default function Details() {
       } catch { /* todos fallaron o timeout */ }
       const lastError = errors[errors.length - 1]
       setResolvingStream(false)
-      setDebridProgress(null)
       if (!resolved) {
         console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
         setEpisodeError(debridErrorMessage(lastError)
@@ -625,7 +608,7 @@ export default function Details() {
     // .avi desbloqueado disparaba un resolveEmbed sobre la URL .torrent).
     const isDirectUrl = /\.(m3u8|mp4|mkv|avi|ts|mov|m4v|webm|wmv)(\?|$)/i.test(stream.url)
       || /videoplayback/.test(stream.url)
-      || /download\.torbox\.app|torbox\.app\/download|\.debrid\.(it|al|com|cx|ee|is)\//i.test(stream.url)
+      || /download\.alldebrid\.com|alldebrid\.com\/d\/|\.debrid\.(it|al|com|cx|ee|is)\//i.test(stream.url)
     // Re-resolve if: has originalUrl, is not an embed, and either:
     // - URL is not direct (still an embed page), OR
     // - URL is direct but from a CDN with expiring tokens (fastream, streamwish, etc.)
@@ -1353,15 +1336,8 @@ export default function Details() {
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
           <LogoLoader size={80} />
           <p className="text-white text-base">
-            {debridProgress
-              ? `Descargando en TorBox… ${Math.round((debridProgress.progress || 0) * 100)}%`
-              : 'Resolviendo vídeo…'}
+            {'Resolviendo vídeo…'}
           </p>
-          {debridProgress && (
-            <p className="text-dark-400 text-xs max-w-xs text-center">
-              TorBox está trayendo el archivo a su CDN. Puede tardar unos minutos la primera vez.
-            </p>
-          )}
         </div>
       )}
 

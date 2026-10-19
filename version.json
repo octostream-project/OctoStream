@@ -1,18 +1,18 @@
 {
-  "versionCode": 206,
-  "versionName": "2.06",
+  "versionCode": 2061,
+  "versionName": "2.06.1",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.06/octostream-2.06-arm64-v8a.apk",
-  "sha256": "240cc3aa7ad25c874b47e2e0d270460d8eda1c9bb76abeb123883e51832b59ac",
-  "notes": "Vuelve RiseupVPN (toggle en Ajustes → Red, autoconnect persistente) y AllDebrid (clave en Ajustes → Debrid) como debrid principal con streaming instantáneo; TorBox queda como alternativa.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-arm64-v8a.apk",
+  "sha256": "a0dd3e11a49c2b5653efc4ca456cc302cd8227bd20ba0ea6cb7be6f0a32ac954",
+  "notes": "TorBox eliminado por completo; AllDebrid queda como único debrid, con flujo PIN restaurado (conecta la cuenta desde alldebrid.com/pin sin copiar la key).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06/octostream-2.06-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06/octostream-2.06-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.06/octostream-2.06-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "240cc3aa7ad25c874b47e2e0d270460d8eda1c9bb76abeb123883e51832b59ac",
-    "armeabi-v7a": "7ed67aa21c9b62e5c6d872f621f862c0484cca16e66e51242edaeabcd979bfb8",
-    "x86_64": "4a2589133f69e6a74bc2faabbac28c795d859b8d60a322121d1ebcb3b05caf84"
+    "arm64-v8a": "a0dd3e11a49c2b5653efc4ca456cc302cd8227bd20ba0ea6cb7be6f0a32ac954",
+    "armeabi-v7a": "6eefcf26e29a1298b21a3854627512f3acfc2098d0e93f5f9b776521dae9eeab",
+    "x86_64": "62a94e5b0cd45b7260e4693505940fe3b9b052a5b4573b26b779700f7bca3b8b"
   }
 }

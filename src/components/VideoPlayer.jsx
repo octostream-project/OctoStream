@@ -12,7 +12,7 @@ import {
 } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
-import { unlockLink as torboxUnlockLink } from '../plugins/bundled/torbox.js'
+import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { pluginManager } from '../plugins/manager.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { useStore } from '../store/useStore.js'
@@ -550,7 +550,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       // enlace de host original (1fichier…) para obtener una URL fresca.
       if (stream.originalDebridUrl) {
         try {
-          const r = await torboxUnlockLink(stream.originalDebridUrl)
+          const r = await adUnlockLink(stream.originalDebridUrl)
           const u = r?.link
           if (u && u !== stream.url) return sanitizeUrl(u)
         } catch { /* noop */ }

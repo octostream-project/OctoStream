@@ -8,6 +8,7 @@ import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
+import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
@@ -93,14 +94,18 @@ export default function Settings() {
   const traktPinTimerRef = useRef(null)
   const traktPinPollingRef = useRef(false)
 
-  // TorBox API key
+  // AllDebrid API key
   const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
   const [adSaved, setAdSaved] = useState(false)
+  // PIN flow state (AllDebrid)
+  const [adPin, setAdPin] = useState(null)
+  const [adPinLoading, setAdPinLoading] = useState(false)
+  const [adPinError, setAdPinError] = useState('')
+  const adPinTimerRef = useRef(null)
+  const adPinPollingRef = useRef(false)
   const [riseupState, setRiseupState] = useState('disconnected')
   const [riseupBusy, setRiseupBusy] = useState(false)
   const [riseupMsg, setRiseupMsg] = useState('')
-  const [tbApiKey, setTbApiKey] = useState(localStorage.getItem('octostream_torbox_key') || '')
-  const [tbSaved, setTbSaved] = useState(false)
 
   // HDFull credentials
   const [hdfullUser, setHdfullUser] = useState(localStorage.getItem('octostream_hdfull_username') || '')
@@ -140,7 +145,6 @@ export default function Settings() {
   // Búsquedas torrent (DonTorrent, GranTorrent, SubTorrents). Apagado = los
   // sitios torrent no se consultan ni emiten streams.
   const [torrentSearch, setTorrentSearch] = useState(localStorage.getItem('octostream_torrent_search') !== 'false')
-  const [torboxSearch, setTorboxSearch] = useState(localStorage.getItem('octostream_torbox_search') !== 'false')
 
   const handleScreensaverSave = () => {
     localStorage.setItem('octostream_screensaver_enabled', ssEnabled ? 'true' : 'false')
@@ -280,17 +284,6 @@ export default function Settings() {
     }
   }
 
-  const handleTbSave = () => {
-    const key = tbApiKey.trim()
-    if (!key) {
-      localStorage.removeItem('octostream_torbox_key')
-    } else {
-      localStorage.setItem('octostream_torbox_key', key)
-    }
-    setTbSaved(true)
-    setTimeout(() => setTbSaved(false), 2000)
-  }
-
   const handleAdSave = () => {
     const key = adApiKey.trim()
     if (!key) localStorage.removeItem('octostream_alldebrid_key')
@@ -298,6 +291,66 @@ export default function Settings() {
     setAdSaved(true)
     setTimeout(() => setAdSaved(false), 2000)
   }
+
+  // --- AllDebrid PIN flow ---
+  const handleAdPinStart = useCallback(async () => {
+    setAdPinError('')
+    setAdPinLoading(true)
+    setAdPin(null)
+    if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
+    try {
+      const pin = await adGetPin()
+      if (!pin) {
+        setAdPinError('No se pudo obtener el código PIN')
+        setAdPinLoading(false)
+        return
+      }
+      setAdPin(pin)
+      const startTime = Date.now()
+      adPinTimerRef.current = setInterval(async () => {
+        if (adPinPollingRef.current) return
+        if (Date.now() - startTime > pin.expires_in * 1000) {
+          clearInterval(adPinTimerRef.current)
+          setAdPinError('El código PIN ha expirado')
+          setAdPin(null)
+          setAdPinLoading(false)
+          return
+        }
+        adPinPollingRef.current = true
+        try {
+          const result = await adCheckPin(pin.pin, pin.check)
+          if (result?.activated && result.apikey) {
+            clearInterval(adPinTimerRef.current)
+            localStorage.setItem('octostream_alldebrid_key', result.apikey)
+            setAdApiKey(result.apikey)
+            setAdPin(null)
+            setAdPinLoading(false)
+            setAdSaved(true)
+            setTimeout(() => setAdSaved(false), 2000)
+          }
+        } catch (e) {
+          setAdPinError(e?.message || 'Error al verificar el PIN')
+        } finally {
+          adPinPollingRef.current = false
+        }
+      }, 5000)
+    } catch (e) {
+      setAdPinError(e?.message || 'Error al obtener PIN')
+      setAdPinLoading(false)
+    }
+  }, [])
+
+  const handleAdPinCancel = useCallback(() => {
+    if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
+    setAdPin(null)
+    setAdPinLoading(false)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     riseupTunnelStatus().then(st => {
@@ -1163,6 +1216,52 @@ export default function Settings() {
                 Guardar AllDebrid
               </button>
             </div>
+            {/* PIN flow */}
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-3">¿O conecta tu cuenta con un código PIN:</p>
+              {!adPin && !adPinLoading && (
+                <button onClick={handleAdPinStart} className="btn-secondary">
+                  <Key size={16} />
+                  Obtener código PIN
+                </button>
+              )}
+              {adPinLoading && !adPin && (
+                <div className="flex items-center gap-2 text-dark-400 text-sm">
+                  <OctoLoader size={16} />
+                  Obteniendo código PIN...
+                </div>
+              )}
+              {adPin && (
+                <div className="bg-primary-600/10 border border-primary-600/30 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="text-3xl font-bold text-primary-400 tracking-wider">{adPin.pin}</div>
+                    <div className="flex items-center gap-1 text-dark-400 text-sm">
+                      <OctoLoader size={14} />
+                      Esperando activación...
+                    </div>
+                  </div>
+                  <a
+                    href={adPin.user_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-primary-400 text-sm hover:text-primary-300"
+                  >
+                    Introduce el PIN en alldebrid.com/pin
+                    <ExternalLink size={14} />
+                  </a>
+                  <button onClick={handleAdPinCancel} className="text-dark-400 text-sm hover:text-red-400">
+                    Cancelar
+                  </button>
+                </div>
+              )}
+              {adPinError && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3 mt-2">
+                  <AlertCircle size={16} />
+                  {adPinError}
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 pt-4 border-t border-dark-700">
               <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key?</p>
               <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
@@ -1174,61 +1273,11 @@ export default function Settings() {
           </div>
 
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="text-white font-bold">TorBox API Key</h3>
-                <p className="text-dark-400 text-sm mt-1">
-                  Desbloquea enlaces compatibles y torrents con TorBox
-                </p>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="password"
-                value={tbApiKey}
-                onChange={e => setTbApiKey(e.target.value)}
-                placeholder="Introduce tu TorBox API key"
-                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
-              />
-              {tbSaved && (
-                <div className="flex items-center gap-2 text-green-400 text-sm">
-                  <Check size={16} />
-                  Guardado
-                </div>
-              )}
-              <button
-                onClick={handleTbSave}
-                className="w-full bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg px-4 py-3 transition-colors"
-              >
-                Guardar TorBox
-              </button>
-            </div>
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key?</p>
-              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
-                <li>Regístrate en torbox.app (servicio de pago)</li>
-                <li>Ve a Settings → API</li>
-                <li>Copia tu API key</li>
-                <li>Pégala arriba</li>
-              </ol>
-              <a
-                href="https://torbox.app/settings"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
-              >
-                Ir a torbox.app
-                <ExternalLink size={14} />
-              </a>
-            </div>
-          </div>
-
-          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-dark-400">TorBox API Key</span>
-                {localStorage.getItem('octostream_torbox_key') ? (
+                <span className="text-dark-400">AllDebrid API Key</span>
+                {localStorage.getItem('octostream_alldebrid_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1447,26 +1496,6 @@ export default function Settings() {
               </button>
             </label>
 
-            <label className="flex items-center justify-between cursor-pointer">
-              <div>
-                <span className="text-sm text-dark-300 block">Búsqueda TorBox (torrent + usenet)</span>
-                <span className="text-xs text-dark-500">Índice Orion de TorBox: añade torrents y NZBs cacheados por IMDb a cada ficha (requiere la API key)</span>
-              </div>
-              <button
-                data-tv-card
-                tabIndex={0}
-                onClick={() => {
-                  const newVal = !torboxSearch
-                  setTorboxSearch(newVal)
-                  localStorage.setItem('octostream_torbox_search', newVal ? 'true' : 'false')
-                }}
-                className={`relative w-12 h-6 rounded-full transition-colors ${torboxSearch ? 'bg-primary-600' : 'bg-dark-700'}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${torboxSearch ? 'translate-x-6' : ''}`}
-                />
-              </button>
-            </label>
             </div>
           </div>
 

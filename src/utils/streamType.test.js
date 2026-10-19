@@ -21,7 +21,7 @@ describe('inferStreamType', () => {
 
   it('detecta hosts de descarga debrid sin extensión clara', () => {
     expect(inferStreamType('https://n0o1p2.debrid.it/dl/xyz/file')).toBe('mp4')
-    expect(inferStreamType('https://download.torbox.app/abc')).toBe('mp4')
+    expect(inferStreamType('https://download.alldebrid.com/abc')).toBe('mp4')
   })
 
   it('detecta DASH y torrent', () => {

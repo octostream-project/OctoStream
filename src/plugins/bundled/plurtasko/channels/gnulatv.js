@@ -12,7 +12,6 @@
 import { CONTENT_TYPES } from '../../../base.js'
 import { fetchHtml, decodeEntities, absoluteUrl } from '../http.js'
 import { findSingleMatch, findMultipleMatches, normalizeServer } from '../scraper.js'
-import { isTorboxSupported } from '../../torbox.js'
 import { isAlldebridSupported } from '../../alldebrid.js'
 
 const HOST = 'https://ww3.gnulahd.nu/'
@@ -178,7 +177,7 @@ export const gnulatv = {
     if (debridEnabled) {
       for (const d of data.dl || []) {
         const src = d.url
-        if (!src || !/^https?:/i.test(src) || !(isTorboxSupported(src) || isAlldebridSupported(src))) continue
+        if (!src || !/^https?:/i.test(src) || !isAlldebridSupported(src)) continue
         const l = langFromLabel(d.lang)
         const server = String(d.name || 'descarga').toLowerCase()
         streams.push({

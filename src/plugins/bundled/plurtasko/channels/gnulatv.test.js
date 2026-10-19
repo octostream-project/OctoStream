@@ -150,7 +150,7 @@ describe('gnulatv channel', () => {
       expect.stringContaining('player?id=215749&t=tok310'),
       expect.anything(),
     )
-    // Con TorBox: 3 embeds + 1fichier (gofile no está soportado por el API webdl)
+    // Con AllDebrid: 3 embeds + 1fichier (gofile no está soportado)
     expect(streams).toHaveLength(4)
     const dl = streams.find(s => s.server === '1fichier')
     expect(dl.lang).toBe('VOSE')
