@@ -203,6 +203,26 @@ export async function httpGetText(url, headers = {}, signal, bypassVpn = false) 
  * GET text and return both body text and response headers.
  * Used for login flows that need to capture Set-Cookie headers.
  */
+/**
+ * HEAD request — returns {status, headers} without downloading the body.
+ * Used to validate debrid/CDN links before handing them to the player.
+ */
+export async function httpHead(url, headers = {}, signal, bypassVpn = false) {
+  signal = effectiveSignal(signal)
+  if (isAndroidNative()) {
+    const response = await nativeRequest({
+      ...NATIVE_TIMEOUTS,
+      method: 'HEAD',
+      url,
+      headers: { 'User-Agent': DEFAULT_UA, ...headers },
+      bypassVpn,
+    })
+    return { status: response.status, headers: response.headers || {} }
+  }
+  const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
+  return { status: res.status, headers: res.headers }
+}
+
 export async function httpGetWithHeaders(url, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {

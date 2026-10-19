@@ -4,7 +4,7 @@
 // requestdl. Magnets: torrents createtorrent → mylist → requestdl (file_id).
 // All API traffic follows the app's Aether/WARP proxy configuration.
 
-import { httpGetJson, httpPostJson } from '../../utils/httpClient.js'
+import { httpGetJson, httpPostJson, httpHead } from '../../utils/httpClient.js'
 import { getItemSync } from '../../utils/storage.js'
 
 const API = 'https://api.torbox.app/v1/api'
@@ -31,6 +31,23 @@ export function isTorboxSupported(url) {
   } catch {
     return false
   }
+}
+
+
+/**
+ * Pide el link de descarga y lo valida con HEAD antes de entregarlo.
+ * TorBox sirve el archivo progresivamente en algunos casos — si responde,
+ * el player puede empezar aunque el job siga "downloading".
+ */
+async function validatedLink(path, params) {
+  try {
+    const r = await apiFetch(path, { params: { token: getTorboxApiKey(), redirect: 'false', ...params } })
+    const link = typeof r === 'string' ? r : (r?.download_link || r?.link || r?.url || null)
+    if (!link || !/^https?:/i.test(link)) return null
+    const probe = await httpHead(link, {}, undefined, true).catch(() => null)
+    if (probe && probe.status < 400) return link
+    return null
+  } catch { return null }
 }
 
 export async function getTorboxDownloads() {
@@ -150,6 +167,13 @@ export async function unlockLink(url, { onProgress } = {}) {
       if (item && onProgress) {
         try { onProgress({ progress: Number(item.progress ?? 0), state: st || 'downloading' }) } catch {}
       }
+      // Reproducción progresiva: con >=15% descargado se intenta el link
+      // cada ~16s — si TorBox lo sirve ya, se reproduce sin esperar al 100%.
+      const prog = Number(item?.progress ?? 0)
+      if (item && prog >= 0.15 && prog < 1 && i % 8 === 4) {
+        const early = await validatedLink('/webdl/requestdl', { web_id: String(id), zip_link: 'false' })
+        if (early) return { link: early, filename: item?.name || '', early: true }
+      }
       if (item?.progress != null && i % 5 === 0) console.log('[TorBox] webdl', Math.round(item.progress * 100) + '%')
     }
     // El trabajo sigue vivo en la cuenta — reintentar re-adjuntará al mismo job.
@@ -185,6 +209,15 @@ export async function resolveMagnet(magnet, { fileFilter } = {}) {
         return { link: null, error: 'requestdl sin URL' }
       }
       if (/failed|error|dead|invalid/i.test(st)) return { link: null, error: `torrent ${st}` }
+      const prog = Number(t?.progress ?? 0)
+      if (t && prog >= 0.15 && prog < 1 && i % 8 === 4) {
+        const files = Array.isArray(t?.files) ? t.files : []
+        const f = files.filter(x => /\.(mp4|mkv|avi|mov|m4v)$/i.test(x?.name || '')).sort((a, b) => (b?.size || 0) - (a?.size || 0))[0] || files[0]
+        if (f) {
+          const early = await validatedLink('/torrents/requestdl', { torrent_id: String(tid), file_id: String(f.id ?? f.file_id ?? 0), zip_link: 'false' })
+          if (early) return { link: early, filename: f.name || t?.name || '', early: true }
+        }
+      }
     }
     return { link: null, error: 'El torrent sigue descargándose en TorBox; reintenta en unos segundos.' }
   } catch (e) {
@@ -219,6 +252,15 @@ export async function resolveUsenet(link, { fileFilter } = {}) {
         return { link: null, error: 'requestdl sin URL' }
       }
       if (/failed|error|dead|invalid/i.test(st)) return { link: null, error: `usenet ${st}` }
+      const prog = Number(t?.progress ?? 0)
+      if (t && prog >= 0.15 && prog < 1 && i % 8 === 4) {
+        const files = Array.isArray(t?.files) ? t.files : []
+        const f = files.filter(x => /\.(mp4|mkv|avi|mov|m4v)$/i.test(x?.name || '')).sort((a, b) => (b?.size || 0) - (a?.size || 0))[0] || files[0]
+        if (f) {
+          const early = await validatedLink('/usenet/requestdl', { usenet_id: String(uid), file_id: String(f.id ?? f.file_id ?? 0), zip_link: 'false' })
+          if (early) return { link: early, filename: f.name || t?.name || '', early: true }
+        }
+      }
     }
     return { link: null, error: 'La descarga usenet sigue en curso en TorBox; reintenta en unos segundos.' }
   } catch (e) {

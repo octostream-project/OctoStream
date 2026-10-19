@@ -1,18 +1,18 @@
 {
-  "versionCode": 2052,
-  "versionName": "2.05.2",
+  "versionCode": 2053,
+  "versionName": "2.05.3",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.2/octostream-2.05.2-arm64-v8a.apk",
-  "sha256": "3dc63c8ffc8c74f949e384dd40bf8434f835ce6e984de1b2225100f9e37b388f",
-  "notes": "La resolución de enlaces debrid ahora muestra el progreso real de la descarga en TorBox (\"Descargando en TorBox… NN%\") en vez de un \"Resolviendo vídeo\" sin información, y espera hasta 3 minutos para archivos grandes.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.3/octostream-2.05.3-arm64-v8a.apk",
+  "sha256": "24b7ffbc00c9a45cec3028bfb098a06adbe4e0ffe784cc079218a1b51bb8ee82",
+  "notes": "Reproducción temprana de debrid: cuando TorBox lleva >=15% de la descarga, la app prueba el link periódicamente y empieza a reproducir en cuanto el CDN responde, sin esperar al 100%.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.2/octostream-2.05.2-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.2/octostream-2.05.2-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.2/octostream-2.05.2-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.3/octostream-2.05.3-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.3/octostream-2.05.3-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.3/octostream-2.05.3-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "3dc63c8ffc8c74f949e384dd40bf8434f835ce6e984de1b2225100f9e37b388f",
-    "armeabi-v7a": "90a03ee0d9e6daa8c00c48d16996306688676278b8436dd69eba42e17ac7e32b",
-    "x86_64": "8131befcc9ad112e55f5b490470e2fd81e35d3a0a08e47616ac9ab6a3e5a85c9"
+    "arm64-v8a": "24b7ffbc00c9a45cec3028bfb098a06adbe4e0ffe784cc079218a1b51bb8ee82",
+    "armeabi-v7a": "403f1f93c486df4fc3e5db17e1e504a1350f9b175794ad3873b95f3162f9ac59",
+    "x86_64": "b570964b203c04c216c9e8918dd6470478bd508fe31999ee1e0093b1e7123015"
   }
 }
