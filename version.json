@@ -1,18 +1,18 @@
 {
-  "versionCode": 178,
-  "versionName": "1.78",
+  "versionCode": 179,
+  "versionName": "1.79",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.78/octostream-1.78-arm64-v8a.apk",
-  "sha256": "0ce403b43a398ea1cac694a09fd9479722c424848c5a4db4db7a2ed49ad8d967",
-  "notes": "RiseupVPN OpenVPN en Android (API remota) + túnel embebido Linux + WARP fallback wg",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-arm64-v8a.apk",
+  "sha256": "70cf1cd63feb40c355efab91f47291d1644be424b3a3a563395ceb74bafc72c5",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.78/octostream-1.78-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.78/octostream-1.78-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.78/octostream-1.78-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.79/octostream-1.79-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "0ce403b43a398ea1cac694a09fd9479722c424848c5a4db4db7a2ed49ad8d967",
-    "armeabi-v7a": "55ade2a6b12dfc661e90bbba4bb88fc6d05974e9079f421756e92e63c60f19b6",
-    "x86_64": "fbd2ba4b18f5938b0c43f088a9996651464a695fd04690fb27adf18dce5c2cfc"
+    "arm64-v8a": "70cf1cd63feb40c355efab91f47291d1644be424b3a3a563395ceb74bafc72c5",
+    "armeabi-v7a": "f01845818b2465fcf7102faaa112a2429d868e2197e78edb16614202ebddc045",
+    "x86_64": "bf637acfca6c652b0c1cdd6a1bd511ea0fc05bfd708212f50d33c54feb55cde0"
   }
 }
