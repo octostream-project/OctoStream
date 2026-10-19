@@ -1009,13 +1009,19 @@ public class CloudProxyPlugin extends Plugin {
             android.net.ConnectivityManager cm =
                 (android.net.ConnectivityManager) ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
             if (cm == null) return null;
+            android.net.Network cell = null;
             for (android.net.Network n : cm.getAllNetworks()) {
                 android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(n);
-                if (nc == null || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) continue;
+                // Sin NET_CAPABILITY_INTERNET la red no vale — la IMS
+                // (ipsec91, VoWiFi) tiene TRANSPORT_CELLULAR pero no
+                // INTERNET y atarle los sockets mata el stream.
+                if (nc == null || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                    || !nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
                 if (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
-                    || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
                     || nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) return n;
+                if (cell == null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) cell = n;
             }
+            return cell; // WiFi/ethernet primero; celular de respaldo
         } catch (Exception ignored) {}
         return null;
     }

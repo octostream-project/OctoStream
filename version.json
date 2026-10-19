@@ -1,18 +1,18 @@
 {
-  "versionCode": 186,
-  "versionName": "1.86",
+  "versionCode": 187,
+  "versionName": "1.87",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.86/octostream-1.86-arm64-v8a.apk",
-  "sha256": "00672d5da710b815e95d611dac04a911a5e4b89b821e0032c8920e2e1bd5f63f",
-  "notes": "Riseup y WARP excluyentes: la IP de salida es la de Riseup",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.87/octostream-1.87-arm64-v8a.apk",
+  "sha256": "941fd1a9a0c1063ccc2fee6aca9aa043cca44c72ee64482ca5a2d16010e17c16",
+  "notes": "Fix TV: geo-bypass ataba sockets a la red IMS sin internet",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.86/octostream-1.86-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.86/octostream-1.86-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.86/octostream-1.86-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.87/octostream-1.87-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.87/octostream-1.87-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.87/octostream-1.87-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "00672d5da710b815e95d611dac04a911a5e4b89b821e0032c8920e2e1bd5f63f",
-    "armeabi-v7a": "c6a100159c5051b4b737fa2778f8906a392709b31428c43f73f7f95c1a4b0c60",
-    "x86_64": "d11a799cb6b84ba5c4ac3bd42b77e128593f4f775e0e5199361fccb7881057f1"
+    "arm64-v8a": "941fd1a9a0c1063ccc2fee6aca9aa043cca44c72ee64482ca5a2d16010e17c16",
+    "armeabi-v7a": "9a09cf86c85d95474aa9c9fe56602e523e7e04a416b1627fcb220d08204996a6",
+    "x86_64": "075aedb5f86fdaaa9afba794d024bc57a267556c65e48b883ca3aca9440a77a1"
   }
 }
