@@ -6,61 +6,19 @@
 import { CapacitorHttp } from '@capacitor/core'
 import { isAndroidNative } from './platform.js'
 import { CloudProxy } from './cloudProxy.js'
+import { waitForWarp, warpAutoConnectEnabled } from './warpStatus.js'
 
-// Hosts com geobloqueio (directos TDT/RTVE/Atresmedia/Mediaset e ads).
-// Com o túnel Riseup activo, os pedidos sairiam por França e o CDN
-// bloqueava/ligava a URL a uma IP estrangeira. CapacitorHttp não consegue
-// atar sockets a uma rede, por isso estes hosts vão por
-// CloudProxy.directFetch — HttpURLConnection aberto na Network física
-// (requer allowBypass() no VpnService.Builder).
-const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net|hdfull\.[a-z]{2,10})$/i
+// Solo directos/servicios de TV con restricción geográfica evitan WARP.
+// El resto del tráfico de la app usa Aether/WARP.
+const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$/i
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
-// Bootstrap de Riseup: generar el .ovpn exige salir a riseup.net ANTES de
-// que exista el túnel. Si estas peticiones esperan al CONNECTED se produce
-// un deadlock (el túnel no puede subir sin el perfil que están pidiendo) —
-// deben salir directas siempre.
-const VPN_BOOTSTRAP_HOST_RE = /(^|\.)riseup\.net$/i
-function isVpnBootstrapHost(url) {
-  try { return VPN_BOOTSTRAP_HOST_RE.test(new URL(url).hostname) } catch { return false }
-}
-// Gate fail-closed: cuando Riseup está configurado para auto-conectar, no
-// permitimos que requests IP-bound escapen por la red física antes del CONNECTED.
-export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {}) {
-  if (!isAndroidNative()) return
-  if (!required) {
-    try {
-      if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
-    } catch { return }
-  }
-  // Auto-reconnect: si el servicio murió (proceso matado por el SO) y el
-  // autoconnect está activo, re-disparar el connect una vez en vez de
-  // esperar a un túnel que nadie va a levantar.
-  let reconnectTried = false
-  const deadline = Date.now() + maxMs
-  while (Date.now() < deadline) {
-    let st
-    try {
-      st = await CloudProxy.riseupTunnelStatus()
-    } catch {
-      const error = new Error('Riseup VPN status unavailable; request blocked to prevent IP leak')
-      error.code = 'VPN_NOT_CONNECTED'
-      throw error
-    }
-    if (st?.connected) return
-    if (!st?.connecting && !reconnectTried
-        && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
-      reconnectTried = true
-      try {
-        const { connectRiseupTunnel } = await import('./riseupVpn.js')
-        connectRiseupTunnel().catch(() => {})
-      } catch { /* sin módulo — seguir esperando */ }
-    }
-    await new Promise(r => setTimeout(r, 400))
-  }
-  const error = new Error('Riseup VPN is not connected; request blocked to prevent IP leak')
-  error.code = 'VPN_NOT_CONNECTED'
+async function requireWarpForNativeTraffic(url) {
+  if (!isAndroidNative() || isGeoHost(url) || !warpAutoConnectEnabled()) return
+  if (await waitForWarp(30000)) return
+  const error = new Error('Aether/WARP no está conectado; la petición se bloqueó para evitar salir fuera del proxy.')
+  error.code = 'WARP_NOT_CONNECTED'
   throw error
 }
 async function nativeRequest(opts) {
@@ -70,11 +28,9 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
-  // VPN activada -> TODAS las peticiones por el tunel (fail-closed, nunca
-  // fail-open por la fisica); VPN apagada -> red normal / WARP.
-  if (!isVpnBootstrapHost(opts.url)) {
-    await waitForVpnTunnel(30000, { required: localStorage.getItem('octostream_riseup_autoconnect') === 'true' })
-  }
+  // Con autoconexión activa, no se permite que CapacitorHttp salga en claro
+  // si el proxy Aether todavía no está arriba.
+  await requireWarpForNativeTraffic(opts.url)
   return CapacitorHttp.request(opts)
 }
 
@@ -152,7 +108,7 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
         throw httpError(response)
       }
     } catch (e) {
-      if (strictNative || e?.code === 'VPN_NOT_CONNECTED') throw e
+      if (strictNative || e?.code === 'VPN_NOT_CONNECTED' || e?.code === 'WARP_NOT_CONNECTED') throw e
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) {
@@ -262,7 +218,7 @@ export async function httpGetWithHeaders(url, headers = {}, signal, bypassVpn = 
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return { data: response.data || '', headers: response.headers || {} }
     } catch (e) {
-      if (e?.name === 'AbortError') throw e
+      if (e?.name === 'AbortError' || e?.code === 'WARP_NOT_CONNECTED') throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const text = await res.text()
@@ -394,7 +350,7 @@ export async function httpGetBlob(url, headers = {}, signal) {
         return response.data
       }
     } catch (e) {
-      if (e?.name === 'AbortError') throw e
+      if (e?.name === 'AbortError' || e?.code === 'WARP_NOT_CONNECTED') throw e
     }
   }
 
@@ -431,7 +387,7 @@ export async function httpGetBlobWithHeaders(url, headers = {}, signal) {
         return { data: response.data, headers: response.headers || {} }
       }
     } catch (e) {
-      if (e?.name === 'AbortError') throw e
+      if (e?.name === 'AbortError' || e?.code === 'WARP_NOT_CONNECTED') throw e
     }
   }
 

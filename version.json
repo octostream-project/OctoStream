@@ -1,18 +1,18 @@
 {
-  "versionCode": 204,
-  "versionName": "2.04",
+  "versionCode": 205,
+  "versionName": "2.05",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-arm64-v8a.apk",
-  "sha256": "14dac1d17d9cc2e90376716c8581624010dcefbadedf06e19a349dcd316e8127",
-  "notes": "Traduce el error de TorBox cuando el enlace original est\u00e1 offline, inaccesible o requiere sesi\u00f3n.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-arm64-v8a.apk",
+  "sha256": "da14119b986e99049b2086e36a68edd3941f3282337c22c71ba3ead14dc16cf2",
+  "notes": "Se elimina Riseup y AllDebrid: el tráfico vuelve a Aether/WARP y TorBox queda como único debrid (hosters, torrents y usenet). Nueva búsqueda TorBox/Orion por IMDb con torrents y NZBs. 'Mi lista' con pestañas Pendientes/Vistos. Errores transitorios de TorBox más claros.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.04/octostream-2.04-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "14dac1d17d9cc2e90376716c8581624010dcefbadedf06e19a349dcd316e8127",
-    "armeabi-v7a": "0de94a52dedca3b73545d2e92ba741b6237fa391c02377334a0d06f1732e3758",
-    "x86_64": "c4860d3983959336acb1ba34e662ea3dada1e6f8b61019eddd29e58bfcc4da24"
+    "arm64-v8a": "da14119b986e99049b2086e36a68edd3941f3282337c22c71ba3ead14dc16cf2",
+    "armeabi-v7a": "ad1e14823f5965444c2f157166b1152e79be44312bdf2d2c64a204883e0b53a7",
+    "x86_64": "b7debd95f6cc36edd25705b516921bcac137c46868dda77dec960f360f09b16f"
   }
 }

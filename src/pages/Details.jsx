@@ -9,13 +9,11 @@ import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
-import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { isTorboxEnabled, unlockLink as tbUnlockLink } from '../plugins/bundled/torbox.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
-import { waitForVpnTunnel } from '../utils/httpClient.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
 import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check } from 'lucide-react'
@@ -121,46 +119,29 @@ function getLangPriority() {
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
 async function unlockDebrid(url) {
-  // res.link es la URL directa ya desbloqueada. Los streams[] de AllDebrid NO
-  // lo son (siguen restringidos), por eso solo se usan alternatives como
-  // fallback.
-  const pickBest = (res) => {
-    if (!res) return null
-    const alts = res.alternatives || []
-    const sorted = [...alts].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
-    return res.link || sorted[0]?.link || null
+  if (!isTorboxEnabled()) return { link: null, error: 'Configura TorBox en Ajustes → Debrid.' }
+  try {
+    const result = await tbUnlockLink(url)
+    return result?.link
+      ? { link: result.link }
+      : { link: null, error: result?.error || 'TorBox no pudo desbloquear el enlace.' }
+  } catch (e) {
+    console.warn('[Details] TorBox unlock failed:', e?.message)
+    return { link: null, error: e?.message || 'TorBox unlock failed' }
   }
-  let lastError = null
-  if (isAlldebridEnabled()) {
-    try {
-      const r = await adUnlockLink(url)
-      const best = pickBest(r)
-      if (best) return { link: best }
-      if (r?.error) lastError = `AllDebrid: ${r.error}`
-    } catch (e) { lastError = e?.message; console.warn('[Details] AllDebrid unlock failed:', e?.message) }
-  }
-  if (isTorboxEnabled()) {
-    try {
-      const r = await tbUnlockLink(url)
-      if (r?.link) return { link: r.link }
-      if (r?.error) lastError = lastError || `TorBox: ${r.error}`
-    } catch (e) { lastError = lastError || e?.message; console.warn('[Details] TorBox unlock failed:', e?.message) }
-  }
-  return { link: null, error: lastError }
 }
 
 // Mensaje legible según el error del debrid.
 function debridErrorMessage(err) {
   const e = String(err || '')
-  if (/VPN_NOT_CONNECTED|Riseup VPN (is not connected|status unavailable)/i.test(e)) {
-    return 'Riseup no está conectado. Espera a que la VPN indique “Conectado” y vuelve a intentar; no se envió el enlace para proteger tu IP.'
+  if (/software caused connection abort|ECONNABORTED|connection reset|socket hang up/i.test(e)) {
+    return 'Se cortó la conexión con TorBox y no se recibió confirmación. Comprueba Aether/WARP y revisa Ajustes → Debrid → Descargas TorBox antes de reenviar, por si el trabajo llegó a crearse.'
   }
-  if (/infringing/i.test(e)) return 'AllDebrid bloquea este archivo (DMCA). Prueba otro enlace.'
   if (/error scanning this link|offline or inaccessible|try a different link/i.test(e)) {
-    return 'TorBox no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor; si AllDebrid está configurado, OctoStream también lo intentará.'
+    return 'TorBox no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor.'
   }
   if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
-  if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Problema con tu cuenta debrid (token/suscripción). Revísalo en Ajustes → Debrid.'
+  if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Revisa la API key y tu suscripción de TorBox en Ajustes → Debrid.'
   // Diagnóstico: el mensaje genérico ocultaba el error real de la API
   // (p. ej. bloqueo por IP del túnel). Se muestra el motivo crudo.
   return `No se pudo desbloquear el enlace (debrid): ${e || 'error desconocido'}`
@@ -532,7 +513,6 @@ export default function Details() {
   }, [type, id, location.state?.autoplay])
 
   const [resolvingStream, setResolvingStream] = useState(false)
-  const [waitingForRiseup, setWaitingForRiseup] = useState(false)
 
   // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
@@ -562,24 +542,15 @@ export default function Details() {
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
-      if (!isAlldebridEnabled() && !isTorboxEnabled()) {
-        setEpisodeError('Este enlace requiere debrid (AllDebrid o TorBox). Configúralo en Ajustes → Debrid.')
+      if (!isTorboxEnabled()) {
+        setEpisodeError('Este enlace requiere TorBox. Configúralo en Ajustes → Debrid.')
         return
       }
       setEpisodeError(null)
-      setWaitingForRiseup(true)
-      try {
-        await waitForVpnTunnel(30000, { required: true })
-      } catch (e) {
-        setEpisodeError(debridErrorMessage(e?.message || e))
-        setWaitingForRiseup(false)
-        return
-      }
-      setWaitingForRiseup(false)
       setResolvingStream(true)
       // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: se prueban
       // varios candidatos EN PARALELO y gana el primero que desbloquee. En
-      // serie, un enlace que entraba en "delayed" (AllDebrid lo baja a su
+      // serie, un enlace remoto puede tardar y
       // caché) podía bloquear hasta 2 min aunque otro resolviera al instante.
       const pool = (candidatesPool && candidatesPool.length ? candidatesPool
         : (episodeStreams && episodeStreams.length ? episodeStreams : streams)) || []
@@ -601,10 +572,10 @@ export default function Details() {
       )
       let resolved = null
       try {
-        // Tope global: si los 8 candidatos entran en "delayed" (AllDebrid baja
-        // el archivo a su caché), la espera llegaba a ~2 min en "Resolviendo…"
+        // Tope global: si los 8 candidatos están procesando, la espera puede
+        // llegar a ~2 min en "Resolviendo…"
         // y parecía que el enlace no abría. A los 90s se informa y se puede
-        // reintentar — el delayed sigue en la caché de AllDebrid.
+        // reintentar.
         resolved = await Promise.race([
           Promise.any(attempts),
           new Promise((_, r) => setTimeout(() => r(new Error('debrid resolve timeout')), 90000)),
@@ -634,7 +605,7 @@ export default function Details() {
     // .avi desbloqueado disparaba un resolveEmbed sobre la URL .torrent).
     const isDirectUrl = /\.(m3u8|mp4|mkv|avi|ts|mov|m4v|webm|wmv)(\?|$)/i.test(stream.url)
       || /videoplayback/.test(stream.url)
-      || /download\.alldebrid\.com|alldebrid\.com\/d\/|\.debrid\.(it|al|com|cx|ee|is)\//i.test(stream.url)
+      || /download\.torbox\.app|torbox\.app\/download|\.debrid\.(it|al|com|cx|ee|is)\//i.test(stream.url)
     // Re-resolve if: has originalUrl, is not an embed, and either:
     // - URL is not direct (still an embed page), OR
     // - URL is direct but from a CDN with expiring tokens (fastream, streamwish, etc.)
@@ -1358,13 +1329,11 @@ export default function Details() {
       )}
 
       {/* Pantalla de carga mientras se resuelve un servidor/enlace */}
-      {(resolvingStream || waitingForRiseup) && (
+      {resolvingStream && (
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
           <LogoLoader size={80} />
           <p className="text-white text-base">
-            {waitingForRiseup
-              ? 'Esperando a que Riseup se conecte; no se enviará el enlace con tu IP española…'
-              : 'Resolviendo vídeo…'}
+            {'Resolviendo vídeo…'}
           </p>
         </div>
       )}
@@ -1689,13 +1658,11 @@ export default function Details() {
               const sortedStreams = sortByLangPriority(streams)
             return (
               <>
-            {(resolvingStream || waitingForRiseup) && (
+            {resolvingStream && (
               <div className="flex items-center gap-2 text-primary-400 mb-4">
                 <OctoLoader size={20} />
                 <span className="text-sm">
-                  {waitingForRiseup
-                    ? 'Esperando a que Riseup se conecte; no se enviará el enlace con tu IP española...'
-                    : 'Resolviendo enlace fresco...'}
+                  {'Resolviendo enlace fresco...'}
                 </span>
               </div>
             )}

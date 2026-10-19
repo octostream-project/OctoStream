@@ -17,11 +17,10 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
-import { isAlldebridEnabled, isAlldebridSupported, unlockLink, resolveMagnet } from '../alldebrid.js'
-import { isTorboxEnabled, unlockLink as tbUnlockLink, resolveMagnet as tbResolveMagnet } from '../torbox.js'
+import { isTorboxEnabled, isTorboxSupported, isTorboxSearchEnabled, unlockLink as tbUnlockLink, resolveMagnet as tbResolveMagnet, resolveUsenet as tbResolveUsenet } from '../torbox.js'
 
-// Cualquier debrid configurado (AllDebrid o TorBox) vale para desbloquear.
-const anyDebridEnabled = () => isAlldebridEnabled() || isTorboxEnabled()
+// TorBox es el único servicio debrid configurado.
+const anyDebridEnabled = () => isTorboxEnabled()
 import { inferStreamType } from '../../../utils/streamType.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
@@ -46,6 +45,7 @@ import { grantorrent } from './channels/grantorrent.js'
 import { subtorrents } from './channels/subtorrents.js'
 import { bloghorror } from './channels/bloghorror.js'
 import { torrentio } from './channels/torrentio.js'
+import { torboxsearch } from './channels/torboxsearch.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
@@ -148,71 +148,43 @@ function normalizeStream(s, defaultLang) {
   return { ...s, quality, lang, server, name }
 }
 
-// Try to unlock a link via AllDebrid.
-// Returns { link, via } or null.
+// Desbloquea hosters compatibles y magnets con TorBox.
 async function debridUnlock(url) {
-  // Convert mega.nz embed URLs to file URLs (Debrid expects /file/ not /embed/)
   let debridUrl = url
   if (/mega\.nz\/embed\//i.test(url)) {
     debridUrl = url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')
-    console.log(`[Plurtasko] Converted Mega embed → file URL: ${debridUrl.substring(0, 80)}`)
   }
-  // Some hosts always show captcha and can't be resolved with JS, so always try debrid
-  const alwaysTryDebrid = /powvideo|streamplay|mega\.nz/i.test(debridUrl)
-  if (!anyDebridEnabled() || (!alwaysTryDebrid && !isAlldebridSupported(debridUrl))) return null
-  if (!isAlldebridEnabled()) {
-    // Solo TorBox — intentarlo directo
-    try {
-      const tb = await tbUnlockLink(debridUrl)
-      if (tb?.link) return { link: tb.link, via: 'TorBox' }
-    } catch (e) { logWarn(`[TorBox] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e)) }
+  if (!isTorboxEnabled() || !isTorboxSupported(debridUrl)) return null
+  try {
+    const result = await tbUnlockLink(debridUrl)
+    return result?.link ? { link: result.link, via: 'TorBox' } : null
+  } catch (e) {
+    logWarn(`[TorBox] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
     return null
   }
+}
+
+async function debridResolveUsenet(link) {
+  if (!isTorboxEnabled()) return null
   try {
-    const ad = await unlockLink(debridUrl)
-    if (ad?.link) {
-      console.log(`[AllDebrid] Unlocked: ${ad.link.substring(0, 80)}`)
-      // If there are quality-specific streams, pick the best one
-      let bestLink = ad.link
-      if (ad.streams && ad.streams.length > 0) {
-        const sorted = [...ad.streams].sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
-        if (sorted[0]?.link) bestLink = sorted[0].link
-      }
-      return { link: bestLink, via: 'AllDebrid' }
+    const result = await tbResolveUsenet(link)
+    if (result?.link) {
+      console.log(`[TorBox] Resolved usenet: ${result.filename || hostOf(result.link)}`)
+      return { links: [{ link: result.link, name: result.filename || '' }], via: 'TorBox' }
     }
-  } catch (e) {
-    logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
-  }
-  // Fallback TorBox si AllDebrid no desbloqueó
-  try {
-    const tb = await tbUnlockLink(debridUrl)
-    if (tb?.link) return { link: tb.link, via: 'TorBox' }
-  } catch (e) { logWarn(`[TorBox] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e)) }
+  } catch (e) { logWarn('[TorBox] Failed to resolve usenet:', String(e?.message || e)) }
   return null
 }
 
-// Try to resolve a magnet via AllDebrid.
-// Returns { links, via } or null.
-async function debridResolveMagnet(url, ep = {}) {
-  if (!anyDebridEnabled()) return null
-  if (isAlldebridEnabled()) {
-    try {
-      const links = await resolveMagnet(url, 30000, ep)
-      if (links?.length) {
-        console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
-        return { links, via: 'AllDebrid' }
-      }
-    } catch (e) {
-      logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
-    }
-  }
+async function debridResolveMagnet(url) {
+  if (!isTorboxEnabled()) return null
   try {
-    const r = await tbResolveMagnet(url)
-    if (r?.link) {
-      console.log(`[TorBox] Resolved magnet: ${r.filename || r.link.substring(0, 60)}`)
-      return { links: [{ link: r.link, name: r.filename || '' }], via: 'TorBox' }
+    const result = await tbResolveMagnet(url)
+    if (result?.link) {
+      console.log(`[TorBox] Resolved magnet: ${result.filename || hostOf(result.link)}`)
+      return { links: [{ link: result.link, name: result.filename || '' }], via: 'TorBox' }
     }
-  } catch (e) { logWarn(`[TorBox] Failed to resolve magnet:`, String(e?.message || e)) }
+  } catch (e) { logWarn('[TorBox] Failed to resolve magnet:', String(e?.message || e)) }
   return null
 }
 
@@ -536,32 +508,32 @@ const BLOCKED_SERVERS = [
   'streamplay', 'stape.fun', 'watchadsontape',
 ]
 
-// Servers that are normally blocked but can be unlocked via AllDebrid.
+// Servers that may be unlocked through TorBox.
 // When a debrid account is configured, these are NOT filtered out.
-// Based on the actual AllDebrid supported hosts.
+// Host candidates that TorBox may support.
 const DEBRID_UNLOCKABLE = [
   // Voe — resolver JS propio (port ResolveURL), no necesita debrid pero se
   // mantiene aquí para que el filtro no lo descarte cuando hay cuenta.
   'voe.sx', 'voe-unblock', 'voeunblock', 'eugenemakedraw', 'morencius',
-  // Mixdrop (AllDebrid)
+  // Mixdrop (TorBox)
   'mixdrop.co', 'mixdrop.to', 'mixdrop.sx', 'mixdrop.ag', 'mixdrop.bz',
-  // Streamtape (AllDebrid)
+  // Streamtape (TorBox)
   'streamtape.com', 'streamtape.to',
   // Upstream — resolver JS propio.
   'upstream.to',
-  // Doodstream NO está: AllDebrid no lo soporta (verificado contra /hosts) —
+  // Doodstream NO está: TorBox no lo soporta (verificado contra /hosts) —
   // va por el resolver propio (port AniWorld).
-  // Mega (AllDebrid)
+  // Mega (TorBox)
   'mega.nz', 'mega.',
-  // 1fichier (AllDebrid)
+  // 1fichier (TorBox)
   '1fichier',
-  // Rapidgator (AllDebrid)
+  // Rapidgator (TorBox)
   'rapidgator',
-  // Turbobit (AllDebrid)
+  // Turbobit (TorBox)
   'turbobit',
-  // Hitfile (AllDebrid)
+  // Hitfile (TorBox)
   'hitfile',
-  // File hosts (AllDebrid)
+  // File hosts (TorBox)
   'katfile.com', 'filefactory', 'file.al', 'filedot', 'filespace',
   'filerio', 'filezip', 'prefiles', 'alfafile', 'simfileshare', 'world-files',
 ]
@@ -639,7 +611,7 @@ function dedupeTorrentStreams(streams) {
   const out = []
   for (const s of streams) {
     const src = String(s.originalUrl || s.url || '')
-    const isTorrent = s.streamType === 'torrent' || /magnet:|\.torrent/i.test(src)
+    const isTorrent = s.streamType === 'torrent' || s.streamType === 'usenet' || /magnet:|\.torrent/i.test(src)
     if (!isTorrent) { out.push(s); continue }
     const key = keyOf(s)
     if (!key) { out.push(s); continue }
@@ -701,13 +673,14 @@ async function resolveStreams(streams, onBatch, context = {}) {
   }
 
   const expanded = []
+  const debridEnabled = anyDebridEnabled()
 
   // Resolve all embed streams in parallel (much faster than sequential)
   const directStreams = limited.filter(s =>
     s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'dash' ||
-    (s.streamType === 'torrent' && torrentSearchEnabled())
+    (s.streamType === 'torrent' && torrentSearchEnabled()) ||
+    (s.streamType === 'usenet' && debridEnabled)
   )
-  const debridEnabled = anyDebridEnabled()
   const debridTasks = []
   for (const s of directStreams) {
     // Extract quality from direct URL if not already set
@@ -717,6 +690,37 @@ async function resolveStreams(streams, onBatch, context = {}) {
     // .torrent URLs are converted to magnets first so debrid can ingest them.
     // Se lanzan en paralelo — un torrent no cacheado tarda ~30s de timeout y
     // en serie multiplicaría la espera por cada resultado.
+    if (s.streamType === 'usenet' && debridEnabled) {
+      debridTasks.push((async () => {
+        try {
+          const resolved = await debridResolveUsenet(s.url)
+          if (resolved?.links?.length) {
+            return resolved.links.map(link => ({
+              ...s,
+              url: link,
+              streamType: 'mp4',
+              quality: urlQuality,
+              server: s.server + ' (Debrid)',
+              originalUrl: s.url,
+              viaDebrid: resolved.via,
+              // Igual que los magnets: la URL firmada caduca en
+              // reproducciones largas; re-resolver el NZB.
+              _refreshUrl: async () => {
+                const fresh = await debridResolveUsenet(s.url)
+                const links = fresh?.links || []
+                return links.find(l => l !== link) || links[0] || null
+              },
+            }))
+          }
+        } catch (e) {
+          logWarn(`[Debrid] Failed to resolve usenet: ${hostOf(s.url)}`, String(e?.message || e))
+        }
+        // Sin fallback P2P para usenet: sin TorBox no hay reproducción.
+        return []
+      })())
+      continue
+    }
+
     if (s.streamType === 'torrent' && debridEnabled) {
       debridTasks.push((async () => {
         let magnetUrl = null
@@ -744,13 +748,14 @@ async function resolveStreams(streams, onBatch, context = {}) {
               server: s.server + ' (Debrid)',
               originalUrl: s.url,
               viaDebrid: resolved.via,
-              // La URL firmada de AllDebrid caduca en reproducciones largas:
+              // La URL firmada de TorBox caduca en reproducciones largas:
               // re-resolver el magnet para obtener un link fresco (el
               // resolveEmbedJs del fallback originalUrl no sabe qué hacer
               // con una página de torrent).
               _refreshUrl: async () => {
-                const fresh = await resolveMagnet(magnetUrl, 30000, ep)
-                return fresh?.find(l => l !== link) || fresh?.[0] || null
+                const fresh = await debridResolveMagnet(magnetUrl, ep)
+                const links = fresh?.links || []
+                return links.find(l => l !== link) || links[0] || null
               },
             }))
           }
@@ -769,7 +774,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
   }
   // Emit direct streams immediately (they're already playable) — ANTES de
   // esperar a debrid: cada magnet puede tardar ~30s de poll y retenerlos
-  // dejaba la lista entera vacía ~1 min con AllDebrid activado.
+  // dejaba la lista entera vacía ~1 min con TorBox activado.
   if (onBatch && expanded.length > 0) onBatch(expanded)
   for (const entries of await Promise.all(debridTasks)) expanded.push(...entries)
   // Los resultados debrid (o el fallback P2P) llegan tarde: re-emitir.
@@ -778,7 +783,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
   // Los torrent nunca pasan por resolución embed: habilitados van por la vía
   // directa (debrid/magnet); deshabilitados se descartan aquí.
   const embedStreams = limited.filter(s =>
-    !(s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'torrent' || s.streamType === 'dash')
+    !(s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'torrent' || s.streamType === 'usenet' || s.streamType === 'dash')
   )
 
   // Resolve all embeds in parallel with a concurrency limit
@@ -813,7 +818,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
               } catch (e) {
                 logWarn(`[Plurtasko] JS resolver failed for ${srv.server}: ${hostOf(srv.url)}`, String(e?.message || e))
               }
-              // Try AllDebrid
+              // Try TorBox
               const debrid = await debridUnlock(srv.url)
               if (debrid?.link) {
                 const streamType = inferStreamType(debrid.link, 'mp4')
@@ -878,7 +883,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
       return []
     }
 
-    // Other embed types - try JS resolver, then AllDebrid, keep as embed if both fail
+    // Other embed types - try JS resolver, then TorBox, keep as embed if both fail
     if (s.streamType === 'embed' || s.streamType === 'iframe' || !s.streamType) {
       let directUrl = null
 
@@ -1503,7 +1508,36 @@ export const plurtaskoFactory = (config) => {
           }
         })()
 
-        await Promise.all([...channelPromises, torrentioPromise])
+        // TorBox Search (índice Orion): torrents + usenet por IMDb/TMDB con
+        // flag cached. Solo corre con key de TorBox — su resolución depende
+        // de ella (magnets → createtorrent, nzbs → createusenetdownload).
+        const torboxPromise = (async () => {
+          if (!isTorboxSearchEnabled()) return
+          try {
+            if (imdbId === null) imdbId = await imdbIdPromise
+            if (!imdbId && !tmdbId) return
+            const rawStreams = await torboxsearch.getStreamsById({ imdbId, tmdbId, type, season, episode })
+            if (!rawStreams.length) return
+            const tagTb = (s) => ({ ...s, _channelId: 'torboxsearch' })
+            const tbOnBatch = onBatch ? (batch) => {
+              allStreams = allStreams.filter(s => s._channelId !== 'torboxsearch')
+              allStreams = allStreams.concat(batch.map(tagTb))
+              allStreams = dedupeTorrentStreams(allStreams)
+              onBatch(sortHdfull(allStreams))
+            } : null
+            const resolved = await resolveStreams(rawStreams, tbOnBatch, { season, episode })
+            if (resolved && resolved.length > 0) {
+              allStreams = allStreams.filter(s => s._channelId !== 'torboxsearch')
+              allStreams = allStreams.concat(resolved.map(tagTb))
+              allStreams = dedupeTorrentStreams(allStreams)
+              if (onBatch) onBatch(sortHdfull(allStreams))
+            }
+          } catch (e) {
+            logWarn('[Plurtasko] TorBox search failed:', String(e?.message || e))
+          }
+        })()
+
+        await Promise.all([...channelPromises, torrentioPromise, torboxPromise])
 
         // Limpiar el marcador interno _channelId antes de devolver
         allStreams = sortHdfull(dedupeTorrentStreams(allStreams))

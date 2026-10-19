@@ -31,7 +31,7 @@ export default function Sidebar({ open, onClose }) {
     { to: '/live-tv', icon: Antenna, label: 'TV en vivo' },
     { to: '/sports', icon: Trophy, label: 'Deportes' },
     { to: '/search', icon: Search, label: 'Buscar' },
-    { to: '/favorites', icon: Heart, label: 'Favoritos', badge: favorites.length },
+    { to: '/favorites', icon: Heart, label: 'Mi lista', badge: favorites.length },
     { to: '/history', icon: Clock, label: 'Historial', badge: watchHistory.length },
     { to: '/add-stream', icon: Link2, label: 'Añadir Enlace' },
     ...(hasSeries ? [{ to: '/calendar', icon: CalendarIcon, label: 'Calendario' }] : []),

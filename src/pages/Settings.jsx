@@ -2,14 +2,12 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
-import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { getTorboxDownloads } from '../plugins/bundled/torbox.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
-import { openRiseupProfile, importRiseupToNetworkManager, connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus, installOpenvpn } from '../utils/riseupVpn.js'
 import { refreshWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
@@ -95,9 +93,6 @@ export default function Settings() {
   const traktPinTimerRef = useRef(null)
   const traktPinPollingRef = useRef(false)
 
-  // AllDebrid API key
-  const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
-  const [adSaved, setAdSaved] = useState(false)
   // TorBox API key
   const [tbApiKey, setTbApiKey] = useState(localStorage.getItem('octostream_torbox_key') || '')
   const [tbSaved, setTbSaved] = useState(false)
@@ -112,17 +107,9 @@ export default function Settings() {
   const [hdfullTesting, setHdfullTesting] = useState(false)
   const [hdfullTestResult, setHdfullTestResult] = useState('') // 'ok' | 'fail' | ''
 
-  // PIN flow state (AllDebrid)
-  const [adPin, setAdPin] = useState(null) // { pin, check, user_url, expires_in }
-  const [adPinLoading, setAdPinLoading] = useState(false)
-  const [adPinError, setAdPinError] = useState('')
-  const adPinTimerRef = useRef(null)
-  const adPinPollingRef = useRef(false)
-
   // Clear PIN polling interval on unmount
   useEffect(() => {
     return () => {
-      if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
       if (traktPinTimerRef.current) clearInterval(traktPinTimerRef.current)
     }
   }, [])
@@ -135,169 +122,6 @@ export default function Settings() {
   const [vpnStatus, setVpnStatus] = useState('disconnected') // disconnected | connecting | connected
   const [vpnError, setVpnError] = useState('')
   const [vpnAutoConnect, setVpnAutoConnect] = useState(localStorage.getItem('octostream_warp_autoconnect') !== 'false')
-  // RiseupVPN (OpenVPN) — capa VPN alternativa: genera un .ovpn con cert
-  // de cliente fresco y lo abre con el cliente OpenVPN del sistema.
-  const [riseupBusy, setRiseupBusy] = useState(false)
-  const [riseupMsg, setRiseupMsg] = useState('')
-  const [riseupState, setRiseupState] = useState('disconnected') // disconnected | connecting | connected
-  const [riseupHasBin, setRiseupHasBin] = useState(true)
-
-  useEffect(() => {
-    riseupTunnelStatus().then(s => {
-      if (s.connected) setRiseupState('connected')
-      else if (s.connecting) setRiseupState('connecting')
-      setRiseupHasBin(s.hasOpenvpn !== false)
-    }).catch(() => {})
-  }, [])
-
-  const toggleRiseupTunnel = useCallback(async () => {
-    setRiseupMsg('')
-    if (riseupState === 'connected' || riseupState === 'connecting') {
-      await disconnectRiseupTunnel()
-      setRiseupState('disconnected')
-      localStorage.setItem('octostream_riseup_autoconnect', 'false')
-      return
-    }
-    setRiseupState('connecting')
-    setRiseupBusy(true)
-    try {
-      const r = await connectRiseupTunnel()
-      if (r.status === 'connected') {
-        // El motor embebido resuelve al arrancar el servicio — el túnel
-        // tarda ~5-15s en negociar (openvpn TCP). Polling hasta CONNECTED
-        // o error para que el toggle refleje el estado real.
-        // Persistir autoconnect ya — si el usuario sale de Ajustes antes de
-        // que llegue el CONNECTED, el flag queda y la VPN sigue viva.
-        localStorage.setItem('octostream_riseup_autoconnect', 'true')
-        setRiseupMsg('Arrancando túnel OpenVPN…')
-        const deadline = Date.now() + 45000
-        while (Date.now() < deadline) {
-          const s = await riseupTunnelStatus()
-          if (s.connected) {
-            setRiseupState('connected')
-            setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico (WARP incluido) sale por él.')
-            localStorage.setItem('octostream_riseup_autoconnect', 'true')
-            return
-          }
-          if (s.error) {
-            setRiseupState('disconnected')
-            setRiseupMsg('No se pudo conectar: ' + s.error)
-            return
-          }
-          await new Promise(res => setTimeout(res, 1500))
-        }
-        setRiseupState('disconnected')
-        setRiseupMsg('El túnel no levantó en 45s — revisa el log (OctoVpnService).')
-      } else if (r.status === 'consent') {
-        setRiseupState('disconnected')
-        setRiseupMsg('Autoriza OctoStream en el diálogo de OpenVPN y pulsa de nuevo.')
-      } else if (r.status === 'need-vpn-permission') {
-        setRiseupState('disconnected')
-        setRiseupMsg('Acepta el permiso VPN del sistema y pulsa de nuevo.')
-      } else {
-        setRiseupState('disconnected')
-        setRiseupMsg('No se pudo conectar: ' + (r.error || r.status || 'desconocido'))
-      }
-    } catch (e) {
-      setRiseupState('disconnected')
-      if ((e.message || '').includes('no-openvpn-app')) {
-        setRiseupHasBin(false)
-        setRiseupMsg('Necesitas OpenVPN for Android instalado para el túnel embebido.')
-      } else if ((e.message || '').includes('no-openvpn')) {
-        setRiseupHasBin(false)
-        setRiseupMsg('OpenVPN no está instalado — instálalo para usar el túnel embebido.')
-      } else {
-        setRiseupMsg('Error: ' + (e.message || e))
-      }
-    } finally {
-      setRiseupBusy(false)
-    }
-  }, [riseupState])
-
-  const handleInstallOpenvpn = useCallback(async () => {
-    setRiseupBusy(true)
-    const r = await installOpenvpn()
-    setRiseupBusy(false)
-    if (r.installed) {
-      setRiseupHasBin(true)
-      setRiseupMsg('OpenVPN instalado — ya puedes conectar el túnel.')
-    } else {
-      setRiseupMsg('No se pudo instalar: ' + (r.error || 'desconocido'))
-    }
-  }, [])
-
-  const handleRiseup = useCallback(async (importNm = false) => {
-    setRiseupBusy(true)
-    setRiseupMsg('')
-    try {
-      if (importNm) {
-        const r = await importRiseupToNetworkManager()
-        setRiseupMsg(r.imported
-          ? 'Perfil importado a NetworkManager — actívalo desde el menú de red del sistema.'
-          : 'No se pudo importar: ' + (r.error || 'desconocido'))
-      } else {
-        const r = await openRiseupProfile()
-        setRiseupMsg(r.opened
-          ? `Perfil generado (${r.gateways} servidores). Se abrió con el cliente OpenVPN del sistema.`
-          : 'No se pudo abrir: ' + (r.error || 'cancelado'))
-      }
-    } catch (e) {
-      setRiseupMsg('Error: ' + (e.message || e))
-    } finally {
-      setRiseupBusy(false)
-    }
-  }, [])
-
-  const toggleVpn = useCallback(async () => {
-    setVpnError('')
-    if (vpnStatus === 'connected' || vpnStatus === 'connecting') {
-      try {
-        await CloudProxy.disconnect()
-        await refreshWarpStatus()
-        setVpnStatus('disconnected')
-        // Desactivar auto-connect cuando se desconecta manualmente
-        localStorage.setItem('octostream_warp_autoconnect', 'false')
-        setVpnAutoConnect(false)
-      } catch (e) {
-        setVpnError('Error al desconectar: ' + (e.message || e))
-      }
-    } else {
-      setVpnStatus('connecting')
-      try {
-        const result = await CloudProxy.connect()
-        await refreshWarpStatus()
-        if (result.status === 'connected') {
-          setVpnStatus('connected')
-          // Activar auto-connect cuando se conecta manualmente
-          localStorage.setItem('octostream_warp_autoconnect', 'true')
-          setVpnAutoConnect(true)
-        } else {
-          setVpnStatus('disconnected')
-          setVpnError('No se pudo conectar')
-        }
-      } catch (e) {
-        setVpnStatus('disconnected')
-        setVpnError('Error: ' + (e.message || e))
-      }
-    }
-  }, [vpnStatus])
-
-  // Toggle auto-connect preference
-  const toggleVpnAutoConnect = useCallback(() => {
-    setVpnAutoConnect(prev => {
-      const next = !prev
-      localStorage.setItem('octostream_warp_autoconnect', next ? 'true' : 'false')
-      return next
-    })
-  }, [])
-
-  // Check VPN status on mount (auto-connect is in App.jsx, runs at app start)
-  useEffect(() => {
-    CloudProxy.getStatus().then(s => {
-      if (s.connected) setVpnStatus('connected')
-      else if (localStorage.getItem('octostream_warp_autoconnect') !== 'false') setVpnStatus('connecting')
-    }).catch(() => {})
-  }, [])
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
   const [ssSaved, setSsSaved] = useState(false)
 
@@ -314,6 +138,7 @@ export default function Settings() {
   // Búsquedas torrent (DonTorrent, GranTorrent, SubTorrents). Apagado = los
   // sitios torrent no se consultan ni emiten streams.
   const [torrentSearch, setTorrentSearch] = useState(localStorage.getItem('octostream_torrent_search') !== 'false')
+  const [torboxSearch, setTorboxSearch] = useState(localStorage.getItem('octostream_torbox_search') !== 'false')
 
   const handleScreensaverSave = () => {
     localStorage.setItem('octostream_screensaver_enabled', ssEnabled ? 'true' : 'false')
@@ -453,17 +278,6 @@ export default function Settings() {
     }
   }
 
-  const handleAdSave = () => {
-    const key = adApiKey.trim()
-    if (!key) {
-      localStorage.removeItem('octostream_alldebrid_key')
-    } else {
-      localStorage.setItem('octostream_alldebrid_key', key)
-    }
-    setAdSaved(true)
-    setTimeout(() => setAdSaved(false), 2000)
-  }
-
   const handleTbSave = () => {
     const key = tbApiKey.trim()
     if (!key) {
@@ -486,61 +300,6 @@ export default function Settings() {
       setTbDownloadsLoading(false)
     }
   }
-
-  // --- AllDebrid PIN flow ---
-  const handleAdPinStart = useCallback(async () => {
-    setAdPinError('')
-    setAdPinLoading(true)
-    setAdPin(null)
-    if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
-    try {
-      const pin = await adGetPin()
-      if (!pin) {
-        setAdPinError('No se pudo obtener el código PIN')
-        setAdPinLoading(false)
-        return
-      }
-      setAdPin(pin)
-      // Poll for activation
-      const startTime = Date.now()
-      adPinTimerRef.current = setInterval(async () => {
-        if (adPinPollingRef.current) return
-        if (Date.now() - startTime > pin.expires_in * 1000) {
-          clearInterval(adPinTimerRef.current)
-          setAdPinError('El código PIN ha expirado')
-          setAdPin(null)
-          setAdPinLoading(false)
-          return
-        }
-        adPinPollingRef.current = true
-        try {
-          const result = await adCheckPin(pin.pin, pin.check)
-          if (result?.activated && result.apikey) {
-            clearInterval(adPinTimerRef.current)
-            localStorage.setItem('octostream_alldebrid_key', result.apikey)
-            setAdApiKey(result.apikey)
-            setAdPin(null)
-            setAdPinLoading(false)
-            setAdSaved(true)
-            setTimeout(() => setAdSaved(false), 2000)
-          }
-        } catch (e) {
-          setAdPinError(e?.message || 'Error al verificar el PIN')
-        } finally {
-          adPinPollingRef.current = false
-        }
-      }, 5000)
-    } catch (e) {
-      setAdPinError(e?.message || 'Error al obtener PIN')
-      setAdPinLoading(false)
-    }
-  }, [])
-
-  const handleAdPinCancel = useCallback(() => {
-    if (adPinTimerRef.current) clearInterval(adPinTimerRef.current)
-    setAdPin(null)
-    setAdPinLoading(false)
-  }, [])
 
   // --- Trakt PIN flow (OAuth device auth) ---
   // Necesita Client ID guardado; el Secret se usa para canjear el código.
@@ -925,7 +684,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* AllDebrid moved to Debrid tab */}
 
           {/* MDBList API key */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
@@ -1349,121 +1107,12 @@ export default function Settings() {
       {/* Tab: Debrid */}
       {activeTab === 'debrid' && (
         <div className="space-y-6">
-          {/* AllDebrid */}
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Download className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">AllDebrid API Key</h3>
-                <p className="text-dark-400 text-sm">
-                  Desbloquea servidores (streamwish, filemoon, vidhide, etc.) y torrents vía AllDebrid
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
-                  <Key size={14} />
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={adApiKey}
-                  onChange={e => setAdApiKey(e.target.value)}
-                  placeholder="Introduce tu AllDebrid API key"
-                  className="input w-full"
-                  onKeyDown={e => e.key === 'Enter' && handleAdSave()}
-                />
-              </div>
-
-              {adSaved && (
-                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
-                  <Check size={16} />
-                  Configuración guardada correctamente
-                </div>
-              )}
-
-              <button onClick={handleAdSave} className="btn-primary">
-                <Check size={18} />
-                Guardar
-              </button>
-            </div>
-
-            {/* PIN flow */}
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-3">¿O conecta tu cuenta con un código PIN:</p>
-              {!adPin && !adPinLoading && (
-                <button onClick={handleAdPinStart} className="btn-secondary">
-                  <Key size={16} />
-                  Obtener código PIN
-                </button>
-              )}
-              {adPinLoading && !adPin && (
-                <div className="flex items-center gap-2 text-dark-400 text-sm">
-                  <OctoLoader size={16} />
-                  Obteniendo código PIN...
-                </div>
-              )}
-              {adPin && (
-                <div className="bg-primary-600/10 border border-primary-600/30 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="text-3xl font-bold text-primary-400 tracking-wider">{adPin.pin}</div>
-                    <div className="flex items-center gap-1 text-dark-400 text-sm">
-                      <OctoLoader size={14} />
-                      Esperando activación...
-                    </div>
-                  </div>
-                  <a
-                    href={adPin.user_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-primary-400 text-sm hover:text-primary-300"
-                  >
-                    Introduce el PIN en alldebrid.com/pin
-                    <ExternalLink size={14} />
-                  </a>
-                  <button onClick={handleAdPinCancel} className="text-dark-400 text-sm hover:text-red-400">
-                    Cancelar
-                  </button>
-                </div>
-              )}
-              {adPinError && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3 mt-2">
-                  <AlertCircle size={16} />
-                  {adPinError}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key?</p>
-              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
-                <li>Regístrate en alldebrid.com (servicio de pago, ~3€/mes)</li>
-                <li>Ve a Configuración → API</li>
-                <li>Copia tu API key</li>
-                <li>Pégala arriba</li>
-              </ol>
-              <a
-                href="https://alldebrid.com/apikeys/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
-              >
-                Ir a alldebrid.com
-                <ExternalLink size={14} />
-              </a>
-            </div>
-          </div>
-
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <div className="flex items-start justify-between mb-3">
               <div>
                 <h3 className="text-white font-bold">TorBox API Key</h3>
                 <p className="text-dark-400 text-sm mt-1">
-                  Debrid alternativo a AllDebrid — desbloquea los mismos enlaces si AllDebrid falla
+                  Desbloquea enlaces compatibles y torrents con TorBox
                 </p>
               </div>
             </div>
@@ -1576,18 +1225,6 @@ export default function Settings() {
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-dark-400">AllDebrid API Key</span>
-                {localStorage.getItem('octostream_alldebrid_key') ? (
-                  <span className="flex items-center gap-1 text-green-400">
-                    <Check size={14} /> Configurada
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-dark-500">
-                    <AlertCircle size={14} /> No configurada
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center justify-between">
                 <span className="text-dark-400">TorBox API Key</span>
                 {localStorage.getItem('octostream_torbox_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
@@ -1666,100 +1303,6 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* RiseupVPN — capa VPN alternativa (OpenVPN). Genera un perfil
-              .ovpn con certificado de cliente fresco y lo abre con el
-              cliente OpenVPN instalado: VPN real sistema-completo, gratis
-              y sin cuenta (https://riseup.net/en/vpn). */}
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center">
-                <Key className="text-green-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">RiseupVPN (OpenVPN)</h3>
-                <p className="text-dark-400 text-sm">
-                  VPN gratuita y sin logs como alternativa a WARP. Genera un perfil .ovpn
-                  y lo abre con OpenVPN Connect u otro cliente instalado (afecta a todo el dispositivo).
-                </p>
-              </div>
-            </div>
-            {(isElectron() || isAndroidNative()) && (
-              <label className="flex items-center justify-between cursor-pointer mb-4">
-                <span className="text-sm text-dark-300">
-                  {riseupState === 'connecting' ? 'Conectando…' : riseupState === 'connected' ? 'Túnel activo (WARP va por aquí)' : 'Túnel apagado'}
-                </span>
-                <button
-                  onClick={toggleRiseupTunnel}
-                  disabled={riseupBusy}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    riseupState === 'connected' ? 'bg-green-600' :
-                    riseupState === 'connecting' ? 'bg-yellow-600' :
-                    'bg-dark-700'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                      riseupState !== 'disconnected' ? 'translate-x-6' : ''
-                    }`}
-                  />
-                </button>
-              </label>
-            )}
-            {!riseupHasBin && isElectron() && (
-              <button
-                onClick={handleInstallOpenvpn}
-                disabled={riseupBusy}
-                className="px-4 py-2 mb-3 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
-              >
-                Instalar OpenVPN
-              </button>
-            )}
-            {!riseupHasBin && isAndroidNative() && (
-              <button
-                onClick={() => {
-                  const url = 'https://f-droid.org/packages/de.blinkt.openvpn/'
-                  if (window.octostream?.openExternal) window.octostream.openExternal(url)
-                  else window.open(url, '_blank')
-                }}
-                className="px-4 py-2 mb-3 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
-              >
-                Instalar OpenVPN for Android (F-Droid)
-              </button>
-            )}
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => handleRiseup(false)}
-                disabled={riseupBusy}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-dark-700 hover:bg-dark-600 text-dark-200'
-                }`}
-              >
-                {riseupBusy ? 'Generando perfil…' : 'Generar y abrir perfil .ovpn'}
-              </button>
-              {isElectron() && (
-                <button
-                  onClick={() => handleRiseup(true)}
-                  disabled={riseupBusy}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    riseupBusy ? 'bg-dark-700 text-dark-400' : 'bg-dark-700 hover:bg-dark-600 text-dark-200'
-                  }`}
-                >
-                  Importar a NetworkManager
-                </button>
-              )}
-            </div>
-            {riseupMsg && (
-              <p className={`text-sm mt-3 ${riseupMsg.startsWith('Error') || riseupMsg.startsWith('No se pudo') ? 'text-red-400' : 'text-green-400'}`}>
-                {riseupMsg}
-              </p>
-            )}
-            {isAndroidNative() && (
-              <p className="text-dark-500 text-xs mt-3">
-                Kill-switch: activa &quot;VPN siempre activada&quot; y &quot;Bloquear conexiones sin VPN&quot;
-                en los ajustes VPN de Android para que nada salga fuera del túnel.
-              </p>
-            )}
-          </div>
         </div>
       )}
 
@@ -1859,6 +1402,7 @@ export default function Settings() {
               </div>
             </div>
 
+            <div className="space-y-4">
             <label className="flex items-center justify-between cursor-pointer">
               <div>
                 <span className="text-sm text-dark-300 block">Buscar enlaces torrent</span>
@@ -1879,6 +1423,28 @@ export default function Settings() {
                 />
               </button>
             </label>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <span className="text-sm text-dark-300 block">Búsqueda TorBox (torrent + usenet)</span>
+                <span className="text-xs text-dark-500">Índice Orion de TorBox: añade torrents y NZBs cacheados por IMDb a cada ficha (requiere la API key)</span>
+              </div>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => {
+                  const newVal = !torboxSearch
+                  setTorboxSearch(newVal)
+                  localStorage.setItem('octostream_torbox_search', newVal ? 'true' : 'false')
+                }}
+                className={`relative w-12 h-6 rounded-full transition-colors ${torboxSearch ? 'bg-primary-600' : 'bg-dark-700'}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${torboxSearch ? 'translate-x-6' : ''}`}
+                />
+              </button>
+            </label>
+            </div>
           </div>
 
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
