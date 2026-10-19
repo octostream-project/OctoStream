@@ -993,7 +993,8 @@ public class CloudProxyPlugin extends Plugin {
     private static final java.util.regex.Pattern GEO_HOST = java.util.regex.Pattern.compile(
         "(^|\\.)(" +
         "tdtspain\\.com|tdtchannels\\.com|rtve\\.es|mediaset\\.net|mediasetinfinity\\.es|" +
-        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net)$",
+        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net|" +
+        "hdfull\\.[a-z]{2,10})$",
         java.util.regex.Pattern.CASE_INSENSITIVE);
 
     public static boolean isGeoBypassHost(String url) {

@@ -1,18 +1,18 @@
 {
-  "versionCode": 190,
-  "versionName": "1.90",
+  "versionCode": 191,
+  "versionName": "1.91",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.90/octostream-1.90-arm64-v8a.apk",
-  "sha256": "4dbc1ce534bd75d8156aa7da52700b18daa24866c037b26924e2d3e0fbbe2572",
-  "notes": "Fix TV: resoluciones TDT (IP-binding) salen por red fisica bajo VPN",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-arm64-v8a.apk",
+  "sha256": "ba3935b3995c83351ac42127ecaa5081ed12d899232bc088efe7f4aaaccb6526",
+  "notes": "HDFull en geo-bypass: login y streams salen por IP real, no por Francia",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.90/octostream-1.90-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.90/octostream-1.90-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.90/octostream-1.90-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.91/octostream-1.91-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "4dbc1ce534bd75d8156aa7da52700b18daa24866c037b26924e2d3e0fbbe2572",
-    "armeabi-v7a": "26cc84687b023091e40a229cccaca4b66934b444e105f41f70037134bf4f79ad",
-    "x86_64": "aa0b391f9f8ff2c9ce70f2c2349f80db2202de8b071eb2b26875bce019056b71"
+    "arm64-v8a": "ba3935b3995c83351ac42127ecaa5081ed12d899232bc088efe7f4aaaccb6526",
+    "armeabi-v7a": "6baadee62f9dc73acfef7f83c1e30af49bfac03829d15bb37487c3ef52c6b274",
+    "x86_64": "5472ce5465b8953af699d0c8313074911afeb4516a0e0b07038b81186b798a6a"
   }
 }

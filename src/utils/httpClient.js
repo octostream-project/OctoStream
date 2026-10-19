@@ -13,7 +13,7 @@ import { CloudProxy } from './cloudProxy.js'
 // atar sockets a uma rede, por isso estes hosts vão por
 // CloudProxy.directFetch — HttpURLConnection aberto na Network física
 // (requer allowBypass() no VpnService.Builder).
-const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$/i
+const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net|hdfull\.[a-z]{2,10})$/i
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }

@@ -4603,7 +4603,9 @@ public class ExoPlayerPlugin extends Plugin {
                     || host.equals("atresplayer.com") || host.endsWith(".atresplayer.com")
                     || host.equals("atresmedia.com") || host.endsWith(".atresmedia.com")
                     || host.equals("dai.google.com") || host.endsWith(".dai.google.com")
-                    || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net");
+                    || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net")
+                    // HDFull rota TLDs (.today .love .sbs .one .buzz .org) + www3/new
+                    || host.contains("hdfull.");
         } catch (Exception ignored) {
             return false;
         }
