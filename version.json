@@ -1,18 +1,18 @@
 {
-  "versionCode": 2061,
-  "versionName": "2.06.1",
+  "versionCode": 2062,
+  "versionName": "2.06.2",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-arm64-v8a.apk",
-  "sha256": "a0dd3e11a49c2b5653efc4ca456cc302cd8227bd20ba0ea6cb7be6f0a32ac954",
-  "notes": "TorBox eliminado por completo; AllDebrid queda como único debrid, con flujo PIN restaurado (conecta la cuenta desde alldebrid.com/pin sin copiar la key).",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.2/octostream-2.06.2-arm64-v8a.apk",
+  "sha256": "448f4bd4178d89f308033c7f1b207edd417145afbfd060859d6c35d54c814c34",
+  "notes": "Nuevo control de brillo en el reproductor nativo: botón de sol en la barra de controles con slider para ajustar el brillo de pantalla — para películas muy oscuras. El valor persiste entre sesiones.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.1/octostream-2.06.1-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.2/octostream-2.06.2-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.2/octostream-2.06.2-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.06.2/octostream-2.06.2-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "a0dd3e11a49c2b5653efc4ca456cc302cd8227bd20ba0ea6cb7be6f0a32ac954",
-    "armeabi-v7a": "6eefcf26e29a1298b21a3854627512f3acfc2098d0e93f5f9b776521dae9eeab",
-    "x86_64": "62a94e5b0cd45b7260e4693505940fe3b9b052a5b4573b26b779700f7bca3b8b"
+    "arm64-v8a": "448f4bd4178d89f308033c7f1b207edd417145afbfd060859d6c35d54c814c34",
+    "armeabi-v7a": "d3a409ca99b59e45dfe2f26eaea11c9b00e9b186c617e08f2837f9cdd434d9f4",
+    "x86_64": "bc69d86a4b632537ff8ae912ab02e74af1f8a26d6c9f655ea99ab2f6bd05e036"
   }
 }

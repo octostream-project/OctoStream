@@ -172,6 +172,7 @@ public class ExoPlayerPlugin extends Plugin {
     private SeekBar boostSeek = null;
     private LinearLayout volumePopup = null;
     private LinearLayout boostPopup = null;
+    private LinearLayout brightnessPopup = null;
     private TextView boostValueTv = null;
     // Percentage (100% = no boost, up to 300%), mapped continuously to the
     // vertical amplifier slider instead of a fixed 3-option menu.
@@ -414,6 +415,8 @@ public class ExoPlayerPlugin extends Plugin {
 
     // --- Volume / speed controls ---
     private SeekBar volumeSeek = null;
+    private SeekBar brightnessSeek = null;
+    private int brightnessPercent = 100;
     private TextView speedLabel = null;
     private float currentSpeed = 1f;
 
@@ -4843,6 +4846,7 @@ public class ExoPlayerPlugin extends Plugin {
                 boolean show = volumePopup.getVisibility() != View.VISIBLE;
                 volumePopup.setVisibility(show ? View.VISIBLE : View.GONE);
                 if (boostPopup != null) boostPopup.setVisibility(View.GONE);
+                if (brightnessPopup != null) brightnessPopup.setVisibility(View.GONE);
                 if (show) volumeSeek.requestFocus();
             }
             resetControlsTimer();
@@ -4882,6 +4886,7 @@ public class ExoPlayerPlugin extends Plugin {
             boolean show = boostPopup.getVisibility() != View.VISIBLE;
             boostPopup.setVisibility(show ? View.VISIBLE : View.GONE);
             if (volumePopup != null) volumePopup.setVisibility(View.GONE);
+            if (brightnessPopup != null) brightnessPopup.setVisibility(View.GONE);
             if (show) boostSeek.requestFocus();
             resetControlsTimer();
         });
@@ -4900,6 +4905,49 @@ public class ExoPlayerPlugin extends Plugin {
         // Al perder foco el slider, ocultar el popup (vuelve al icono).
         boostSeek.setOnFocusChangeListener((v, hasFocus) -> {
             if (!hasFocus && boostPopup != null) boostPopup.setVisibility(View.GONE);
+        });
+
+
+        // Brillo de pantalla: mismo patrón que volumen — botón + popup con
+        // slider. Ajusta screenBrightness de la ventana (persiste entre
+        // sesiones, útil para películas muy oscuras).
+        ImageButton brightnessButton = controlsOverlay.findViewById(R.id.octo_brightness);
+        brightnessPopup = controlsOverlay.findViewById(R.id.octo_brightness_popup);
+        brightnessSeek = controlsOverlay.findViewById(R.id.octo_brightness_seek);
+        try {
+            brightnessPercent = Math.max(1, Math.min(100,
+                    context.getSharedPreferences("octo_player", Context.MODE_PRIVATE)
+                            .getInt("brightness", 100)));
+        } catch (Exception e) { brightnessPercent = 100; }
+        brightnessSeek.setProgress(brightnessPercent);
+        applyScreenBrightness();
+        brightnessSeek.getProgressDrawable().setColorFilter(ACCENT_COLOR, android.graphics.PorterDuff.Mode.SRC_IN);
+        brightnessSeek.getThumb().setColorFilter(ACCENT_COLOR, android.graphics.PorterDuff.Mode.SRC_IN);
+        brightnessButton.setOnClickListener(v -> {
+            if (brightnessPopup == null) return;
+            boolean show = brightnessPopup.getVisibility() != View.VISIBLE;
+            brightnessPopup.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (volumePopup != null) volumePopup.setVisibility(View.GONE);
+            if (boostPopup != null) boostPopup.setVisibility(View.GONE);
+            if (show) brightnessSeek.requestFocus();
+            resetControlsTimer();
+        });
+        brightnessSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                brightnessPercent = progress;
+                applyScreenBrightness();
+                try {
+                    context.getSharedPreferences("octo_player", Context.MODE_PRIVATE)
+                            .edit().putInt("brightness", brightnessPercent).apply();
+                } catch (Exception ignored) {}
+                resetControlsTimer();
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) { resetControlsTimer(); }
+        });
+        brightnessSeek.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus && brightnessPopup != null) brightnessPopup.setVisibility(View.GONE);
         });
 
 
@@ -7981,6 +8029,16 @@ public class ExoPlayerPlugin extends Plugin {
         } catch (Exception e) {
             Log.w(TAG, "Volume amplifier unavailable", e);
         }
+    }
+
+    private void applyScreenBrightness() {
+        try {
+            android.app.Activity activity = getActivity();
+            if (activity == null) return;
+            android.view.WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
+            lp.screenBrightness = Math.max(0.01f, brightnessPercent / 100f);
+            activity.getWindow().setAttributes(lp);
+        } catch (Exception ignored) {}
     }
 
     private void applyVolumeBoost() {

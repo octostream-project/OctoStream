@@ -259,6 +259,33 @@
                 android:contentDescription="Volumen" />
         </LinearLayout>
 
+        <ImageButton
+            android:id="@+id/octo_brightness"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="Brillo"
+            android:src="@drawable/ic_brightness" />
+
+        <LinearLayout
+            android:id="@+id/octo_brightness_popup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/seekbar_popup_bg"
+            android:visibility="gone">
+
+            <SeekBar
+                android:id="@+id/octo_brightness_seek"
+                android:layout_width="120dp"
+                android:layout_height="36dp"
+                android:max="100"
+                android:progress="100"
+                android:contentDescription="Brillo" />
+        </LinearLayout>
+
         <Space
             android:layout_width="12dp"
             android:layout_height="1dp" />
