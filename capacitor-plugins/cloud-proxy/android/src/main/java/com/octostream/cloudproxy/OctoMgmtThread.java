@@ -141,8 +141,16 @@ public class OctoMgmtThread implements Runnable {
                 break;
             }
             case "ROUTE6": {
+                // Real: "MSG:::/3 (null)" — addr/prefijo en UN token y el
+                // segundo arg es "(null)" (gateway) — no es un prefijo.
                 String[] parts = extra.split(" ");
-                if (parts.length >= 2) mService.addRouteV6(parts[0], parts[1]);
+                String a = parts[0];
+                if (a.contains("/")) {
+                    int s = a.indexOf('/');
+                    mService.addRouteV6(a.substring(0, s), a.substring(s + 1));
+                } else if (parts.length >= 2 && !parts[1].startsWith("(")) {
+                    mService.addRouteV6(a, parts[1]);
+                }
                 break;
             }
             case "IFCONFIG": {
@@ -174,7 +182,10 @@ public class OctoMgmtThread implements Runnable {
                 break;
             }
             case "PERSIST_TUN_ACTION":
-                status = "ok";
+                // openvpn NO acepta "ok" — exige NOOP/OPEN_AFTER_CLOSE/
+                // OPEN_BEFORE_CLOSE. NOOP: no persistimos el tun entre
+                // reconexiones, openvpn pedirá OPENTUN de nuevo.
+                status = "NOOP";
                 break;
             case "OPENTUN":
                 if (!sendTunFd(extra)) status = "cancel";

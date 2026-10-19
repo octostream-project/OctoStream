@@ -1,18 +1,18 @@
 {
-  "versionCode": 183,
-  "versionName": "1.83",
+  "versionCode": 184,
+  "versionName": "1.84",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.83/octostream-1.83-arm64-v8a.apk",
-  "sha256": "a6b1dd9db7402f4c83a9d9e58e101fe72b2cb958620fd901eee69c9159ca7874",
-  "notes": "Fix t\u00fanel RiseupVPN: parseo MSG: del protocolo mgmt \u2014 el t\u00fanel ya levanta",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.84/octostream-1.84-arm64-v8a.apk",
+  "sha256": "d3a180265f4865c54269ab88f8daeff7b6024000355a7ccd7345e7f9b51470b5",
+  "notes": "Fix t\u00fanel: PERSIST_TUN_ACTION respond\u00eda ok (FATAL) + ROUTE6 parseaba (null)",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.83/octostream-1.83-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.83/octostream-1.83-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.83/octostream-1.83-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.84/octostream-1.84-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.84/octostream-1.84-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.84/octostream-1.84-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "a6b1dd9db7402f4c83a9d9e58e101fe72b2cb958620fd901eee69c9159ca7874",
-    "armeabi-v7a": "b3aef93e5cb9b63e90ef6bc7cbf4283aff85c643df401b8347fafe86fdd35f39",
-    "x86_64": "4916cdacb493d980a49fdfb7fb8a9a491ac350ec6abbe5867d8011a0f3f4e21a"
+    "arm64-v8a": "d3a180265f4865c54269ab88f8daeff7b6024000355a7ccd7345e7f9b51470b5",
+    "armeabi-v7a": "5de5e32cbab4463963d65350c3ec79e820d2794afa75d56d23898e0256e0c923",
+    "x86_64": "59dbc5493308f25f1e4b2a621695d70ea5759ac09a17540481ec609b1bd60a88"
   }
 }
