@@ -118,10 +118,10 @@ function getLangPriority() {
 
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
-async function unlockDebrid(url) {
+async function unlockDebrid(url, onProgress) {
   if (!isTorboxEnabled()) return { link: null, error: 'Configura TorBox en Ajustes → Debrid.' }
   try {
-    const result = await tbUnlockLink(url)
+    const result = await tbUnlockLink(url, { onProgress })
     return result?.link
       ? { link: result.link }
       : { link: null, error: result?.error || 'TorBox no pudo desbloquear el enlace.' }
@@ -513,6 +513,7 @@ export default function Details() {
   }, [type, id, location.state?.autoplay])
 
   const [resolvingStream, setResolvingStream] = useState(false)
+  const [debridProgress, setDebridProgress] = useState(null)
 
   // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
@@ -559,8 +560,9 @@ export default function Details() {
         .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
       const candidates = [stream, ...others].slice(0, 8)
       const errors = []
+      setDebridProgress(null)
       const attempts = candidates.map(cand =>
-        unlockDebrid(cand.url).then(r => {
+        unlockDebrid(cand.url, (p) => setDebridProgress(p)).then(r => {
           if (r?.link) return { cand, direct: r.link }
           errors.push(r?.error || 'unlock failed')
           throw new Error(r?.error || 'unlock failed')
@@ -576,13 +578,17 @@ export default function Details() {
         // llegar a ~2 min en "Resolviendo…"
         // y parecía que el enlace no abría. A los 90s se informa y se puede
         // reintentar.
+        // Tope acorde al poll de TorBox (90 it × 2s ≈ 3 min): un archivo
+        // grande sigue descargándose en su CDN y el job persiste — cortar
+        // antes dejaba "resolviendo" muerto aunque el progreso avanzara.
         resolved = await Promise.race([
           Promise.any(attempts),
-          new Promise((_, r) => setTimeout(() => r(new Error('debrid resolve timeout')), 90000)),
+          new Promise((_, r) => setTimeout(() => r(new Error('debrid resolve timeout')), 190000)),
         ])
       } catch { /* todos fallaron o timeout */ }
       const lastError = errors[errors.length - 1]
       setResolvingStream(false)
+      setDebridProgress(null)
       if (!resolved) {
         console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
         setEpisodeError(debridErrorMessage(lastError)
@@ -1333,8 +1339,15 @@ export default function Details() {
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
           <LogoLoader size={80} />
           <p className="text-white text-base">
-            {'Resolviendo vídeo…'}
+            {debridProgress
+              ? `Descargando en TorBox… ${Math.round((debridProgress.progress || 0) * 100)}%`
+              : 'Resolviendo vídeo…'}
           </p>
+          {debridProgress && (
+            <p className="text-dark-400 text-xs max-w-xs text-center">
+              TorBox está trayendo el archivo a su CDN. Puede tardar unos minutos la primera vez.
+            </p>
+          )}
         </div>
       )}
 

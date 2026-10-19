@@ -110,7 +110,7 @@ async function apiFetch(path, { method = 'GET', params = {}, body, timeoutMs = 2
  * Desbloquea un enlace de hoster (1fichier, rapidgator…).
  * Devuelve {link, filename} o {link:null, error}.
  */
-export async function unlockLink(url) {
+export async function unlockLink(url, { onProgress } = {}) {
   try {
     let created = null
     // "error scanning this link" puede ser transitorio (el hoster responde
@@ -147,6 +147,9 @@ export async function unlockLink(url) {
         return { link: null, error: 'requestdl sin URL' }
       }
       if (/failed|error|dead|invalid/i.test(st)) return { link: null, error: `job ${st}` }
+      if (item && onProgress) {
+        try { onProgress({ progress: Number(item.progress ?? 0), state: st || 'downloading' }) } catch {}
+      }
       if (item?.progress != null && i % 5 === 0) console.log('[TorBox] webdl', Math.round(item.progress * 100) + '%')
     }
     // El trabajo sigue vivo en la cuenta — reintentar re-adjuntará al mismo job.
