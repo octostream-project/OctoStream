@@ -18,6 +18,10 @@ import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isAlldebridEnabled, isAlldebridSupported, unlockLink, resolveMagnet } from '../alldebrid.js'
+import { isTorboxEnabled, unlockLink as tbUnlockLink, resolveMagnet as tbResolveMagnet } from '../torbox.js'
+
+// Cualquier debrid configurado (AllDebrid o TorBox) vale para desbloquear.
+const anyDebridEnabled = () => isAlldebridEnabled() || isTorboxEnabled()
 import { inferStreamType } from '../../../utils/streamType.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
@@ -155,7 +159,15 @@ async function debridUnlock(url) {
   }
   // Some hosts always show captcha and can't be resolved with JS, so always try debrid
   const alwaysTryDebrid = /powvideo|streamplay|mega\.nz/i.test(debridUrl)
-  if (!isAlldebridEnabled() || (!alwaysTryDebrid && !isAlldebridSupported(debridUrl))) return null
+  if (!anyDebridEnabled() || (!alwaysTryDebrid && !isAlldebridSupported(debridUrl))) return null
+  if (!isAlldebridEnabled()) {
+    // Solo TorBox — intentarlo directo
+    try {
+      const tb = await tbUnlockLink(debridUrl)
+      if (tb?.link) return { link: tb.link, via: 'TorBox' }
+    } catch (e) { logWarn(`[TorBox] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e)) }
+    return null
+  }
   try {
     const ad = await unlockLink(debridUrl)
     if (ad?.link) {
@@ -171,22 +183,36 @@ async function debridUnlock(url) {
   } catch (e) {
     logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
   }
+  // Fallback TorBox si AllDebrid no desbloqueó
+  try {
+    const tb = await tbUnlockLink(debridUrl)
+    if (tb?.link) return { link: tb.link, via: 'TorBox' }
+  } catch (e) { logWarn(`[TorBox] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e)) }
   return null
 }
 
 // Try to resolve a magnet via AllDebrid.
 // Returns { links, via } or null.
 async function debridResolveMagnet(url, ep = {}) {
-  if (!isAlldebridEnabled()) return null
-  try {
-    const links = await resolveMagnet(url, 30000, ep)
-    if (links?.length) {
-      console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
-      return { links, via: 'AllDebrid' }
+  if (!anyDebridEnabled()) return null
+  if (isAlldebridEnabled()) {
+    try {
+      const links = await resolveMagnet(url, 30000, ep)
+      if (links?.length) {
+        console.log(`[AllDebrid] Resolved magnet: ${links.length} links`)
+        return { links, via: 'AllDebrid' }
+      }
+    } catch (e) {
+      logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
     }
-  } catch (e) {
-    logWarn(`[AllDebrid] Failed to resolve magnet:`, String(e?.message || e))
   }
+  try {
+    const r = await tbResolveMagnet(url)
+    if (r?.link) {
+      console.log(`[TorBox] Resolved magnet: ${r.filename || r.link.substring(0, 60)}`)
+      return { links: [{ link: r.link, name: r.filename || '' }], via: 'TorBox' }
+    }
+  } catch (e) { logWarn(`[TorBox] Failed to resolve magnet:`, String(e?.message || e)) }
   return null
 }
 
@@ -631,7 +657,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
   if (!streams || !streams.length) return []
 
   // Filter out blocked servers that crash the app
-  const debridActive = isAlldebridEnabled()
+  const debridActive = anyDebridEnabled()
   const normalizedStreams = streams.map(normalizeStreamForPlayback)
   const isBlockedStream = (url, server, name) => {
     const urlLower = (url || '').toLowerCase()
@@ -681,7 +707,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
     s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'dash' ||
     (s.streamType === 'torrent' && torrentSearchEnabled())
   )
-  const debridEnabled = isAlldebridEnabled()
+  const debridEnabled = anyDebridEnabled()
   const debridTasks = []
   for (const s of directStreams) {
     // Extract quality from direct URL if not already set
@@ -1015,7 +1041,7 @@ export const plurtaskoFactory = (config) => {
     },
 
     async getStreams({ type, id, name, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch }) {
-      const debridEnabled = isAlldebridEnabled()
+      const debridEnabled = anyDebridEnabled()
       try {
         if (isEpisodicType(type) && (season == null || episode == null)) return []
 

@@ -1,18 +1,18 @@
 {
-  "versionCode": 197,
-  "versionName": "1.97",
+  "versionCode": 198,
+  "versionName": "1.98",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.97/octostream-1.97-arm64-v8a.apk",
-  "sha256": "cacedec9f3b0b57364cecbbfe067ad842ba3c133b1c9ab7225cd345792cf9340",
-  "notes": "Auditoria: VPN no se apaga al minimizar (se apaga solo al cerrar la app), fail-closed VPN, AllDebrid por tunel, TorBox debrid, fixes de seguridad en sync/proxy Electron, bugs varios",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-arm64-v8a.apk",
+  "sha256": "81cc1f75a9e4f71b1442a43f3f6f5d09d99fad2e5237abfa3b53dd88f2e060e9",
+  "notes": "TorBox ya funciona sin AllDebrid: los checks de debrid aceptan cualquiera de los dos",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.97/octostream-1.97-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.97/octostream-1.97-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.97/octostream-1.97-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.98/octostream-1.98-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "cacedec9f3b0b57364cecbbfe067ad842ba3c133b1c9ab7225cd345792cf9340",
-    "armeabi-v7a": "da97dd65bda7969c039bcf5f5695c8bd1bea2347a0e215657c81efc36886385e",
-    "x86_64": "79991e9e2b1f2a065b0369c02004e558dd0fe571572fc0c3a66faa8c1bb0f575"
+    "arm64-v8a": "81cc1f75a9e4f71b1442a43f3f6f5d09d99fad2e5237abfa3b53dd88f2e060e9",
+    "armeabi-v7a": "12f74ce873c81e7be5c6fcf6572daefcb9e390e7af9be2c45fb7a2f240c8bec8",
+    "x86_64": "3510e84d5db084bda2038a0cd4e640f755211d1afb9068431e01ee2563d8665f"
   }
 }

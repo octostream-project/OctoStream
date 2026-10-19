@@ -559,8 +559,8 @@ export default function Details() {
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
-      if (!isAlldebridEnabled()) {
-        setEpisodeError('Este enlace requiere AllDebrid. Configúralo en Ajustes → Debrid.')
+      if (!isAlldebridEnabled() && !isTorboxEnabled()) {
+        setEpisodeError('Este enlace requiere debrid (AllDebrid o TorBox). Configúralo en Ajustes → Debrid.')
         return
       }
       setEpisodeError(null)
