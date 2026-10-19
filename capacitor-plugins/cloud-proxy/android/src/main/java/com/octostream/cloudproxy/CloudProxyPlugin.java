@@ -149,14 +149,41 @@ public class CloudProxyPlugin extends Plugin {
     /** Motor embebido: VpnService propio + proceso libovpnexec.so. */
     private void riseupConnectEmbedded(PluginCall call, String conf) {
         android.content.Context ctx = getContext();
-        // Permiso VPN del sistema (una sola vez por app).
+        // Permiso VPN del sistema (una sola vez por app). El intent del
+        // diálogo se lanza vía startActivityForResult del plugin — lanzarlo
+        // con startActivity() desde el contexto de la app se lo traga en
+        // varios ROMs (MIUI, Android TV) y el diálogo nunca aparecía.
         android.content.Intent prepare = android.net.VpnService.prepare(ctx);
         if (prepare != null) {
-            prepare.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(prepare);
-            call.resolve(new JSObject().put("status", "need-vpn-permission"));
+            mPendingOvpnConf = conf;
+            mPendingEmbeddedCall = call;
+            startActivityForResult(call, prepare, "ovpnPermResult");
             return;
         }
+        doStartEmbedded(call, conf);
+    }
+
+    private volatile PluginCall mPendingEmbeddedCall = null;
+
+    /** Resultado del diálogo de permiso VPN del sistema. */
+    @com.getcapacitor.annotation.ActivityCallback
+    private void ovpnPermResult(PluginCall call, androidx.activity.result.ActivityResult result) {
+        PluginCall pending = mPendingEmbeddedCall;
+        mPendingEmbeddedCall = null;
+        if (pending == null) {
+            call.reject("sin connect pendiente");
+            return;
+        }
+        if (result.getResultCode() == android.app.Activity.RESULT_OK
+                && mPendingOvpnConf != null) {
+            doStartEmbedded(pending, mPendingOvpnConf);
+        } else {
+            pending.reject("Permiso VPN denegado");
+        }
+    }
+
+    private void doStartEmbedded(PluginCall call, String conf) {
+        android.content.Context ctx = getContext();
         try {
             File confFile = new File(ctx.getCacheDir(), "riseup-user.ovpn");
             java.io.FileWriter w = new java.io.FileWriter(confFile, false);
