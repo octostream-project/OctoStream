@@ -1573,6 +1573,12 @@ export default function Settings() {
                 {riseupMsg}
               </p>
             )}
+            {isAndroidNative() && (
+              <p className="text-dark-500 text-xs mt-3">
+                Kill-switch: activa &quot;VPN siempre activada&quot; y &quot;Bloquear conexiones sin VPN&quot;
+                en los ajustes VPN de Android para que nada salga fuera del túnel.
+              </p>
+            )}
           </div>
         </div>
       )}

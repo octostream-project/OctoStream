@@ -98,7 +98,10 @@ public class OctoMgmtThread implements Runnable {
         int p2 = arg.indexOf('\'', p1 + 1);
         if (p1 < 0 || p2 < 0) return;
         String needed = arg.substring(p1 + 1, p2);
-        String extra = arg.split(":", 2).length > 1 ? arg.split(":", 2)[1].trim() : "";
+        // El valor va DESPUÉS de la segunda comilla: "Need 'X' valor".
+        // (extraer por ':' partía el prefijo PASSWORD: y dejaba el 'Need'
+        // dentro — el tun/DNS nunca se habrían configurado).
+        String extra = arg.substring(p2 + 1).trim();
         String status = "ok";
         switch (needed) {
             case "PROTECTFD": {
@@ -173,10 +176,9 @@ public class OctoMgmtThread implements Runnable {
 
     private FileDescriptor pollAncillary() {
         try {
-            // El fd llega como ancillary en el socket — leer un byte lo
-            // dispara en LocalSocket.
-            InputStream in = mClient.getInputStream();
-            if (in.available() > 0) in.read();
+            // El fd llega adjunto al byte de la línea need 'PROTECTFD' que
+            // el BufferedReader ya consumió — NO hay que leer más del
+            // stream (se comería comandos de management).
             FileDescriptor[] fds = mClient.getAncillaryFileDescriptors();
             if (fds != null && fds.length > 0) return fds[0];
         } catch (Exception e) {

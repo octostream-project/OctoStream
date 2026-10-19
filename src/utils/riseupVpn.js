@@ -137,7 +137,7 @@ redirect-gateway def1
 `
   }
   conf += `\n<key>\n${key}\n</key>\n\n<cert>\n${cert}\n</cert>\n\n<ca>\n${ca}\n</ca>\n`
-  return { conf, gateways: remotes.length }
+  return { conf, gateways: entries.length }
 }
 
 /**

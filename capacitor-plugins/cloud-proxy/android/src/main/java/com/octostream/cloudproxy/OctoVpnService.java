@@ -4,7 +4,6 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -238,7 +237,10 @@ public class OctoVpnService extends VpnService {
             mProcess = null;
         }
         if (mTun != null) { try { mTun.close(); } catch (IOException ignored) {} mTun = null; }
-        try { stopForeground(true); } catch (Exception ignored) {}
+        try {
+            if (Build.VERSION.SDK_INT >= 33) stopForeground(STOP_FOREGROUND_REMOVE);
+            else stopForeground(true);
+        } catch (Exception ignored) {}
     }
 
     @Override
