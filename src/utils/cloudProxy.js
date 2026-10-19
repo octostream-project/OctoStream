@@ -29,4 +29,8 @@ export const CloudProxy = {
     typeof api().directFetch === 'function'
       ? api().directFetch(opts)
       : Promise.reject(new Error('directFetch unsupported')),
+  riseupTunnelStatus: () =>
+    typeof api().riseupTunnelStatus === 'function'
+      ? api().riseupTunnelStatus()
+      : Promise.resolve({ connected: false, connecting: false }),
 }

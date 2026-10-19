@@ -17,6 +17,28 @@ const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.ne
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
+// Gate fail-closed: con el túnel Riseup activado pero aún sin CONNECTED
+// (arranque o re-connect), un request normal saldría por la WiFi física —
+// los unlock IP-bound (AllDebrid) quedarían ligados a la IP real y el CDN
+// rechazaría el stream por el túnel. Se espera al CONNECTED (máx ~12s).
+// Si el túnel nunca llega, se sigue por la física tras el timeout y no se
+// vuelve a esperar durante 60s para no colgar cada request con VPN rota.
+let vpnGateGaveUpAt = 0
+export async function waitForVpnTunnel(maxMs = 12000) {
+  if (!isAndroidNative()) return
+  if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
+  if (Date.now() - vpnGateGaveUpAt < 60000) return
+  try {
+    const t0 = Date.now()
+    while (Date.now() - t0 < maxMs) {
+      const st = await CloudProxy.riseupTunnelStatus()
+      if (!st || st.connected) return
+      if (!st.connecting) return // servicio parado: no espera
+      await new Promise(r => setTimeout(r, 400))
+    }
+    vpnGateGaveUpAt = Date.now()
+  } catch { /* sin status → sin gate */ }
+}
 async function nativeRequest(opts) {
   if (opts.bypassVpn || isGeoHost(opts.url)) {
     try {
@@ -24,6 +46,7 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
+  await waitForVpnTunnel()
   return CapacitorHttp.request(opts)
 }
 

@@ -4,6 +4,7 @@
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative, isElectron } from './platform.js'
 import { sanitizeHttpUrl } from './sanitizeUrl.js'
+import { waitForVpnTunnel } from './httpClient.js'
 
 let stateListener = null
 let zapListener = null
@@ -124,6 +125,9 @@ export async function playStream(options, onStateChange) {
   }
   const url = sanitizeHttpUrl(options.url)
   if (!url) throw new Error('URL de stream no válida')
+  // Si el túnel está activado pero aún subiendo, el socket fail-open saldría
+  // por la física — con links debrid IP-bound eso rompe la reproducción.
+  if (options.bypassVpn !== true) await waitForVpnTunnel()
   stateListener = onStateChange
   zapListener = options.onZap || null
   episodeSelectListener = options.onEpisodeSelect || null
@@ -178,6 +182,7 @@ export async function switchChannel(options) {
   }
   const url = sanitizeHttpUrl(options.url)
   if (!url) return
+  if (options.bypassVpn !== true) await waitForVpnTunnel()
   return ExoPlayer.switchChannel({
     url,
     streamType: options.streamType || 'hls',
