@@ -3,6 +3,11 @@ import { useStore } from '../store/useStore.js'
 import ContentCard from '../components/ContentCard.jsx'
 import { Bookmark, CheckCircle2, Clock } from 'lucide-react'
 
+// Mi lista solo recoge contenido con principio y fin — la TV en directo y
+// canales no se pueden "terminar" y ensucian Pendientes sin sentido.
+const LIST_TYPES = new Set(['movie', 'series', 'anime', 'dorama'])
+const isListable = (item) => LIST_TYPES.has(item?.type)
+
 function isComplete(item, watchedEpisodes) {
   if (item?.type === 'series') {
     const seasons = Array.isArray(item.seasonsList) ? item.seasonsList : []
@@ -28,11 +33,11 @@ export default function Favorites() {
 
   const { pending, completed } = useMemo(() => {
     const keyOf = item => `${item.type}:${item.id}`
-    const completedItems = history.filter(item => isComplete(item, watchedEpisodes))
+    const completedItems = history.filter(item => isListable(item) && isComplete(item, watchedEpisodes))
     const completedKeys = new Set(completedItems.map(keyOf))
     const pendingByKey = new Map()
     for (const item of [...history, ...favorites]) {
-      if (!isComplete(item, watchedEpisodes) && !completedKeys.has(keyOf(item))) {
+      if (isListable(item) && !isComplete(item, watchedEpisodes) && !completedKeys.has(keyOf(item))) {
         pendingByKey.set(keyOf(item), item)
       }
     }

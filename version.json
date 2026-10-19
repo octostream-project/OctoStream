@@ -1,18 +1,18 @@
 {
-  "versionCode": 205,
-  "versionName": "2.05",
+  "versionCode": 2051,
+  "versionName": "2.05.1",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-arm64-v8a.apk",
-  "sha256": "7f97444d1d61f726fd10250d9d1a186207bc156344f8f4611cfab9385ca3b59d",
-  "notes": "Se elimina Riseup y AllDebrid: el tráfico vuelve a Aether/WARP y TorBox queda como único debrid (hosters, torrents y usenet). Nueva búsqueda TorBox/Orion por IMDb con torrents y NZBs. 'Mi lista' con pestañas Pendientes/Vistos. Errores transitorios de TorBox más claros.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.1/octostream-2.05.1-arm64-v8a.apk",
+  "sha256": "9c6dbca46079cab99ec2bed0755dfea192f8cf9cb0d3d255912f9cf16f87b0ac",
+  "notes": "Mi lista (Pendientes/Vistos) solo muestra películas, series, anime y doramas — la TV en directo queda fuera. TorBox: un reintento si el escaneo del enlace falla y enlaces de descarga solo cuando el trabajo está listo de verdad (evita el 404 al reproducir).",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.05/octostream-2.05-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.1/octostream-2.05.1-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.1/octostream-2.05.1-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.05.1/octostream-2.05.1-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "7f97444d1d61f726fd10250d9d1a186207bc156344f8f4611cfab9385ca3b59d",
-    "armeabi-v7a": "cafcb452a81a80689b55cc51206fbe89747665112e2324344a3b1de9d165f6af",
-    "x86_64": "49273ae6effa45abbb83469826a6332cb8a3264e597aee0a658fc7fb1c4a1eb7"
+    "arm64-v8a": "9c6dbca46079cab99ec2bed0755dfea192f8cf9cb0d3d255912f9cf16f87b0ac",
+    "armeabi-v7a": "2637f619c9ed1569371672a8f076661be8adfacc24031610e0707a1701074b71",
+    "x86_64": "df84ab98a95829709cdefb7aea8e340298b3a4b77af7997f92cabb7b6a82eafd"
   }
 }
