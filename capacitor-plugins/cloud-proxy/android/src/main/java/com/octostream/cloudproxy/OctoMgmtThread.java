@@ -106,6 +106,22 @@ public class OctoMgmtThread implements Runnable {
         // (extraer por ':' partía el prefijo PASSWORD: y dejaba el 'Need'
         // dentro — el tun/DNS nunca se habrían configurado).
         String extra = arg.substring(p2 + 1).trim();
+        // Formato real: "Need 'X' confirmation MSG:<args>" — el valor va
+        // tras "MSG:", no tras la comilla (sin esto 'ROUTE' recibe
+        // "MSG:0.0.0.0" como red → NumberFormatException → hilo muerto).
+        int msg = extra.indexOf("MSG:");
+        if (msg >= 0) extra = extra.substring(msg + 4).trim();
+        String status = "ok";
+        try {
+            status = applyNeed(needed, extra);
+        } catch (Exception e) {
+            Log.e(TAG, "need '" + needed + "' mal parseado: " + extra, e);
+            status = "cancel"; // un need malformado no debe matar el hilo
+        }
+        sendCmd("needok '" + needed + "' " + status);
+    }
+
+    private String applyNeed(String needed, String extra) {
         String status = "ok";
         switch (needed) {
             case "PROTECTFD": {
@@ -130,25 +146,31 @@ public class OctoMgmtThread implements Runnable {
                 break;
             }
             case "IFCONFIG": {
-                // Formatos reales: "ip peer mtu" | "ip peer netmask mtu" |
-                // "ip netmask". El MTU es el último token si es numérico;
-                // la netmask el token "255.x" (si no hay → peer → /32 p2p).
+                // Real: "10.41.0.88 255.255.248.0 1500 subnet" |
+                // "ip peer mtu" | "ip netmask". Netmask = token "255.x",
+                // MTU = el token numérico, peer (sin mask) → /32.
                 String[] parts = extra.split(" ");
                 String ip = parts[0];
                 String maskOrPeer = parts.length >= 2 ? parts[1] : null;
                 int mtu = 0;
                 for (int i = 1; i < parts.length; i++) {
                     if (parts[i].startsWith("255.")) maskOrPeer = parts[i];
-                    else if (i == parts.length - 1 && i > 1) {
-                        try { mtu = Integer.parseInt(parts[i]); } catch (NumberFormatException ignored) {}
-                    }
+                    else if (parts[i].matches("\\d+")) mtu = Integer.parseInt(parts[i]);
                 }
                 if (maskOrPeer != null) mService.setLocalIp(ip, maskOrPeer, mtu);
                 break;
             }
             case "IFCONFIG6": {
+                // Real: "fd15:53b6:dead::2/64 1500" — el prefijo puede
+                // venir DENTRO del primer token y el segundo ser el MTU.
                 String[] parts = extra.split(" ");
-                if (parts.length >= 2) mService.setLocalIpV6(parts[0], parts[1]);
+                String a = parts[0];
+                if (a.contains("/")) {
+                    int s = a.indexOf('/');
+                    mService.setLocalIpV6(a.substring(0, s), a.substring(s + 1));
+                } else if (parts.length >= 2) {
+                    mService.setLocalIpV6(a, parts[1]);
+                }
                 break;
             }
             case "PERSIST_TUN_ACTION":
@@ -159,9 +181,8 @@ public class OctoMgmtThread implements Runnable {
                 break;
             default:
                 Log.w(TAG, "unknown need '" + needed + "'");
-                return;
         }
-        sendCmd("needok '" + needed + "' " + status);
+        return status;
     }
 
     private boolean sendTunFd(String extra) {
