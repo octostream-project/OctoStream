@@ -266,21 +266,29 @@ public class OctoVpnService extends VpnService {
     public void setMtu(int mtu) { if (mtu > 0) mMtu = mtu; }
     public boolean protectFd(int fd) { return protect(fd); }
 
+    private final Object mStopLock = new Object();
+
     private void stopVpn() {
         connected = false;
         running = false;
-        if (mMgmt != null) { mMgmt.close(); mMgmt = null; }
-        if (mProcess != null) {
-            mProcess.destroy();
+        Process p;
+        synchronized (mStopLock) {
+            if (mMgmt != null) { mMgmt.close(); mMgmt = null; }
+            p = mProcess;
+            mProcess = null;
+        }
+        // Dos llamadas concurrentes (runVpn cleanup + onDestroy/ACTION_STOP)
+        // crasheaban: uno anulaba mProcess entre el check y el waitFor.
+        if (p != null) {
+            p.destroy();
             try { new ProcessBuilder("killall", "-9", "libovpnexec.so").start()
                     .waitFor(2, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
             try {
-                if (!mProcess.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) mProcess.destroyForcibly();
+                if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly();
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                mProcess.destroyForcibly();
+                p.destroyForcibly();
             }
-            mProcess = null;
         }
         if (mTun != null) { try { mTun.close(); } catch (IOException ignored) {} mTun = null; }
         try {

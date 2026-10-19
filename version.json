@@ -1,18 +1,18 @@
 {
-  "versionCode": 188,
-  "versionName": "1.88",
+  "versionCode": 189,
+  "versionName": "1.89",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.88/octostream-1.88-arm64-v8a.apk",
-  "sha256": "bb04456b94a6264a3111861a3f1153fc75639122e122d636481f85e28f724150",
-  "notes": "Fix TV: streams direct (TDT, YouTube) atan sockets a la red fisica bajo VPN",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v1.89/octostream-1.89-arm64-v8a.apk",
+  "sha256": "228230e3bcf07671157597aecd88164d9494454fd81a9c51fbee8f55b62a5245",
+  "notes": "Fix crash al cerrar: carrera en stopVpn (mProcess null entre check y waitFor)",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.88/octostream-1.88-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.88/octostream-1.88-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.88/octostream-1.88-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v1.89/octostream-1.89-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v1.89/octostream-1.89-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v1.89/octostream-1.89-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "bb04456b94a6264a3111861a3f1153fc75639122e122d636481f85e28f724150",
-    "armeabi-v7a": "a235d722d19977bf51a91a1921f2176b1e7ea7fd31256403989203533fea2f49",
-    "x86_64": "472da6219d0a6035643063ba1a574b876421cc4a65ce636bc87ff2902cc41485"
+    "arm64-v8a": "228230e3bcf07671157597aecd88164d9494454fd81a9c51fbee8f55b62a5245",
+    "armeabi-v7a": "13eade73464092747b6116c0669176be5ca49da895126860b50df3ed984e00ab",
+    "x86_64": "cb25f5ccf3bf5be88fb27d2a43d2c4b1a5f4c23abd75a6b2ef96b8e5af7347de"
   }
 }
