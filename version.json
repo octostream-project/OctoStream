@@ -1,18 +1,18 @@
 {
-  "versionCode": 207,
-  "versionName": "2.07",
+  "versionCode": 2070,
+  "versionName": "2.07.0",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07/octostream-2.07-arm64-v8a.apk",
-  "sha256": "e29d34264fe6213603a344cd882865965bb767884bc056b58b3fceb47ee0018d",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-arm64-v8a.apk",
+  "sha256": "c47c657b3fa82ba43e02fafda7fcf90503c26e4b4ee401385ea9fa7ab8f195a0",
   "notes": "Torrentio en castellano (language=spanish) limitado a 1080p — sin 4K/2160p. Canales actualizados a dominios actuales: AnimeYT reescrito, PelisPlusHD y DonTorrent corregidos. Ajustes de Red reparados: los toggles de WARP/Aether y auto-arranque de VPN vuelven a funcionar.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07/octostream-2.07-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07/octostream-2.07-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07/octostream-2.07-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "e29d34264fe6213603a344cd882865965bb767884bc056b58b3fceb47ee0018d",
-    "armeabi-v7a": "4a65077e102fccfaba0c939d89c8976780981929d9d64625264714ae4853cf73",
-    "x86_64": "544b0d5952995cdf58471f2390bbc63b3ff52ae054e3510404b8fea1cfbb6a5b"
+    "arm64-v8a": "c47c657b3fa82ba43e02fafda7fcf90503c26e4b4ee401385ea9fa7ab8f195a0",
+    "armeabi-v7a": "1bf3f35a76218eed16125e4b5bf7ca06e758ffdff71ccca19c029497ba0228b2",
+    "x86_64": "dd8b5eaf3dbb265c0ef5b5615f56a12ee824442739d2b4d12890451fc2a7ab05"
   }
 }
