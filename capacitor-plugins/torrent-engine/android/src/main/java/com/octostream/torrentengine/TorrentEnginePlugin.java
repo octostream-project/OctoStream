@@ -300,9 +300,12 @@ public class TorrentEnginePlugin extends Plugin {
     // El progreso sale por los eventos 'torrentProgress' de startProgressPoll.
     // ------------------------------------------------------------------
 
-    // Carpeta de descarga elegida por el usuario (ruta real — jlibtorrent
-    // no puede escribir en URIs SAF). Si no es escribible se cae al
-    // directorio privado de la app.
+    // Carpeta de descarga elegida por el usuario. Dos modos:
+    //  - "download_dir" (ruta real): ideal para jlibtorrent — exige all-files
+    //    (API 30+) o WRITE_EXTERNAL_STORAGE (API <= 29).
+    //  - "download_tree" (URI SAF): funciona sin permisos especiales; las
+    //    descargas HTTP van directas vía ContentResolver y los torrents se
+    //    copian al terminar desde el directorio interno.
     private static final String PREFS = "octostream_torrent_engine";
 
     private File downloadsDir() {
@@ -315,6 +318,12 @@ public class TorrentEnginePlugin extends Plugin {
         File base = getContext().getExternalFilesDir(null);
         if (base == null) base = getContext().getFilesDir();
         return new File(base, "downloads");
+    }
+
+    private Uri downloadTree() {
+        String t = getContext().getSharedPreferences(PREFS, 0)
+                .getString("download_tree", null);
+        return t != null ? Uri.parse(t) : null;
     }
 
     /** Carpeta de descarga actual + si es personalizada + acceso all-files. */
@@ -330,53 +339,67 @@ public class TorrentEnginePlugin extends Plugin {
                 ? Environment.isExternalStorageManager()
                 : getPermissionState("storageWrite") == PermissionState.GRANTED;
         ret.put("allFilesAccess", access);
+        ret.put("treeMode", downloadTree() != null);
         call.resolve(ret);
     }
 
     /** Vuelve al directorio privado de la app. */
     @PluginMethod
     public void resetDownloadDir(PluginCall call) {
-        getContext().getSharedPreferences(PREFS, 0).edit().remove("download_dir").apply();
+        getContext().getSharedPreferences(PREFS, 0).edit()
+                .remove("download_dir").remove("download_tree").apply();
         call.resolve();
     }
 
     /**
-     * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Escribir fuera del
-     * sandbox exige: API 30+ → ajuste "Acceso a todos los archivos" (si
-     * falta se abre y se devuelve {needsPermission:true}); API <= 29 →
-     * permiso runtime WRITE_EXTERNAL_STORAGE (requestPermissionForAlias).
+     * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Si all-files está
+     * disponible y concedido se guarda la ruta real (los torrents escriben
+     * directos); si no, la URI SAF basta (descargas HTTP directas y
+     * torrents copiados al terminar). El ajuste de all-files solo se abre
+     * una vez: si el dispositivo no tiene esa pantalla o el usuario no lo
+     * concede, el siguiente toque va directo al picker.
      */
     @PluginMethod
     public void pickDownloadDir(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= 30) {
-            if (!Environment.isExternalStorageManager()) {
-                try {
-                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                    i.setData(Uri.parse("package:" + getContext().getPackageName()));
-                    getActivity().startActivity(i);
-                } catch (Exception e) {
-                    try {
-                        getActivity().startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
-                    } catch (Exception ignored) {}
-                }
+        android.content.SharedPreferences prefs =
+                getContext().getSharedPreferences(PREFS, 0);
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()
+                && !prefs.getBoolean("all_files_prompted", false)) {
+            prefs.edit().putBoolean("all_files_prompted", true).apply();
+            if (openAllFilesSettings()) {
                 call.resolve(new JSObject().put("needsPermission", true));
                 return;
             }
-        } else if (getPermissionState("storageWrite") != PermissionState.GRANTED) {
+            // La pantalla no existe en este dispositivo → picker directo.
+        } else if (Build.VERSION.SDK_INT < 30
+                && getPermissionState("storageWrite") != PermissionState.GRANTED) {
             requestPermissionForAlias("storageWrite", call, "storagePermCallback");
             return;
         }
         launchDirPicker(call);
     }
 
+    private boolean openAllFilesSettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            i.setData(Uri.parse("package:" + getContext().getPackageName()));
+            if (i.resolveActivity(getContext().getPackageManager()) == null) {
+                i = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                if (i.resolveActivity(getContext().getPackageManager()) == null) return false;
+            }
+            getActivity().startActivity(i);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @PermissionCallback
     private void storagePermCallback(PluginCall call) {
         if (call == null) return;
-        if (getPermissionState("storageWrite") == PermissionState.GRANTED) {
-            launchDirPicker(call);
-        } else {
-            call.resolve(new JSObject().put("needsPermission", true));
-        }
+        // Concedido o no, el picker se abre igualmente: sin permiso de
+        // escritura se entra en modo SAF (funciona igual para descargas).
+        launchDirPicker(call);
     }
 
     private void launchDirPicker(PluginCall call) {
@@ -397,20 +420,29 @@ public class TorrentEnginePlugin extends Plugin {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (Exception ignored) {}
         String path = treeUriToPath(uri);
-        if (path == null) {
-            call.reject("La carpeta elegida no es almacenamiento local (usa Descargas, SD o USB)");
-            return;
-        }
-        File dir = new File(path);
-        dir.mkdirs();
-        if (!dir.isDirectory() || !dir.canWrite()) {
-            call.reject("Sin permiso de escritura en esa carpeta");
-            return;
-        }
-        getContext().getSharedPreferences(PREFS, 0).edit()
-                .putString("download_dir", path).apply();
+        boolean rawAccess = Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED;
+        android.content.SharedPreferences.Editor ed =
+                getContext().getSharedPreferences(PREFS, 0).edit();
         JSObject ret = new JSObject();
-        ret.put("path", path);
+        if (path != null && rawAccess) {
+            File dir = new File(path);
+            dir.mkdirs();
+            if (!dir.isDirectory() || !dir.canWrite()) {
+                call.reject("Sin permiso de escritura en esa carpeta");
+                return;
+            }
+            ed.putString("download_dir", path).remove("download_tree").apply();
+            ret.put("path", path);
+            ret.put("treeMode", false);
+        } else {
+            // Modo SAF: sin acceso a rutas reales — la URI persistida basta
+            // para leer/escribir vía ContentResolver.
+            ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
+            ret.put("path", uri.toString());
+            ret.put("treeMode", true);
+        }
         ret.put("custom", true);
         call.resolve(ret);
     }
@@ -506,6 +538,40 @@ public class TorrentEnginePlugin extends Plugin {
                 ret.put("fileIndex", idx);
                 ret.put("complete", false);
                 call.resolve(ret);
+
+                // Modo SAF: el motor solo puede escribir en disco real, así
+                // que el archivo baja al interno y al completarse se copia
+                // al árbol elegido por el usuario y se borra el original.
+                final Uri tree = downloadTree();
+                final File src = mediaFile;
+                if (tree != null) {
+                    new Thread(() -> {
+                        try {
+                            for (;;) {
+                                TorrentHandle h = th;
+                                if (h == null || !h.isValid() || httpDlCancel) return;
+                                if (h.status().progress() >= 1.0f) break;
+                                Thread.sleep(2000);
+                            }
+                            android.content.ContentResolver cr = getContext().getContentResolver();
+                            Uri parent = DocumentsContract.buildDocumentUriUsingTree(
+                                    tree, DocumentsContract.getTreeDocumentId(tree));
+                            String outName = src.getName();
+                            Uri doc = DocumentsContract.createDocument(
+                                    cr, parent, "application/octet-stream", outName);
+                            if (doc == null) return;
+                            try (InputStream cin = new java.io.FileInputStream(src);
+                                 java.io.OutputStream cout = cr.openOutputStream(doc, "w")) {
+                                byte[] cb = new byte[128 * 1024];
+                                int crd;
+                                while ((crd = cin.read(cb)) >= 0) cout.write(cb, 0, crd);
+                            }
+                            src.delete();
+                        } catch (Throwable t) {
+                            Log.e(TAG, "copia a carpeta SAF fallida (queda en interno)", t);
+                        }
+                    }, "torrent-tree-copy").start();
+                }
             } catch (Exception e) {
                 Log.e(TAG, "download failed", e);
                 cleanupTorrent();
@@ -520,8 +586,40 @@ public class TorrentEnginePlugin extends Plugin {
         JSArray files = new JSArray();
         try {
             collectVideoFiles(downloadsDir(), downloadsDir(), files);
+            collectTreeVideos(files);
         } catch (Throwable ignored) {}
         call.resolve(new JSObject().put("files", files));
+    }
+
+    // Vídeos dentro del árbol SAF elegido (modo sin all-files): se listan
+    // por DocumentsContract y su "path" es la URI content:// — playLocalFile
+    // ya sabe reproducir esas URIs.
+    private void collectTreeVideos(JSArray out) {
+        Uri tree = downloadTree();
+        if (tree == null) return;
+        try {
+            android.content.ContentResolver cr = getContext().getContentResolver();
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
+                    tree, DocumentsContract.getTreeDocumentId(tree));
+            try (android.database.Cursor c = cr.query(children, new String[] {
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_SIZE,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE }, null, null, null)) {
+                if (c == null) return;
+                while (c.moveToNext()) {
+                    String name = c.getString(1);
+                    long size = c.getLong(2);
+                    if (name == null || !isVideoFile(name.toLowerCase(Locale.ROOT)) || size <= 0) continue;
+                    Uri doc = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0));
+                    JSObject o = new JSObject();
+                    o.put("name", name);
+                    o.put("path", doc.toString());
+                    o.put("size", size);
+                    out.put(o);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     private void collectVideoFiles(File root, File dir, JSArray out) {
@@ -549,6 +647,13 @@ public class TorrentEnginePlugin extends Plugin {
             return;
         }
         try {
+            // URIs SAF (modo árbol): se borran por DocumentsContract.
+            if (path.startsWith("content://")) {
+                boolean deleted = DocumentsContract.deleteDocument(
+                        getContext().getContentResolver(), Uri.parse(path));
+                call.resolve(new JSObject().put("deleted", deleted));
+                return;
+            }
             File dir = downloadsDir();
             File f = new File(path);
             String canonSave = dir.getCanonicalPath();
@@ -646,14 +751,29 @@ public class TorrentEnginePlugin extends Plugin {
                             + "." + (urlExt != null && isVideoFile("x." + urlExt) ? urlExt : "mp4");
                 }
 
-                File dir = downloadsDir();
-                dir.mkdirs();
-                File out = new File(dir, fname);
-                String canonSave = dir.getCanonicalPath();
-                if (!out.getCanonicalPath().startsWith(canonSave + File.separator)) {
-                    throw new Exception("ruta de archivo fuera del directorio de descarga");
+                final Uri tree = downloadTree();
+                File out = null;
+                File part = null;
+                Uri partDoc = null;
+                if (tree != null) {
+                    // Modo SAF: .part para no listar descargas a medias, y
+                    // renameDocument al final (mismo patrón que el archivo).
+                    android.content.ContentResolver cr = getContext().getContentResolver();
+                    Uri parent = DocumentsContract.buildDocumentUriUsingTree(
+                            tree, DocumentsContract.getTreeDocumentId(tree));
+                    partDoc = DocumentsContract.createDocument(
+                            cr, parent, "application/octet-stream", fname + ".part");
+                    if (partDoc == null) throw new Exception("no se pudo crear el archivo en la carpeta elegida");
+                } else {
+                    File dir = downloadsDir();
+                    dir.mkdirs();
+                    out = new File(dir, fname);
+                    String canonSave = dir.getCanonicalPath();
+                    if (!out.getCanonicalPath().startsWith(canonSave + File.separator)) {
+                        throw new Exception("ruta de archivo fuera del directorio de descarga");
+                    }
+                    part = new File(dir, fname + ".part");
                 }
-                File part = new File(dir, fname + ".part");
 
                 // Conexión (respeta el proxy de sistema — WARP — vía propiedades Java).
                 HttpURLConnection conn = null;
@@ -690,7 +810,7 @@ public class TorrentEnginePlugin extends Plugin {
                 if (conn == null) throw new Exception("demasiados redirects");
 
                 long total = conn.getContentLengthLong();
-                if (out.exists() && total > 0 && out.length() == total) {
+                if (out != null && out.exists() && total > 0 && out.length() == total) {
                     conn.disconnect();
                     JSObject done = new JSObject();
                     done.put("name", fname);
@@ -700,18 +820,21 @@ public class TorrentEnginePlugin extends Plugin {
                     call.resolve(done);
                     return;
                 }
-                if (out.exists()) out.delete();
-                if (part.exists()) part.delete();
+                if (out != null && out.exists()) out.delete();
+                if (part != null && part.exists()) part.delete();
 
                 emitHttpProgress("downloading", 0, 0, Math.max(total, 0), 0, fname);
                 call.resolve(new JSObject()
                         .put("name", fname)
-                        .put("path", out.getAbsolutePath())
+                        .put("path", tree != null ? partDoc.toString() : out.getAbsolutePath())
                         .put("sizeBytes", Math.max(total, 0))
                         .put("complete", false));
 
                 InputStream in = conn.getInputStream();
-                java.io.FileOutputStream fos = new java.io.FileOutputStream(part);
+                java.io.OutputStream fos = tree != null
+                        ? getContext().getContentResolver().openOutputStream(partDoc, "w")
+                        : new java.io.FileOutputStream(part);
+                if (fos == null) throw new Exception("no se pudo abrir el destino de la descarga");
                 byte[] buf = new byte[64 * 1024];
                 long doneBytes = 0, lastEmit = 0, lastBytes = 0;
                 int r;
@@ -734,7 +857,10 @@ public class TorrentEnginePlugin extends Plugin {
                     conn.disconnect();
                 }
                 if (total > 0 && doneBytes < total) throw new Exception("descarga incompleta: " + doneBytes + " de " + total);
-                if (!part.renameTo(out)) {
+                if (tree != null) {
+                    DocumentsContract.renameDocument(
+                            getContext().getContentResolver(), partDoc, fname);
+                } else if (!part.renameTo(out)) {
                     // renameTo falla en algunos filesystems: copiar + borrar.
                     try (InputStream pin = new java.io.FileInputStream(part);
                          java.io.FileOutputStream pout = new java.io.FileOutputStream(out)) {

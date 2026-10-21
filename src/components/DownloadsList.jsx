@@ -59,7 +59,11 @@ export default function DownloadsList() {
   const handlePlay = async (file) => {
     setError('')
     try {
-      const uri = isAndroidNative() ? `file://${file.path}` : file.path
+      // URIs SAF (modo carpeta sin all-files) se pasan tal cual — el
+      // player las abre por ContentResolver; rutas de archivo van con file://.
+      const uri = file.path.startsWith('content://')
+        ? file.path
+        : (isAndroidNative() ? `file://${file.path}` : file.path)
       await playLocalFile({ uri, title: file.name })
     } catch (e) {
       setError(e?.message || 'No se pudo reproducir la descarga')
@@ -81,10 +85,10 @@ export default function DownloadsList() {
       const engine = await getTorrentEngine()
       const r = await engine?.pickDownloadDir?.()
       if (r?.needsPermission) {
-        setError('Concede el permiso de almacenamiento a OctoStream (pantalla de ajustes o diálogo de Android) y vuelve a pulsar "Carpeta".')
+        setError('Si tu Android no muestra el ajuste de almacenamiento, pulsa "Carpeta" otra vez: podrás elegir carpeta igualmente.')
         return
       }
-      if (r?.path) setDirInfo({ path: r.path, custom: true })
+      if (r?.path) setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
     } catch (e) {
       if (e?.message !== 'cancelled' && !e?.cancelled) {
         setError(e?.message || 'No se pudo elegir la carpeta')
@@ -114,7 +118,9 @@ export default function DownloadsList() {
           <div className="min-w-0">
             <p className="text-white font-medium">Descargas</p>
             <p className="text-xs text-dark-500 truncate">
-              {dirInfo?.custom ? dirInfo.path : 'Carpeta interna de la app'}
+              {dirInfo?.custom
+                ? (dirInfo.treeMode || dirInfo.path.startsWith('content://') ? 'Carpeta elegida' : dirInfo.path)
+                : 'Carpeta interna de la app'}
             </p>
           </div>
         </div>
