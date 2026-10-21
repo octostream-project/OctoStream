@@ -15,8 +15,12 @@ export async function getTorrentEngine() {
       start: (o) => t.start(o),
       listFiles: (o) => t.listFiles(o),
       download: (o) => t.download(o),
+      downloadHttp: (o) => t.downloadHttp(o),
       listDownloads: () => t.listDownloads(),
       deleteDownload: (o) => t.deleteDownload(o),
+      getDownloadDir: () => t.getDownloadDir(),
+      pickDownloadDir: () => t.pickDownloadDir(),
+      resetDownloadDir: () => t.resetDownloadDir(),
       stop: () => t.stop(),
       status: () => t.status(),
       addListener: (name, cb) => {

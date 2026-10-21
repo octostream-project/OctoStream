@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore.js'
 // SyncDevices como al listener global (RemotePlayReceiver) — funciona con
 // cualquier componente desmontado.
 export function mergeRemoteData(remoteData) {
-  const counts = { favs: 0, hist: 0, eps: 0 }
+  const counts = { favs: 0, watchlist: 0, hist: 0, eps: 0 }
   if (!remoteData || typeof remoteData !== 'object') return counts
   const s = useStore.getState()
 
@@ -18,6 +18,16 @@ export function mergeRemoteData(remoteData) {
       if (!favMap.has(key)) { favMap.set(key, f); counts.favs++ }
     }
     if (counts.favs) s.setFavorites([...favMap.values()].slice(0, 500))
+  }
+
+  if (Array.isArray(remoteData.watchlist)) {
+    const listMap = new Map()
+    for (const w of s.watchlist) listMap.set(`${w.id}-${w.type}`, w)
+    for (const w of remoteData.watchlist) {
+      const key = `${w.id}-${w.type}`
+      if (!listMap.has(key)) { listMap.set(key, w); counts.watchlist++ }
+    }
+    if (counts.watchlist) s.setWatchlist([...listMap.values()].slice(0, 500))
   }
 
   if (Array.isArray(remoteData.watchHistory)) {
@@ -63,6 +73,7 @@ export function localSyncPayload() {
   const s = useStore.getState()
   return {
     favorites: s.favorites,
+    watchlist: s.watchlist,
     watchHistory: s.watchHistory,
     watchedEpisodes: s.watchedEpisodes,
   }

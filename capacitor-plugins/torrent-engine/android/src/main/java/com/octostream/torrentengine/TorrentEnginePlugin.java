@@ -1,7 +1,13 @@
 package com.octostream.torrentengine;
 
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.util.Log;
 
 import com.frostwire.jlibtorrent.FileStorage;
@@ -15,11 +21,13 @@ import com.frostwire.jlibtorrent.TorrentInfo;
 import com.frostwire.jlibtorrent.TorrentStatus;
 import com.frostwire.jlibtorrent.swig.settings_pack;
 
+import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.ByteArrayOutputStream;
@@ -281,10 +289,115 @@ public class TorrentEnginePlugin extends Plugin {
     // El progreso sale por los eventos 'torrentProgress' de startProgressPoll.
     // ------------------------------------------------------------------
 
+    // Carpeta de descarga elegida por el usuario (ruta real — jlibtorrent
+    // no puede escribir en URIs SAF). Si no es escribible se cae al
+    // directorio privado de la app.
+    private static final String PREFS = "octostream_torrent_engine";
+
     private File downloadsDir() {
+        String custom = getContext().getSharedPreferences(PREFS, 0)
+                .getString("download_dir", null);
+        if (custom != null) {
+            File d = new File(custom);
+            if (d.isDirectory() && d.canWrite()) return d;
+        }
         File base = getContext().getExternalFilesDir(null);
         if (base == null) base = getContext().getFilesDir();
         return new File(base, "downloads");
+    }
+
+    /** Carpeta de descarga actual + si es personalizada + acceso all-files. */
+    @PluginMethod
+    public void getDownloadDir(PluginCall call) {
+        String custom = getContext().getSharedPreferences(PREFS, 0)
+                .getString("download_dir", null);
+        File d = downloadsDir();
+        JSObject ret = new JSObject();
+        ret.put("path", d.getAbsolutePath());
+        ret.put("custom", custom != null && d.getAbsolutePath().equals(custom));
+        ret.put("allFilesAccess",
+                Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager());
+        call.resolve(ret);
+    }
+
+    /** Vuelve al directorio privado de la app. */
+    @PluginMethod
+    public void resetDownloadDir(PluginCall call) {
+        getContext().getSharedPreferences(PREFS, 0).edit().remove("download_dir").apply();
+        call.resolve();
+    }
+
+    /**
+     * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Escribir fuera del
+     * sandbox exige "Acceso a todos los archivos" en API 30+ — si falta se
+     * abre su ajuste y se devuelve {needsPermission:true}; la UI reintenta
+     * el picker cuando el usuario vuelva.
+     */
+    @PluginMethod
+    public void pickDownloadDir(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            try {
+                Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                i.setData(Uri.parse("package:" + getContext().getPackageName()));
+                getActivity().startActivity(i);
+            } catch (Exception e) {
+                try {
+                    getActivity().startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                } catch (Exception ignored) {}
+            }
+            call.resolve(new JSObject().put("needsPermission", true));
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(call, intent, "pickDownloadDirResult");
+    }
+
+    @ActivityCallback
+    private void pickDownloadDirResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+        if (uri == null) { call.reject("cancelled"); return; }
+        try {
+            getContext().getContentResolver().takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        } catch (Exception ignored) {}
+        String path = treeUriToPath(uri);
+        if (path == null) {
+            call.reject("La carpeta elegida no es almacenamiento local (usa Descargas, SD o USB)");
+            return;
+        }
+        File dir = new File(path);
+        dir.mkdirs();
+        if (!dir.isDirectory() || !dir.canWrite()) {
+            call.reject("Sin permiso de escritura en esa carpeta");
+            return;
+        }
+        getContext().getSharedPreferences(PREFS, 0).edit()
+                .putString("download_dir", path).apply();
+        JSObject ret = new JSObject();
+        ret.put("path", path);
+        ret.put("custom", true);
+        call.resolve(ret);
+    }
+
+    // content://…/tree/primary:Descargas/X → /storage/emulated/0/Descargas/X
+    // …/tree/ABCD-1234:X → /storage/ABCD-1234/X (SD/USB OTG).
+    private static String treeUriToPath(Uri uri) {
+        try {
+            String docId = DocumentsContract.getTreeDocumentId(uri);
+            if (docId == null) return null;
+            String[] parts = docId.split(":", 2);
+            String rel = parts.length > 1 ? parts[1] : "";
+            if ("primary".equalsIgnoreCase(parts[0])) {
+                return new File(Environment.getExternalStorageDirectory(), rel).getAbsolutePath();
+            }
+            File vol = new File("/storage/" + parts[0]);
+            if (vol.isDirectory()) return new File(vol, rel).getAbsolutePath();
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     @PluginMethod
@@ -425,6 +538,189 @@ public class TorrentEnginePlugin extends Plugin {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Descarga directa http(s): enlaces de vídeo progresivo (mp4/mkv/debrid
+    // desbloqueado). Mismo directorio y eventos 'torrentProgress' que la
+    // descarga torrent. HLS (m3u8) no aplica — solo archivos completos.
+    // El .part evita que listDownloads lo muestre hasta terminar.
+    // ------------------------------------------------------------------
+
+    private volatile boolean httpDlCancel = false;
+
+    private static String sanitizeName(String name) {
+        if (name == null) return null;
+        // Sin separadores de ruta ni caracteres que rompen filesystems.
+        String s = name.replaceAll("[\\\\/:*?\"<>|]", " ").trim().replaceAll("\\s+", " ");
+        if (s.isEmpty() || s.equals(".") || s.equals("..")) return null;
+        if (s.length() > 120) s = s.substring(0, 120).trim();
+        return s;
+    }
+
+    private static String basenameFromUrl(String url) {
+        try {
+            String p = new URL(url).getPath();
+            int i = p.lastIndexOf('/');
+            String b = i >= 0 ? p.substring(i + 1) : p;
+            b = java.net.URLDecoder.decode(b, "UTF-8");
+            return b.isEmpty() ? null : b;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private static String extOf(String name) {
+        int i = name != null ? name.lastIndexOf('.') : -1;
+        return (i > 0 && i < name.length() - 1) ? name.substring(i + 1).toLowerCase(Locale.ROOT) : null;
+    }
+
+    private void emitHttpProgress(String state, double progress, long done, long total, long rate, String fileName) {
+        JSObject o = new JSObject();
+        o.put("state", state);
+        o.put("progress", progress);
+        o.put("downloadRate", rate);
+        o.put("uploadRate", 0);
+        o.put("peers", 0);
+        o.put("seeds", 0);
+        o.put("totalDone", done);
+        o.put("totalSize", total);
+        o.put("fileName", fileName);
+        try { notifyListeners("torrentProgress", o); } catch (Throwable ignored) {}
+    }
+
+    @PluginMethod
+    public void downloadHttp(PluginCall call) {
+        final String url = call.getString("url");
+        final String nameArg = call.getString("name");
+        final JSObject headers = call.getObject("headers");
+        if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            call.reject("url http(s) requerida");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                // Mismo slot único que download(): una cosa bajando a la vez.
+                stopTorrentInternal();
+                httpDlCancel = false;
+
+                String fname = sanitizeName(nameArg);
+                if (fname == null) fname = sanitizeName(basenameFromUrl(url));
+                if (fname == null) fname = "video";
+                // Extensión de vídeo garantizada (debrid URLs suelen acabar sin ella).
+                String urlExt = extOf(sanitizeName(basenameFromUrl(url)));
+                String nameExt = extOf(fname);
+                if (nameExt == null || !isVideoFile("x." + nameExt)) {
+                    fname = fname.replaceAll("\\.[^.]*$", "")
+                            + "." + (urlExt != null && isVideoFile("x." + urlExt) ? urlExt : "mp4");
+                }
+
+                File dir = downloadsDir();
+                dir.mkdirs();
+                File out = new File(dir, fname);
+                String canonSave = dir.getCanonicalPath();
+                if (!out.getCanonicalPath().startsWith(canonSave + File.separator)) {
+                    throw new Exception("ruta de archivo fuera del directorio de descarga");
+                }
+                File part = new File(dir, fname + ".part");
+
+                // Conexión (respeta el proxy de sistema — WARP — vía propiedades Java).
+                HttpURLConnection conn = null;
+                String current = url;
+                for (int hop = 0; hop <= 5; hop++) {
+                    URL u = new URL(current);
+                    conn = (HttpURLConnection) u.openConnection();
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+                    if (headers != null) {
+                        java.util.Iterator<String> keys = headers.keys();
+                        while (keys.hasNext()) {
+                            String k = keys.next();
+                            try {
+                                String v = headers.getString(k);
+                                if (v != null) conn.setRequestProperty(k, v);
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    int code = conn.getResponseCode();
+                    if (code >= 300 && code < 400) {
+                        String loc = conn.getHeaderField("Location");
+                        conn.disconnect();
+                        if (loc == null) throw new Exception("redirect sin Location");
+                        current = new URL(new URL(current), loc).toString();
+                        conn = null;
+                        continue;
+                    }
+                    if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+                    break;
+                }
+                if (conn == null) throw new Exception("demasiados redirects");
+
+                long total = conn.getContentLengthLong();
+                if (out.exists() && total > 0 && out.length() == total) {
+                    conn.disconnect();
+                    JSObject done = new JSObject();
+                    done.put("name", fname);
+                    done.put("path", out.getAbsolutePath());
+                    done.put("sizeBytes", out.length());
+                    done.put("complete", true);
+                    call.resolve(done);
+                    return;
+                }
+                if (out.exists()) out.delete();
+                if (part.exists()) part.delete();
+
+                emitHttpProgress("downloading", 0, 0, Math.max(total, 0), 0, fname);
+                call.resolve(new JSObject()
+                        .put("name", fname)
+                        .put("path", out.getAbsolutePath())
+                        .put("sizeBytes", Math.max(total, 0))
+                        .put("complete", false));
+
+                InputStream in = conn.getInputStream();
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(part);
+                byte[] buf = new byte[64 * 1024];
+                long doneBytes = 0, lastEmit = 0, lastBytes = 0;
+                int r;
+                try {
+                    while ((r = in.read(buf)) >= 0) {
+                        if (httpDlCancel) throw new Exception("descarga cancelada");
+                        fos.write(buf, 0, r);
+                        doneBytes += r;
+                        long now = System.currentTimeMillis();
+                        if (now - lastEmit >= 1000) {
+                            long rate = (doneBytes - lastBytes) * 1000 / Math.max(now - lastEmit, 1);
+                            double prog = total > 0 ? Math.min(doneBytes / (double) total, 1.0) : 0;
+                            emitHttpProgress("downloading", prog, doneBytes, Math.max(total, 0), rate, fname);
+                            lastEmit = now; lastBytes = doneBytes;
+                        }
+                    }
+                    fos.flush();
+                } finally {
+                    try { fos.close(); } catch (Throwable ignored) {}
+                    conn.disconnect();
+                }
+                if (total > 0 && doneBytes < total) throw new Exception("descarga incompleta: " + doneBytes + " de " + total);
+                if (!part.renameTo(out)) {
+                    // renameTo falla en algunos filesystems: copiar + borrar.
+                    try (InputStream pin = new java.io.FileInputStream(part);
+                         java.io.FileOutputStream pout = new java.io.FileOutputStream(out)) {
+                        byte[] cb = new byte[64 * 1024];
+                        int cr;
+                        while ((cr = pin.read(cb)) >= 0) pout.write(cb, 0, cr);
+                    }
+                    part.delete();
+                }
+                emitHttpProgress("finished", 1.0, doneBytes, Math.max(total, doneBytes), 0, fname);
+            } catch (Exception e) {
+                Log.e(TAG, "downloadHttp failed", e);
+                emitHttpProgress("error", 0, 0, 0, 0, "");
+                call.reject("Descarga: " + e.getMessage());
+            }
+        }, "http-download").start();
+    }
+
     @Override
     protected void handleOnPause() {
         // App en background: pausar el swarm. ExoPlayer ya pausó el vídeo;
@@ -460,6 +756,7 @@ public class TorrentEnginePlugin extends Plugin {
 
     private void stopTorrentInternal() {
         running = false;
+        httpDlCancel = true;
         stopProgressPoll();
         cleanupTorrent();
     }

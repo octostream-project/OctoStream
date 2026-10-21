@@ -34,6 +34,9 @@ repositories {
 
 dependencies {
     implementation project(':capacitor-android')
+    // AppCompat+Activity: getActivity() y el ActivityResult del picker SAF
+    // (misma dependencia que usa el plugin exoplayer).
+    implementation 'androidx.appcompat:appcompat:1.6.1'
     // jlibtorrent: Java API + native libtorrent binaries per Android ABI
     implementation 'com.frostwire:jlibtorrent:1.2.0.18'
     implementation 'com.frostwire:jlibtorrent-android-arm:1.2.0.18'

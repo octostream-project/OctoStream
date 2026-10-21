@@ -1196,18 +1196,52 @@ async function getTorrentEngine() {
         }
       },
       downloadDir: path.join(app.getPath('temp'), 'octostream-torrent'),
-      offlineDir: path.join(app.getPath('downloads'), 'OctoStream'),
+      offlineDir: savedDownloadDir() || path.join(app.getPath('downloads'), 'OctoStream'),
     })
   }
   return torrentEngine
 }
+
+// Carpeta de descargas elegida por el usuario — persiste en userData.
+const dlDirFile = () => path.join(app.getPath('userData'), 'download-dir.json')
+function savedDownloadDir() {
+  try {
+    const p = JSON.parse(fs.readFileSync(dlDirFile(), 'utf8'))?.path
+    if (p && fs.existsSync(p)) return p
+  } catch {}
+  return null
+}
+const defaultDownloadDir = () => path.join(app.getPath('downloads'), 'OctoStream')
 ipcMain.handle('torrent:start', async (_e, arg) => (await getTorrentEngine()).start(arg || {}))
 ipcMain.handle('torrent:listFiles', async (_e, arg) => (await getTorrentEngine()).listFiles(arg || {}))
 ipcMain.handle('torrent:download', async (_e, arg) => (await getTorrentEngine()).download(arg || {}))
+ipcMain.handle('torrent:downloadHttp', async (_e, arg) => (await getTorrentEngine()).downloadHttp(arg || {}))
 ipcMain.handle('torrent:listDownloads', async () => (await getTorrentEngine()).listDownloads())
 ipcMain.handle('torrent:deleteDownload', async (_e, arg) => (await getTorrentEngine()).deleteDownload(arg || {}))
 ipcMain.handle('torrent:stop', async () => (await getTorrentEngine()).stop())
 ipcMain.handle('torrent:status', async () => (await getTorrentEngine()).status())
+ipcMain.handle('torrent:getDownloadDir', async () => {
+  const e = await getTorrentEngine()
+  return { path: e.offlineDir, custom: e.offlineDir !== defaultDownloadDir() }
+})
+ipcMain.handle('torrent:pickDownloadDir', async () => {
+  const r = await dialog.showOpenDialog({
+    title: 'Carpeta de descargas',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (r.canceled || !r.filePaths?.[0]) return { cancelled: true }
+  const p = r.filePaths[0]
+  try { fs.writeFileSync(dlDirFile(), JSON.stringify({ path: p })) } catch {}
+  const e = await getTorrentEngine()
+  e.setOfflineDir(p)
+  return { path: p, custom: true }
+})
+ipcMain.handle('torrent:resetDownloadDir', async () => {
+  try { fs.rmSync(dlDirFile(), { force: true }) } catch {}
+  const e = await getTorrentEngine()
+  e.setOfflineDir(defaultDownloadDir())
+  return { path: e.offlineDir, custom: false }
+})
 
 // Pantalla completa de la ventana: la app Android reproduce siempre a
 // pantalla completa; en escritorio el player se comporta igual.

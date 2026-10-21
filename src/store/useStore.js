@@ -9,6 +9,7 @@ import { waitForWarp } from '../utils/warpStatus.js'
 // Persisted slices of the store. Each key maps to a localStorage key.
 const PERSISTED_KEYS = {
   favorites: 'octostream_favorites',
+  watchlist: 'octostream_watchlist',
   watchHistory: 'octostream_history',
   watchedEpisodes: 'octostream_watched_episodes',
   youtubeSearchHistory: 'octostream_youtube_search_history',
@@ -72,6 +73,9 @@ export const useStore = create((set, get) => ({
   searchResults: [],
   loading: false,
   favorites: loadPersisted(PERSISTED_KEYS.favorites, []),
+  // "Pendientes": watchlist explícita (marcada con el icono marcador de
+  // Details) — distinta de favoritos y del historial en curso.
+  watchlist: loadPersisted(PERSISTED_KEYS.watchlist, []),
   watchHistory: loadPersisted(PERSISTED_KEYS.watchHistory, []),
   // Map of "seriesId:Sseason:Eepisode" → { watchedAt, progress }
   // Tracks which episodes have been watched (>= 97% progress).
@@ -202,6 +206,20 @@ export const useStore = create((set, get) => ({
     return get().favorites.some(f => f.id === id && f.type === type)
   },
 
+  toggleWatchlist: (item) => {
+    const watchlist = get().watchlist
+    const exists = watchlist.find(w => w.id === item.id && w.type === item.type)
+    const updated = exists
+      ? watchlist.filter(w => !(w.id === item.id && w.type === item.type))
+      : [item, ...watchlist].slice(0, 500)
+    persist(PERSISTED_KEYS.watchlist, updated)
+    set({ watchlist: updated })
+  },
+
+  isWatchlisted: (id, type) => {
+    return get().watchlist.some(w => w.id === id && w.type === type)
+  },
+
   addToHistory: (item) => {
     const history = get().watchHistory
     const existing = history.find(h => h.id === item.id && h.type === item.type)
@@ -281,6 +299,10 @@ export const useStore = create((set, get) => ({
   setFavorites: (items) => {
     persist(PERSISTED_KEYS.favorites, items)
     set({ favorites: items })
+  },
+  setWatchlist: (items) => {
+    persist(PERSISTED_KEYS.watchlist, items)
+    set({ watchlist: items })
   },
   setWatchHistory: (items) => {
     persist(PERSISTED_KEYS.watchHistory, items)

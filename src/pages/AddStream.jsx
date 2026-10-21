@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef } from 'react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
+import DownloadsList from '../components/DownloadsList.jsx'
 import { embedStreamPlugin } from '../plugins/builtIn/index.js'
 import { pickLocalVideo, pickLocalSubtitle, playLocalFile } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
-import { getTorrentEngine } from '../utils/torrentEngine.js'
-import { Play, Link2, Plus, Trash2, Clapperboard, Usb, Subtitles, X, Download } from 'lucide-react'
+import { Play, Link2, Plus, Trash2, Clapperboard, Usb, Subtitles, X } from 'lucide-react'
 
 const STORAGE_KEY = 'octostream_custom_streams'
 
@@ -27,43 +27,8 @@ export default function AddStream() {
   const [customStreams, setCustomStreams] = useState(loadCustomStreams)
   const [localError, setLocalError] = useState('')
   const [localPick, setLocalPick] = useState(null)
-  const [downloads, setDownloads] = useState([])
   const urlRef = useRef(null)
   const canDownload = isAndroidNative() || isElectron()
-
-  // Descargas offline de torrents: lista lo que hay en el directorio de
-  // descargas del motor (Android: <files>/downloads, escritorio: ~/Downloads/OctoStream).
-  const refreshDownloads = useCallback(async () => {
-    if (!canDownload) return
-    try {
-      const engine = await getTorrentEngine()
-      const res = await engine?.listDownloads?.()
-      setDownloads(res?.files || [])
-    } catch { /* motor no disponible */ }
-  }, [canDownload])
-
-  useEffect(() => {
-    const t = setTimeout(() => { refreshDownloads() }, 0)
-    return () => clearTimeout(t)
-  }, [refreshDownloads])
-
-  const handleDownloadPlay = async (file) => {
-    setLocalError('')
-    try {
-      const uri = isAndroidNative() ? `file://${file.path}` : file.path
-      await playLocalFile({ uri, title: file.name })
-    } catch (e) {
-      setLocalError(e?.message || 'No se pudo reproducir la descarga')
-    }
-  }
-
-  const handleDownloadDelete = async (file) => {
-    try {
-      const engine = await getTorrentEngine()
-      await engine?.deleteDownload?.({ path: file.path })
-      refreshDownloads()
-    } catch { /* noop */ }
-  }
 
   const handleLocalFile = async () => {
     setLocalError('')
@@ -238,35 +203,9 @@ export default function AddStream() {
         </div>
       )}
 
-      {canDownload && downloads.length > 0 && (
+      {canDownload && (
         <div className="bg-dark-800 rounded-xl p-5 border border-dark-700 mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-shrink-0 w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-              <Download className="text-primary-400" size={20} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-white font-medium">Descargas</p>
-              <p className="text-xs text-dark-500">Vídeos descargados por torrent — se ven sin conexión</p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {downloads.map((f, i) => (
-              <div key={f.path || i} className="flex items-center gap-3 bg-dark-700/50 rounded-lg p-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm truncate">{f.name}</p>
-                  <p className="text-xs text-dark-500">
-                    {f.size >= 1e9 ? `${(f.size / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(f.size / 1e6))} MB`}
-                  </p>
-                </div>
-                <button onClick={() => handleDownloadPlay(f)} className="btn-ghost p-2" title="Reproducir">
-                  <Play size={18} />
-                </button>
-                <button onClick={() => handleDownloadDelete(f)} className="btn-ghost p-2 text-red-400" title="Borrar">
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            ))}
-          </div>
+          <DownloadsList />
         </div>
       )}
 

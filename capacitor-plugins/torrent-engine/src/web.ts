@@ -1,5 +1,5 @@
 import { WebPlugin } from '@capacitor/core'
-import type { TorrentDownloadResult, TorrentEnginePlugin, TorrentListResult, TorrentStartOptions, TorrentStartResult, TorrentStatusResult } from './definitions'
+import type { DownloadDirInfo, HttpDownloadOptions, HttpDownloadResult, PickDownloadDirResult, TorrentDownloadResult, TorrentEnginePlugin, TorrentListResult, TorrentStartOptions, TorrentStartResult, TorrentStatusResult } from './definitions'
 
 export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
   async start(_options: TorrentStartOptions): Promise<TorrentStartResult> {
@@ -14,6 +14,10 @@ export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
     throw new Error('Torrent streaming is only available on Android')
   }
 
+  async downloadHttp(_options: HttpDownloadOptions): Promise<HttpDownloadResult> {
+    throw new Error('Descargas solo disponibles en Android/Electron')
+  }
+
   async listDownloads(): Promise<{ files: { name: string; path: string; size: number }[] }> {
     return { files: [] }
   }
@@ -21,6 +25,16 @@ export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
   async deleteDownload(_options: { path: string }): Promise<{ deleted: boolean }> {
     return { deleted: false }
   }
+
+  async getDownloadDir(): Promise<DownloadDirInfo> {
+    return { path: '', custom: false }
+  }
+
+  async pickDownloadDir(): Promise<PickDownloadDirResult> {
+    throw new Error('Selector de carpeta solo disponible en Android/Electron')
+  }
+
+  async resetDownloadDir(): Promise<void> {}
 
   async stop(): Promise<void> {}
 

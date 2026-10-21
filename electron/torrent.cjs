@@ -94,6 +94,7 @@ class TorrentEngine {
     this.server = null
     this.timer = null
     this.state = 'idle'
+    this.httpReq = null
   }
 
   async _getClient() {
@@ -318,10 +319,118 @@ class TorrentEngine {
     }
   }
 
+  // Carpeta de descarga elegida por el usuario (main persiste el path).
+  setOfflineDir(dir) {
+    if (dir && typeof dir === 'string') this.offlineDir = dir
+    return { path: this.offlineDir }
+  }
+
   listDownloads() {
     const files = []
     this._walkVideos(this.offlineDir, this.offlineDir, files)
     return { files }
+  }
+
+  // Descarga directa http(s): vídeo progresivo (mp4/mkv, debrid). Mismo
+  // directorio y eventos 'torrentProgress' que la descarga torrent.
+  async downloadHttp({ url, name, headers } = {}) {
+    if (!url || !/^https?:\/\//i.test(url)) throw new Error('url http(s) requerida')
+    await this.stop()
+    fs.mkdirSync(this.offlineDir, { recursive: true })
+
+    const sanitize = (s) => (s || '').replace(/[\\/:*?"<>|]/g, ' ').trim().replace(/\s+/g, ' ')
+    const baseOf = (u) => {
+      try { return decodeURIComponent(new URL(u).pathname.split('/').pop() || '') } catch { return '' }
+    }
+    let fname = sanitize(name) || sanitize(baseOf(url)) || 'video'
+    const urlExt = (baseOf(url).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()
+    const nameExt = (fname.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()
+    if (!nameExt || !VIDEO_EXT.test('x.' + nameExt)) {
+      fname = fname.replace(/\.[^.]*$/, '') + '.' + (urlExt && VIDEO_EXT.test('x.' + urlExt) ? urlExt : 'mp4')
+    }
+    const out = path.join(this.offlineDir, fname)
+    const part = out + '.part'
+    const root = path.resolve(this.offlineDir)
+    if (!path.resolve(out).startsWith(root + path.sep)) throw new Error('ruta fuera del directorio de descargas')
+
+    const emit = (state, progress, done, total, rate) => {
+      const ev = {
+        state, progress, downloadRate: rate || 0, uploadRate: 0, peers: 0, seeds: 0,
+        totalDone: done, totalSize: total, fileName: fname,
+      }
+      this.lastStatus = ev
+      this.sendEvent('torrentProgress', ev)
+    }
+
+    const res = await new Promise((resolve, reject) => {
+      const hop = (current, depth) => {
+        if (depth > 5) return reject(new Error('demasiados redirects'))
+        let u
+        try { u = new URL(current) } catch { return reject(new Error('URL inválida')) }
+        const lib = u.protocol === 'https:' ? https : http
+        const req = lib.get({
+          hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: u.pathname + u.search,
+          headers: { 'User-Agent': 'OctoStream/1.0', ...(headers || {}) },
+          timeout: 30000,
+        }, (r) => {
+          if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+            r.resume()
+            const loc = r.headers.location
+            return hop(loc.startsWith('http') ? loc : new URL(loc, current).href, depth + 1)
+          }
+          if (r.statusCode < 200 || r.statusCode >= 300) {
+            r.resume()
+            return reject(new Error(`HTTP ${r.statusCode}`))
+          }
+          resolve(r)
+        })
+        req.on('timeout', () => req.destroy(new Error('timeout')))
+        req.on('error', reject)
+        this.httpReq = req
+      }
+      hop(url, 0)
+    })
+
+    this.httpReq = null
+    this.httpRes = res
+    const total = Number(res.headers['content-length'] || 0)
+    const stat = fs.existsSync(out) ? fs.statSync(out) : null
+    if (stat && total > 0 && stat.size === total) {
+      res.resume()
+      return { name: fname, path: out, sizeBytes: stat.size, complete: true }
+    }
+    try { fs.rmSync(out, { force: true }); fs.rmSync(part, { force: true }) } catch { /* no-op */ }
+
+    emit('downloading', 0, 0, total, 0)
+    this.state = 'downloading'
+
+    const done = await new Promise((resolve, reject) => {
+      const ws = fs.createWriteStream(part)
+      let bytes = 0, lastEmit = 0, lastBytes = 0
+      res.on('data', (c) => {
+        bytes += c.length
+        const now = Date.now()
+        if (now - lastEmit >= 1000) {
+          emit('downloading', total ? Math.min(bytes / total, 1) : 0, bytes, total,
+            Math.round((bytes - lastBytes) * 1000 / Math.max(now - lastEmit, 1)))
+          lastEmit = now; lastBytes = bytes
+        }
+      })
+      res.on('error', (e) => { ws.destroy(); reject(e) })
+      ws.on('error', reject)
+      ws.on('finish', () => resolve(bytes))
+      res.pipe(ws)
+    })
+    this.httpRes = null
+    if (total > 0 && done < total) {
+      try { fs.rmSync(part, { force: true }) } catch { /* no-op */ }
+      throw new Error(`descarga incompleta: ${done} de ${total}`)
+    }
+    fs.renameSync(part, out)
+    this.state = 'finished'
+    emit('finished', 1, done, Math.max(total, done), 0)
+    return { name: fname, path: out, sizeBytes: done, complete: false }
   }
 
   deleteDownload({ path: p } = {}) {
@@ -342,6 +451,8 @@ class TorrentEngine {
 
   async stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null }
+    if (this.httpReq) { try { this.httpReq.destroy() } catch { /* no-op */ } this.httpReq = null }
+    if (this.httpRes) { try { this.httpRes.destroy() } catch { /* no-op */ } this.httpRes = null }
     if (this.server) {
       const s = this.server
       this.server = null

@@ -17,7 +17,7 @@ import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
-import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download } from 'lucide-react'
+import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download, Bookmark } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 
@@ -172,7 +172,9 @@ export default function Details() {
   // Selecting the isFavorite function does NOT re-render when favorites change
   // (the function reference is stable), so the heart color never updates.
   const favorites = useStore(s => s.favorites)
+  const watchlist = useStore(s => s.watchlist)
   const toggleFavorite = useStore(s => s.toggleFavorite)
+  const toggleWatchlist = useStore(s => s.toggleWatchlist)
   const addToHistory = useStore(s => s.addToHistory)
   const updateProgress = useStore(s => s.updateProgress)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
@@ -218,6 +220,19 @@ export default function Details() {
   // Descarga offline de un torrent (o un archivo concreto del pack).
   // Progreso por eventos 'torrentProgress'; el motor tiene slot único —
   // iniciar otra descarga o reproducción sustituye a la anterior.
+  const ensureDlListener = async (engine) => {
+    if (!dlListenerRef.current) {
+      dlListenerRef.current = await engine.addListener('torrentProgress', ev => {
+        setDlStatus(prev => {
+          if (!prev || prev.done) return prev
+          const progress = ev?.progress || 0
+          const done = progress >= 1 || ev?.state === 'finished'
+          return { ...prev, name: ev?.fileName || prev.name, progress, done }
+        })
+      })
+    }
+  }
+
   const downloadTorrent = async (stream, fileIndex = null) => {
     try {
       const engine = await getTorrentEngine()
@@ -227,16 +242,7 @@ export default function Details() {
         return
       }
       setDlStatus({ name: stream.name || stream.server || 'torrent', progress: 0, done: false })
-      if (!dlListenerRef.current) {
-        dlListenerRef.current = await engine.addListener('torrentProgress', ev => {
-          setDlStatus(prev => {
-            if (!prev || prev.done) return prev
-            const progress = ev?.progress || 0
-            const done = progress >= 1 || ev?.state === 'finished'
-            return { ...prev, name: ev?.fileName || prev.name, progress, done }
-          })
-        })
-      }
+      await ensureDlListener(engine)
       const res = await engine.download({
         url: stream.url,
         season: meta?.season ?? undefined,
@@ -248,6 +254,61 @@ export default function Details() {
       console.warn('[Details] download failed:', e?.message)
       setDlStatus({ name: 'Error al descargar', done: true })
     }
+  }
+
+  // ¿Se puede descargar como archivo? Solo vídeo progresivo: mp4/mkv
+  // directos y enlaces debrid (se desbloquean a un archivo). HLS/DASH y
+  // embeds no aplican — sería remux, no descarga.
+  const isDownloadableDirect = (stream) => {
+    if (!stream?.url) return false
+    if (stream.streamType === 'debrid') return true
+    if (stream.streamType === 'torrent' || stream.streamType === 'embed'
+        || stream.streamType === 'hls' || stream.streamType === 'dash') return false
+    if (/\.m3u8([?#]|$)|\.mpd([?#]|$)/i.test(stream.url)) return false
+    return stream.streamType === 'mp4' || inferStreamType(stream.url, '') === 'mp4'
+  }
+
+  // Descarga directa http(s): el enlace debrid se desbloquea primero y el
+  // archivo resultante baja a la misma carpeta de Descargas que los torrents.
+  const downloadDirect = async (stream) => {
+    try {
+      const engine = await getTorrentEngine()
+      if (!engine?.downloadHttp) {
+        setDlStatus({ name: 'Descargas no disponibles en esta plataforma', done: true })
+        setTimeout(() => setDlStatus(null), 4000)
+        return
+      }
+      let url = stream.url
+      if (stream.streamType === 'debrid') {
+        if (!isAlldebridEnabled()) {
+          setDlStatus({ name: 'Requiere AllDebrid (Ajustes → Debrid)', done: true })
+          setTimeout(() => setDlStatus(null), 4000)
+          return
+        }
+        setDlStatus({ name: 'Desbloqueando enlace debrid…', progress: 0, done: false })
+        const r = await unlockDebrid(stream.url)
+        if (!r?.link) {
+          setDlStatus({ name: debridErrorMessage(r?.error), done: true })
+          return
+        }
+        url = r.link
+      }
+      const displayName = [meta?.name, parseStreamQuality(stream)].filter(Boolean).join(' ')
+        || stream.name || stream.server || 'video'
+      setDlStatus({ name: displayName, progress: 0, done: false })
+      await ensureDlListener(engine)
+      const res = await engine.downloadHttp({ url, name: displayName, headers: stream.headers })
+      if (res?.complete) setDlStatus({ name: res.name, progress: 1, done: true })
+    } catch (e) {
+      console.warn('[Details] downloadHttp failed:', e?.message)
+      setDlStatus({ name: 'Error al descargar', done: true })
+    }
+  }
+
+  // Icono ⬇ de la fila: torrent → picker/descarga; directo/debrid → downloadHttp.
+  const handleDownloadClick = (stream) => {
+    if (stream.streamType === 'torrent') return handleTorrentDownload(stream)
+    return downloadDirect(stream)
   }
 
   // Icono ⬇ de la fila: 1 archivo → descarga directa; pack → picker con ⬇ por archivo.
@@ -1342,6 +1403,7 @@ export default function Details() {
   }
 
   const fav = favorites.some(f => f.id === meta.id && f.type === meta.type)
+  const listed = watchlist.some(w => w.id === meta.id && w.type === meta.type)
 
   // Check if an episode has been watched (>= 97% progress)
   const isEpWatched = (season, episode) => {
@@ -1668,6 +1730,14 @@ export default function Details() {
               )}
               <button
                 data-tv-card
+                onClick={() => toggleWatchlist(meta)}
+                title={listed ? 'Quitar de Pendientes' : 'Añadir a Pendientes'}
+                className={`btn-secondary p-3 ${listed ? 'text-primary-400' : ''}`}
+              >
+                <Bookmark size={22} className={listed ? 'fill-primary-400' : ''} />
+              </button>
+              <button
+                data-tv-card
                 onClick={() => toggleFavorite(meta)}
                 className={`btn-secondary p-3 ${fav ? 'text-red-400' : ''}`}
               >
@@ -1902,13 +1972,13 @@ export default function Details() {
                         <p className="text-white text-sm font-medium truncate">{stream.name}</p>
                         <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
                       </div>
-                      {stream.streamType === 'torrent' && (
+                      {(stream.streamType === 'torrent' || isDownloadableDirect(stream)) && (
                         <button
                           tabIndex={0}
                           className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
                           title="Descargar para ver sin conexión"
-                          onClick={e => { e.stopPropagation(); handleTorrentDownload(stream) }}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleTorrentDownload(stream) } }}
+                          onClick={e => { e.stopPropagation(); handleDownloadClick(stream) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleDownloadClick(stream) } }}
                         >
                           <Download size={18} />
                         </button>
@@ -2356,13 +2426,13 @@ export default function Details() {
                         <p className="text-white text-sm font-medium truncate">{stream.name}</p>
                         <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
                       </div>
-                      {stream.streamType === 'torrent' && (
+                      {(stream.streamType === 'torrent' || isDownloadableDirect(stream)) && (
                         <button
                           tabIndex={0}
                           className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
                           title="Descargar para ver sin conexión"
-                          onClick={e => { e.stopPropagation(); handleTorrentDownload(stream) }}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleTorrentDownload(stream) } }}
+                          onClick={e => { e.stopPropagation(); handleDownloadClick(stream) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleDownloadClick(stream) } }}
                         >
                           <Download size={18} />
                         </button>

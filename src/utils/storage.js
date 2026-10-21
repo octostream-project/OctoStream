@@ -34,6 +34,7 @@ const SYNCED_KEYS = [
   'octostream_custom_plugins',
   'octostream_language',
   'octostream_favorites',
+  'octostream_watchlist',
   'octostream_history',
   'octostream_search_history',
   'octostream_tmdb_key',

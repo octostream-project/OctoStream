@@ -89,8 +89,12 @@ contextBridge.exposeInMainWorld('octostream', {
     start: (arg) => ipcRenderer.invoke('torrent:start', arg),
     listFiles: (arg) => ipcRenderer.invoke('torrent:listFiles', arg),
     download: (arg) => ipcRenderer.invoke('torrent:download', arg),
+    downloadHttp: (arg) => ipcRenderer.invoke('torrent:downloadHttp', arg),
     listDownloads: () => ipcRenderer.invoke('torrent:listDownloads'),
     deleteDownload: (arg) => ipcRenderer.invoke('torrent:deleteDownload', arg),
+    getDownloadDir: () => ipcRenderer.invoke('torrent:getDownloadDir'),
+    pickDownloadDir: () => ipcRenderer.invoke('torrent:pickDownloadDir'),
+    resetDownloadDir: () => ipcRenderer.invoke('torrent:resetDownloadDir'),
     stop: () => ipcRenderer.invoke('torrent:stop'),
     status: () => ipcRenderer.invoke('torrent:status'),
     on: (handler) => {
