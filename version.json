@@ -1,18 +1,18 @@
 {
-  "versionCode": 2074,
-  "versionName": "2.07.4",
+  "versionCode": 2075,
+  "versionName": "2.07.5",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.4/octostream-2.07.4-arm64-v8a.apk",
-  "sha256": "58f77bad313c84d3e166432bfd98a562694498a31e81d053ad2058d13be026cf",
-  "notes": "USB: tras elegir el vídeo puedes adjuntar subtítulos .srt/.vtt locales antes de reproducir. HDFull vuelve a salir por WARP.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-arm64-v8a.apk",
+  "sha256": "876cd95dba44e1544b58025bd27cf740e79d074e9a9be8e3fdca27cb0b2f7ca1",
+  "notes": "Acceso a Añadir Enlace desde la barra inferior en móvil — hace alcanzable la reproducción desde USB y los subtítulos locales.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.4/octostream-2.07.4-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.4/octostream-2.07.4-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.4/octostream-2.07.4-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "58f77bad313c84d3e166432bfd98a562694498a31e81d053ad2058d13be026cf",
-    "armeabi-v7a": "f608dbf9d1581f14faaa0ea372980f268f22b31459d9893e9ce497226441d889",
-    "x86_64": "0f8f24dc3fa50fee8dff1b0c85501a17973a7bebeaa74daff4a1244bb90535ed"
+    "arm64-v8a": "876cd95dba44e1544b58025bd27cf740e79d074e9a9be8e3fdca27cb0b2f7ca1",
+    "armeabi-v7a": "ac21bb81460ddee59a9e84928f785ee625edbfa13f493eb168c207355b740e55",
+    "x86_64": "73ef6a0200f650b5939feb7f5ab5e2a5faafff0a6702a1ceac7b888cabca1a07"
   }
 }

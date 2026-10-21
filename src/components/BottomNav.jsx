@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Search, Heart, Antenna, Clock, Settings as SettingsIcon, Youtube, Calendar as CalendarIcon, Trophy } from 'lucide-react'
+import { Home, Search, Heart, Antenna, Clock, Settings as SettingsIcon, Youtube, Calendar as CalendarIcon, Trophy, Link2 } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 
 function BottomNav() {
@@ -21,6 +21,7 @@ function BottomNav() {
     { to: '/favorites', icon: Heart, label: 'Mi lista', badge: favoritesCount },
     { to: '/history', icon: Clock, label: 'Historial', badge: historyCount },
     ...(hasSeries ? [{ to: '/calendar', icon: CalendarIcon, label: 'Calendario' }] : []),
+    { to: '/add-stream', icon: Link2, label: 'Enlaces' },
     { to: '/settings', icon: SettingsIcon, label: 'Ajustes' },
   ]
 
