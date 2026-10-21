@@ -201,6 +201,12 @@ export interface ExoPlayerPlugin {
    * content:// con permiso persistible para play({url, localFile:true}).
    */
   pickVideo(): Promise<PickVideoResult>
+  /**
+   * Picker SAF para subtítulos externos (.srt/.vtt). Devuelve una URI
+   * content:// persistible usable en PlayOptions.subtitles junto a
+   * play({localFile:true}).
+   */
+  pickSubtitle(): Promise<PickVideoResult>
   playEmbed(options: PlayEmbedOptions): Promise<PlayEmbedResult>
   /**
    * Resuelve un embed de forma invisible: WebView oculto que deja correr el

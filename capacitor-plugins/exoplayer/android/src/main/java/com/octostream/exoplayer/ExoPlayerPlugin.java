@@ -3431,9 +3431,11 @@ public class ExoPlayerPlugin extends Plugin {
                 JSONObject s = subsJson.optJSONObject(i);
                 if (s == null) continue;
                 String subUrl = s.optString("url", "");
-                // Solo http(s): las URLs de subtítulos vienen de plugins de
-                // terceros — file:///content:// leerían archivos locales.
-                if (subUrl.isEmpty() || !(subUrl.startsWith("http://") || subUrl.startsWith("https://"))) continue;
+                // http(s) para subs de plugins; content://file:// solo en la
+                // ruta localFile (subtítulo elegido por el usuario con SAF).
+                boolean isLocalSub = subUrl.startsWith("content://") || subUrl.startsWith("file://");
+                if (subUrl.isEmpty() || !(subUrl.startsWith("http://") || subUrl.startsWith("https://")
+                        || (localFile && isLocalSub))) continue;
                 String mime = s.optString("mimeType", "").toLowerCase(java.util.Locale.ROOT);
                 String subMime = mime.contains("vtt") ? androidx.media3.common.MimeTypes.TEXT_VTT
                         : mime.contains("srt") || mime.contains("subrip") ? androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
@@ -3505,8 +3507,35 @@ public class ExoPlayerPlugin extends Plugin {
         startActivityForResult(call, intent, "pickVideoResult");
     }
 
+    /**
+     * Picker SAF para subtítulos externos (.srt/.vtt). Los providers no
+     * etiquetan bien los .srt — se aceptan varios mime types comunes.
+     */
+    @PluginMethod
+    public void pickSubtitle(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[] { "application/x-subrip", "application/x-subtitle",
+                        "text/x-subrip", "text/vtt", "text/plain",
+                        "application/octet-stream" });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(call, intent, "pickSubtitleResult");
+    }
+
     @ActivityCallback
     private void pickVideoResult(PluginCall call, ActivityResult result) {
+        resolvePickedUri(call, result);
+    }
+
+    @ActivityCallback
+    private void pickSubtitleResult(PluginCall call, ActivityResult result) {
+        resolvePickedUri(call, result);
+    }
+
+    private void resolvePickedUri(PluginCall call, ActivityResult result) {
         if (call == null) return;
         Intent data = result != null ? result.getData() : null;
         Uri uri = data != null ? data.getData() : null;

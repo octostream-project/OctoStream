@@ -1,9 +1,9 @@
 import { useState, useRef } from 'react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import { embedStreamPlugin } from '../plugins/builtIn/index.js'
-import { pickLocalVideo, playLocalFile } from '../utils/exoPlayer.js'
+import { pickLocalVideo, pickLocalSubtitle, playLocalFile } from '../utils/exoPlayer.js'
 import { isAndroidNative } from '../utils/platform.js'
-import { Play, Link2, Plus, Trash2, Clapperboard, Usb } from 'lucide-react'
+import { Play, Link2, Plus, Trash2, Clapperboard, Usb, Subtitles, X } from 'lucide-react'
 
 const STORAGE_KEY = 'octostream_custom_streams'
 
@@ -25,6 +25,7 @@ export default function AddStream() {
   const [playing, setPlaying] = useState(null)
   const [customStreams, setCustomStreams] = useState(loadCustomStreams)
   const [localError, setLocalError] = useState('')
+  const [localPick, setLocalPick] = useState(null)
   const urlRef = useRef(null)
 
   const handleLocalFile = async () => {
@@ -32,11 +33,39 @@ export default function AddStream() {
     try {
       const file = await pickLocalVideo()
       if (!file?.uri) return
-      await playLocalFile({ uri: file.uri, title: file.name || 'Archivo local' })
+      setLocalPick({ video: file, subtitle: null })
     } catch (e) {
       if (e?.message !== 'cancelled') {
         setLocalError(e?.message || 'No se pudo abrir el archivo')
       }
+    }
+  }
+
+  const handleLocalSubtitle = async () => {
+    setLocalError('')
+    try {
+      const sub = await pickLocalSubtitle()
+      if (!sub?.uri) return
+      setLocalPick(p => p && { ...p, subtitle: sub })
+    } catch (e) {
+      if (e?.message !== 'cancelled') {
+        setLocalError(e?.message || 'No se pudo abrir el subtítulo')
+      }
+    }
+  }
+
+  const handleLocalPlay = async () => {
+    if (!localPick?.video?.uri) return
+    setLocalError('')
+    try {
+      const subName = localPick.subtitle?.name || ''
+      const subtitles = localPick.subtitle?.uri
+        ? [{ url: localPick.subtitle.uri, mimeType: /\.vtt$/i.test(subName) ? 'text/vtt' : 'application/x-subrip', label: subName || 'Subtítulos' }]
+        : null
+      await playLocalFile({ uri: localPick.video.uri, title: localPick.video.name || 'Archivo local', subtitles })
+      setLocalPick(null)
+    } catch (e) {
+      setLocalError(e?.message || 'No se pudo reproducir el archivo')
     }
   }
 
@@ -119,6 +148,39 @@ export default function AddStream() {
               Examinar
             </button>
           </div>
+          {localPick && (
+            <div className="mt-4 space-y-3">
+              <p className="text-sm text-dark-300 truncate">
+                <span className="text-dark-500">Vídeo:</span> {localPick.video.name || localPick.video.uri}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={handleLocalSubtitle} className="btn-secondary flex items-center gap-1.5">
+                  <Subtitles size={16} />
+                  {localPick.subtitle ? 'Cambiar subtítulos' : 'Subtítulos (.srt/.vtt)'}
+                </button>
+                {localPick.subtitle && (
+                  <span className="text-xs text-dark-400 flex items-center gap-1 truncate">
+                    {localPick.subtitle.name || 'subtítulos'}
+                    <button
+                      onClick={() => setLocalPick(p => p && { ...p, subtitle: null })}
+                      className="text-dark-500 hover:text-red-400"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleLocalPlay} className="btn-primary flex items-center gap-1.5">
+                  <Play size={16} />
+                  Reproducir
+                </button>
+                <button onClick={() => setLocalPick(null)} className="btn-ghost text-sm">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
           {localError && <p className="text-red-400 text-xs mt-3">{localError}</p>}
         </div>
       )}

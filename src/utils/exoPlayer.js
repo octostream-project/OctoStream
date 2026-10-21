@@ -170,10 +170,19 @@ export async function pickLocalVideo() {
 }
 
 /**
+ * Picker SAF para subtítulos externos (.srt/.vtt). La URI content:// se pasa
+ * en playLocalFile({subtitles:[{url}]}).
+ */
+export async function pickLocalSubtitle() {
+  if (!isAndroidNative()) throw new Error('Solo disponible en Android')
+  return ExoPlayer.pickSubtitle()
+}
+
+/**
  * Reproduce un archivo local (content:// o file://) en el ExoPlayer nativo.
  * Salta la sanitización http(s): la URI solo procede del SAF picker.
  */
-export async function playLocalFile({ uri, title, startTime }, onStateChange) {
+export async function playLocalFile({ uri, title, startTime, subtitles }, onStateChange) {
   if (!isAndroidNative()) throw new Error('Solo disponible en Android')
   stateListener = onStateChange
   zapListener = null
@@ -187,6 +196,7 @@ export async function playLocalFile({ uri, title, startTime }, onStateChange) {
     title: title || '',
     mode: 'vod',
     startTime: startTime || 0,
+    subtitles: subtitles || null,
   })
 }
 

@@ -10,6 +10,10 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
     throw new Error('ExoPlayer is only available on Android native')
   }
 
+  async pickSubtitle(): Promise<PickVideoResult> {
+    throw new Error('ExoPlayer is only available on Android native')
+  }
+
   async switchChannel(_options: SwitchChannelOptions): Promise<{ status: string }> {
     throw new Error('ExoPlayer is only available on Android native')
   }
