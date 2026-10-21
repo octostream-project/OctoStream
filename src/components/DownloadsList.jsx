@@ -81,7 +81,7 @@ export default function DownloadsList() {
       const engine = await getTorrentEngine()
       const r = await engine?.pickDownloadDir?.()
       if (r?.needsPermission) {
-        setError('Concede "Acceso a todos los archivos" en el ajuste que se abrió y vuelve a pulsar Cambiar.')
+        setError('Concede el permiso de almacenamiento a OctoStream (pantalla de ajustes o diálogo de Android) y vuelve a pulsar "Carpeta".')
         return
       }
       if (r?.path) setDirInfo({ path: r.path, custom: true })

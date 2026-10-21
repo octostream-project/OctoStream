@@ -1,5 +1,6 @@
 package com.octostream.torrentengine;
 
+import android.Manifest;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -22,13 +23,17 @@ import com.frostwire.jlibtorrent.TorrentStatus;
 import com.frostwire.jlibtorrent.swig.settings_pack;
 
 import androidx.activity.result.ActivityResult;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -52,7 +57,13 @@ import java.util.concurrent.Executors;
  * missing pieces get deadline-boosted so playback starts while the rest of the
  * file downloads in the background.
  */
-@CapacitorPlugin(name = "TorrentEngine")
+@CapacitorPlugin(name = "TorrentEngine", permissions = {
+        // Escritura fuera del sandbox para la carpeta de descarga elegida:
+        // WRITE_EXTERNAL_STORAGE cubre API <= 29 (permiso runtime); en API
+        // 30+ se usa el ajuste "Acceso a todos los archivos" (MANAGE_*).
+        @Permission(alias = "storageWrite", strings = {
+                Manifest.permission.WRITE_EXTERNAL_STORAGE })
+})
 public class TorrentEnginePlugin extends Plugin {
 
     private static final String TAG = "TorrentEngine";
@@ -315,8 +326,10 @@ public class TorrentEnginePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("path", d.getAbsolutePath());
         ret.put("custom", custom != null && d.getAbsolutePath().equals(custom));
-        ret.put("allFilesAccess",
-                Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager());
+        boolean access = Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED;
+        ret.put("allFilesAccess", access);
         call.resolve(ret);
     }
 
@@ -329,25 +342,44 @@ public class TorrentEnginePlugin extends Plugin {
 
     /**
      * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Escribir fuera del
-     * sandbox exige "Acceso a todos los archivos" en API 30+ — si falta se
-     * abre su ajuste y se devuelve {needsPermission:true}; la UI reintenta
-     * el picker cuando el usuario vuelva.
+     * sandbox exige: API 30+ → ajuste "Acceso a todos los archivos" (si
+     * falta se abre y se devuelve {needsPermission:true}); API <= 29 →
+     * permiso runtime WRITE_EXTERNAL_STORAGE (requestPermissionForAlias).
      */
     @PluginMethod
     public void pickDownloadDir(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
-            try {
-                Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                i.setData(Uri.parse("package:" + getContext().getPackageName()));
-                getActivity().startActivity(i);
-            } catch (Exception e) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (!Environment.isExternalStorageManager()) {
                 try {
-                    getActivity().startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
-                } catch (Exception ignored) {}
+                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    i.setData(Uri.parse("package:" + getContext().getPackageName()));
+                    getActivity().startActivity(i);
+                } catch (Exception e) {
+                    try {
+                        getActivity().startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                    } catch (Exception ignored) {}
+                }
+                call.resolve(new JSObject().put("needsPermission", true));
+                return;
             }
-            call.resolve(new JSObject().put("needsPermission", true));
+        } else if (getPermissionState("storageWrite") != PermissionState.GRANTED) {
+            requestPermissionForAlias("storageWrite", call, "storagePermCallback");
             return;
         }
+        launchDirPicker(call);
+    }
+
+    @PermissionCallback
+    private void storagePermCallback(PluginCall call) {
+        if (call == null) return;
+        if (getPermissionState("storageWrite") == PermissionState.GRANTED) {
+            launchDirPicker(call);
+        } else {
+            call.resolve(new JSObject().put("needsPermission", true));
+        }
+    }
+
+    private void launchDirPicker(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                 | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
