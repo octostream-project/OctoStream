@@ -352,46 +352,21 @@ public class TorrentEnginePlugin extends Plugin {
     }
 
     /**
-     * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Si all-files está
-     * disponible y concedido se guarda la ruta real (los torrents escriben
-     * directos); si no, la URI SAF basta (descargas HTTP directas y
-     * torrents copiados al terminar). El ajuste de all-files solo se abre
-     * una vez: si el dispositivo no tiene esa pantalla o el usuario no lo
-     * concede, el siguiente toque va directo al picker.
+     * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Siempre va directo al
+     * picker del sistema — sin pantallas de ajustes: en varios Android
+     * (GrapheneOS/Storage Scopes, algunos fabricantes) la pantalla de
+     * "acceso a todos los archivos" no existe o no devuelve resultado y
+     * la llamada quedaba colgada. Si all-files está concedido, el modo de
+     * ruta real se activa solo en pickDownloadDirResult.
      */
     @PluginMethod
     public void pickDownloadDir(PluginCall call) {
-        android.content.SharedPreferences prefs =
-                getContext().getSharedPreferences(PREFS, 0);
-        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()
-                && !prefs.getBoolean("all_files_prompted", false)) {
-            prefs.edit().putBoolean("all_files_prompted", true).apply();
-            if (openAllFilesSettings()) {
-                call.resolve(new JSObject().put("needsPermission", true));
-                return;
-            }
-            // La pantalla no existe en este dispositivo → picker directo.
-        } else if (Build.VERSION.SDK_INT < 30
+        if (Build.VERSION.SDK_INT < 30
                 && getPermissionState("storageWrite") != PermissionState.GRANTED) {
             requestPermissionForAlias("storageWrite", call, "storagePermCallback");
             return;
         }
         launchDirPicker(call);
-    }
-
-    private boolean openAllFilesSettings() {
-        try {
-            Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-            i.setData(Uri.parse("package:" + getContext().getPackageName()));
-            if (i.resolveActivity(getContext().getPackageManager()) == null) {
-                i = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                if (i.resolveActivity(getContext().getPackageManager()) == null) return false;
-            }
-            getActivity().startActivity(i);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     @PermissionCallback
@@ -403,48 +378,59 @@ public class TorrentEnginePlugin extends Plugin {
     }
 
     private void launchDirPicker(PluginCall call) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(call, intent, "pickDownloadDirResult");
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(call, intent, "pickDownloadDirResult");
+        } catch (Exception e) {
+            // Sin DocumentsUI o intent no resoluble: reject siempre — una
+            // llamada que no se resuelve deja la UI girando para siempre.
+            call.reject("No hay selector de carpetas disponible: " + e.getMessage());
+        }
     }
 
     @ActivityCallback
     private void pickDownloadDirResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
-        Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
-        if (uri == null) { call.reject("cancelled"); return; }
         try {
-            getContext().getContentResolver().takePersistableUriPermission(uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        } catch (Exception ignored) {}
-        String path = treeUriToPath(uri);
-        boolean rawAccess = Build.VERSION.SDK_INT >= 30
-                ? Environment.isExternalStorageManager()
-                : getPermissionState("storageWrite") == PermissionState.GRANTED;
-        android.content.SharedPreferences.Editor ed =
-                getContext().getSharedPreferences(PREFS, 0).edit();
-        JSObject ret = new JSObject();
-        if (path != null && rawAccess) {
-            File dir = new File(path);
-            dir.mkdirs();
-            if (!dir.isDirectory() || !dir.canWrite()) {
-                call.reject("Sin permiso de escritura en esa carpeta");
-                return;
+            Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+            if (uri == null) { call.reject("cancelled"); return; }
+            try {
+                getContext().getContentResolver().takePersistableUriPermission(uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            String path = treeUriToPath(uri);
+            boolean rawAccess = Build.VERSION.SDK_INT >= 30
+                    ? Environment.isExternalStorageManager()
+                    : getPermissionState("storageWrite") == PermissionState.GRANTED;
+            android.content.SharedPreferences.Editor ed =
+                    getContext().getSharedPreferences(PREFS, 0).edit();
+            JSObject ret = new JSObject();
+            if (path != null && rawAccess) {
+                File dir = new File(path);
+                dir.mkdirs();
+                if (!dir.isDirectory() || !dir.canWrite()) {
+                    call.reject("Sin permiso de escritura en esa carpeta");
+                    return;
+                }
+                ed.putString("download_dir", path).remove("download_tree").apply();
+                ret.put("path", path);
+                ret.put("treeMode", false);
+            } else {
+                // Modo SAF: sin acceso a rutas reales — la URI persistida
+                // basta para leer/escribir vía ContentResolver.
+                ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
+                ret.put("path", uri.toString());
+                ret.put("treeMode", true);
             }
-            ed.putString("download_dir", path).remove("download_tree").apply();
-            ret.put("path", path);
-            ret.put("treeMode", false);
-        } else {
-            // Modo SAF: sin acceso a rutas reales — la URI persistida basta
-            // para leer/escribir vía ContentResolver.
-            ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
-            ret.put("path", uri.toString());
-            ret.put("treeMode", true);
+            ret.put("custom", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            // El callback nunca puede escapar sin resolver/rechazar.
+            call.reject("No se pudo usar la carpeta: " + t.getMessage());
         }
-        ret.put("custom", true);
-        call.resolve(ret);
     }
 
     // content://…/tree/primary:Descargas/X → /storage/emulated/0/Descargas/X
