@@ -19,9 +19,11 @@ let lastCheck = null
  *   {versionName, notes, apkUrl, sha256, force}
  * or null when up-to-date / check fails / not Android.
  */
-export async function checkForUpdate({ manifestUrl = UPDATE_MANIFEST_URL } = {}) {
+export async function checkForUpdate({ manifestUrl = UPDATE_MANIFEST_URL, force = false } = {}) {
   if (!isAndroidNative()) return null
   // Al menos 1h entre checks para no martillear el repo en cada arranque.
+  // force: "Buscar actualización" manual en Ajustes — ignora el throttle.
+  if (force) lastCheck = null
   if (lastCheck && Date.now() - lastCheck < 60 * 60 * 1000) return null
   lastCheck = Date.now()
   try {

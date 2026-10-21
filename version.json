@@ -1,18 +1,18 @@
 {
-  "versionCode": 2075,
-  "versionName": "2.07.5",
+  "versionCode": 2076,
+  "versionName": "2.07.6",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-arm64-v8a.apk",
-  "sha256": "876cd95dba44e1544b58025bd27cf740e79d074e9a9be8e3fdca27cb0b2f7ca1",
-  "notes": "Acceso a Añadir Enlace desde la barra inferior en móvil — hace alcanzable la reproducción desde USB y los subtítulos locales.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.6/octostream-2.07.6-arm64-v8a.apk",
+  "sha256": "f94f794a067650b0d9dddd6fbeffb80a8f3386f0f232f9737a27c7f8a28c278b",
+  "notes": "12 mejoras: subs automaticos USB, forzar actualizacion, canales muertos fuera, reanudar en locales, watchdog del player (sin mas pantalla negra), elegir archivo del torrent, descarga offline de torrents, copia de seguridad, rotacion persistente de dominios, lint baseline en CI, auditoria semanal de canales, bump a prueba de fallos",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.5/octostream-2.07.5-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.6/octostream-2.07.6-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.6/octostream-2.07.6-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.6/octostream-2.07.6-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "876cd95dba44e1544b58025bd27cf740e79d074e9a9be8e3fdca27cb0b2f7ca1",
-    "armeabi-v7a": "ac21bb81460ddee59a9e84928f785ee625edbfa13f493eb168c207355b740e55",
-    "x86_64": "73ef6a0200f650b5939feb7f5ab5e2a5faafff0a6702a1ceac7b888cabca1a07"
+    "arm64-v8a": "f94f794a067650b0d9dddd6fbeffb80a8f3386f0f232f9737a27c7f8a28c278b",
+    "armeabi-v7a": "490754b6c46da34a00679b62945fa79a1f2ec3e630099eee0178bfd42d65b40d",
+    "x86_64": "303e3bfb269e3825b5635dbae897ff752a8fce49eb3350041f60d32d7fdbf47f"
   }
 }

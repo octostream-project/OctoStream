@@ -88,6 +88,7 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import java.io.ByteArrayOutputStream;
 
 import androidx.activity.result.ActivityResult;
 
@@ -3439,6 +3440,7 @@ public class ExoPlayerPlugin extends Plugin {
                 String mime = s.optString("mimeType", "").toLowerCase(java.util.Locale.ROOT);
                 String subMime = mime.contains("vtt") ? androidx.media3.common.MimeTypes.TEXT_VTT
                         : mime.contains("srt") || mime.contains("subrip") ? androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+                        : mime.contains("ssa") || mime.contains("ass") ? androidx.media3.common.MimeTypes.TEXT_SSA
                         : androidx.media3.common.MimeTypes.APPLICATION_TTML;
                 String label = s.optString("label", "");
                 String lang = s.optString("lang", "");
@@ -3502,6 +3504,9 @@ public class ExoPlayerPlugin extends Plugin {
         // Algunos providers etiquetan .mkv/.ts como octet-stream.
         intent.putExtra(Intent.EXTRA_MIME_TYPES,
                 new String[] { "video/*", "application/octet-stream" });
+        // Multi-selección: el usuario puede marcar vídeo + .srt del tirón —
+        // JS clasifica los archivos y engancha el subtítulo automáticamente.
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(call, intent, "pickVideoResult");
@@ -3525,6 +3530,79 @@ public class ExoPlayerPlugin extends Plugin {
         startActivityForResult(call, intent, "pickSubtitleResult");
     }
 
+    /**
+     * Exportar configuración: diálogo "Guardar como" del sistema (SAF
+     * CREATE_DOCUMENT) — el usuario elige dónde escribir el JSON (USB,
+     * Descargas, Drive…). El contenido llega como string en "content".
+     */
+    @PluginMethod
+    public void exportConfig(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        String name = call.getString("filename", "octostream-backup.json");
+        intent.putExtra(Intent.EXTRA_TITLE, name);
+        startActivityForResult(call, intent, "exportConfigResult");
+    }
+
+    /**
+     * Importar configuración: picker SAF de un archivo JSON. Devuelve
+     * {content} con el texto del archivo (tope 4 MB — un backup nunca es más).
+     */
+    @PluginMethod
+    public void importConfig(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[] { "application/json", "text/plain", "application/octet-stream" });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(call, intent, "importConfigResult");
+    }
+
+    @ActivityCallback
+    private void exportConfigResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+        if (uri == null) { call.reject("cancelled"); return; }
+        String content = call.getString("content", "{}");
+        try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
+            if (out == null) { call.reject("no se pudo abrir el destino"); return; }
+            out.write(content.getBytes("UTF-8"));
+            out.flush();
+            JSObject ret = new JSObject();
+            ret.put("saved", true);
+            ret.put("uri", uri.toString());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("error escribiendo: " + e.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    private void importConfigResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+        if (uri == null) { call.reject("cancelled"); return; }
+        try (java.io.InputStream in = getContext().getContentResolver().openInputStream(uri);
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            if (in == null) { call.reject("no se pudo abrir el archivo"); return; }
+            byte[] buf = new byte[16384];
+            int total = 0, r;
+            while ((r = in.read(buf)) >= 0) {
+                total += r;
+                if (total > 4 * 1024 * 1024) { call.reject("archivo demasiado grande"); return; }
+                bos.write(buf, 0, r);
+            }
+            JSObject ret = new JSObject();
+            ret.put("content", bos.toString("UTF-8"));
+            ret.put("name", describeUri(uri).getString("name"));
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("error leyendo: " + e.getMessage());
+        }
+    }
+
     @ActivityCallback
     private void pickVideoResult(PluginCall call, ActivityResult result) {
         resolvePickedUri(call, result);
@@ -3538,15 +3616,39 @@ public class ExoPlayerPlugin extends Plugin {
     private void resolvePickedUri(PluginCall call, ActivityResult result) {
         if (call == null) return;
         Intent data = result != null ? result.getData() : null;
-        Uri uri = data != null ? data.getData() : null;
-        if (uri == null) {
+        java.util.List<Uri> uris = new ArrayList<>();
+        if (data != null && data.getClipData() != null) {
+            android.content.ClipData clip = data.getClipData();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri u = clip.getItemAt(i).getUri();
+                if (u != null) uris.add(u);
+            }
+        }
+        Uri single = data != null ? data.getData() : null;
+        if (single != null) uris.add(single);
+        if (uris.isEmpty()) {
             call.reject("cancelled");
             return;
         }
-        try {
-            getContext().getContentResolver().takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (Exception ignored) {}
+        com.getcapacitor.JSArray files = new com.getcapacitor.JSArray();
+        for (Uri uri : uris) {
+            try {
+                getContext().getContentResolver().takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            files.put(describeUri(uri));
+        }
+        JSObject ret = new JSObject();
+        ret.put("files", files);
+        // Compat: primera selección también en los campos planos.
+        JSObject first = describeUri(uris.get(0));
+        ret.put("uri", first.optString("uri"));
+        ret.put("name", first.optString("name"));
+        ret.put("size", first.optLong("size"));
+        call.resolve(ret);
+    }
+
+    private JSObject describeUri(Uri uri) {
         String name = "";
         long size = -1;
         try (Cursor c = getContext().getContentResolver().query(uri, null, null, null, null)) {
@@ -3557,11 +3659,11 @@ public class ExoPlayerPlugin extends Plugin {
                 if (si >= 0) size = c.getLong(si);
             }
         } catch (Exception ignored) {}
-        JSObject ret = new JSObject();
-        ret.put("uri", uri.toString());
-        ret.put("name", name);
-        ret.put("size", size);
-        call.resolve(ret);
+        JSObject o = new JSObject();
+        o.put("uri", uri.toString());
+        o.put("name", name);
+        o.put("size", size);
+        return o;
     }
 
     private void openPlayer(String url, String streamType, boolean direct, String licenseUrl,
@@ -6302,6 +6404,19 @@ public class ExoPlayerPlugin extends Plugin {
     @PluginMethod
     public void isPipActive(PluginCall call) {
         call.resolve(new JSObject().put("active", pipPlayer != null));
+    }
+
+    // Liveness para el watchdog del WebView: cualquier UI nativa viva cuenta
+    // como activa (player, PiP, diálogo de embed, resolver o carga). Si la
+    // app quedó con root oculto y aquí no hay nada, el player murió sin
+    // emitir 'closed' y el JS debe restaurar la UI.
+    @PluginMethod
+    public void isActive(PluginCall call) {
+        mainHandler.post(() -> {
+            boolean active = player != null || pipPlayer != null
+                    || embedDialog != null || dialog != null || overlayDialog != null;
+            call.resolve(new JSObject().put("active", active));
+        });
     }
 
     private static AudioAttributes mainAudioAttrs() {

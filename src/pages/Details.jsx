@@ -14,9 +14,10 @@ import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
+import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
-import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check } from 'lucide-react'
+import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 
@@ -207,6 +208,71 @@ export default function Details() {
   const [episodeError, setEpisodeError] = useState(null)
   const [view, setView] = useState('series') // 'series' | 'season' | 'episode'
   const [episodeStreams, setEpisodeStreams] = useState([])
+  // Picker de archivo dentro del torrent (packs multi-archivo):
+  // {stream, files, skipResume, candidatesPool} mientras el diálogo está abierto.
+  const [torrentPick, setTorrentPick] = useState(null)
+  // Chip de progreso de descarga offline (torrent → carpeta Descargas).
+  const [dlStatus, setDlStatus] = useState(null)
+  const dlListenerRef = useRef(null)
+
+  // Descarga offline de un torrent (o un archivo concreto del pack).
+  // Progreso por eventos 'torrentProgress'; el motor tiene slot único —
+  // iniciar otra descarga o reproducción sustituye a la anterior.
+  const downloadTorrent = async (stream, fileIndex = null) => {
+    try {
+      const engine = await getTorrentEngine()
+      if (!engine?.download) {
+        setDlStatus({ name: 'Descargas no disponibles en esta plataforma', done: true })
+        setTimeout(() => setDlStatus(null), 4000)
+        return
+      }
+      setDlStatus({ name: stream.name || stream.server || 'torrent', progress: 0, done: false })
+      if (!dlListenerRef.current) {
+        dlListenerRef.current = await engine.addListener('torrentProgress', ev => {
+          setDlStatus(prev => {
+            if (!prev || prev.done) return prev
+            const progress = ev?.progress || 0
+            const done = progress >= 1 || ev?.state === 'finished'
+            return { ...prev, name: ev?.fileName || prev.name, progress, done }
+          })
+        })
+      }
+      const res = await engine.download({
+        url: stream.url,
+        season: meta?.season ?? undefined,
+        episode: meta?.episode ?? undefined,
+        fileIndex: fileIndex ?? undefined,
+      })
+      if (res?.complete) setDlStatus({ name: res.name, progress: 1, done: true })
+    } catch (e) {
+      console.warn('[Details] download failed:', e?.message)
+      setDlStatus({ name: 'Error al descargar', done: true })
+    }
+  }
+
+  // Icono ⬇ de la fila: 1 archivo → descarga directa; pack → picker con ⬇ por archivo.
+  const handleTorrentDownload = async (stream) => {
+    try {
+      const engine = await getTorrentEngine()
+      const list = engine?.listFiles ? await engine.listFiles({ url: stream.url }) : null
+      const files = list?.files || []
+      if (files.length > 1) {
+        setTorrentPick({ stream, files, skipResume: true, candidatesPool: null })
+        return
+      }
+      await downloadTorrent(stream, files[0]?.index ?? null)
+    } catch (e) {
+      console.warn('[Details] listFiles p/ descarga falló:', e?.message)
+      await downloadTorrent(stream, null)
+    }
+  }
+
+  // El chip de "Descargado" se autocierra a los pocos segundos.
+  useEffect(() => {
+    if (!dlStatus?.done) return
+    const t = setTimeout(() => setDlStatus(null), 5000)
+    return () => clearTimeout(t)
+  }, [dlStatus?.done])
   // Loading state for episode stream search — separate from page-level loading
   // so the episode view can show its own spinner without hiding the page.
   const [episodeLoading, setEpisodeLoading] = useState(false)
@@ -539,6 +605,28 @@ export default function Details() {
   const handlePlay = async (stream, skipResume = false, candidatesPool = null) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
+    // Torrent multi-archivo (pack de temporada): listar los vídeos y dejar
+    // elegir antes de reproducir. listFiles solo trae metadatos — el plugin
+    // cachea el TorrentInfo y start() lo reutiliza, así que no cuesta el
+    // fetch del magnet dos veces. Si falla o hay un solo archivo se sigue
+    // directo con el auto-pick de siempre.
+    if (stream.streamType === 'torrent' && stream.torrentFileIndex == null && stream.url) {
+      try {
+        setResolvingStream(true)
+        const engine = await getTorrentEngine()
+        const list = engine?.listFiles ? await engine.listFiles({ url: stream.url }) : null
+        setResolvingStream(false)
+        const files = list?.files || []
+        if (files.length > 1) {
+          setTorrentPick({ stream, files, skipResume, candidatesPool })
+          return
+        }
+        if (files.length === 1) stream = { ...stream, torrentFileIndex: files[0].index }
+      } catch (e) {
+        setResolvingStream(false)
+        console.warn('[Details] listFiles falló, reproduciendo con auto-pick:', e?.message)
+      }
+    }
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
@@ -1385,6 +1473,83 @@ export default function Details() {
         </div>
       )}
 
+      {/* Picker de archivo dentro del torrent — packs con varios vídeos */}
+      {torrentPick && (
+        <div data-tv-modal className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-dark-800 rounded-2xl p-6 max-w-lg w-full border border-dark-700 shadow-2xl max-h-[80vh] flex flex-col">
+            <h2 className="text-xl font-bold text-white mb-1">Elegir archivo</h2>
+            <p className="text-dark-400 text-sm mb-4">
+              Este torrent contiene {torrentPick.files.length} vídeos
+            </p>
+            <div data-tv-row className="flex flex-col gap-2 overflow-y-auto min-h-0">
+              {torrentPick.files.map((f, i) => (
+                <div key={f.index} className="flex items-stretch gap-2">
+                  <button
+                    data-tv-card
+                    {...(i === 0 ? { 'data-tv-initial': true, autoFocus: true } : {})}
+                    onClick={() => {
+                      const pick = torrentPick
+                      setTorrentPick(null)
+                      handlePlay({ ...pick.stream, torrentFileIndex: f.index }, pick.skipResume, pick.candidatesPool)
+                    }}
+                    className="flex-1 text-left bg-dark-700 hover:bg-dark-600 rounded-lg px-4 py-3 transition-colors"
+                  >
+                    <p className="text-white text-sm break-all">{f.name}</p>
+                    <p className="text-dark-400 text-xs mt-1">
+                      {f.size >= 1e9 ? `${(f.size / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(f.size / 1e6))} MB`}
+                    </p>
+                  </button>
+                  <button
+                    data-tv-card
+                    title="Descargar este archivo"
+                    onClick={() => {
+                      const pick = torrentPick
+                      setTorrentPick(null)
+                      downloadTorrent(pick.stream, f.index)
+                    }}
+                    className="px-3 bg-dark-700 hover:bg-dark-600 text-dark-300 hover:text-primary-400 rounded-lg transition-colors"
+                  >
+                    <Download size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              data-tv-card
+              onClick={() => setTorrentPick(null)}
+              className="w-full mt-4 text-dark-400 text-sm hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Chip de progreso de la descarga offline (torrent → Descargas) */}
+      {dlStatus && (
+        <div className="fixed bottom-20 right-4 z-50 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 max-w-sm">
+          {dlStatus.done
+            ? <Check size={18} className="text-emerald-400 flex-shrink-0" />
+            : <Download size={18} className="text-primary-400 flex-shrink-0 animate-pulse" />}
+          <div className="min-w-0">
+            <p className="text-white text-sm truncate">
+              {dlStatus.done ? 'Descargado' : 'Descargando'} · {dlStatus.name}
+            </p>
+            {!dlStatus.done && (
+              <div className="w-48 h-1.5 bg-dark-600 rounded-full mt-1.5 overflow-hidden">
+                <div
+                  className="h-full bg-primary-500 rounded-full transition-all"
+                  style={{ width: `${Math.round((dlStatus.progress || 0) * 100)}%` }}
+                />
+              </div>
+            )}
+            {!dlStatus.done && (
+              <p className="text-dark-400 text-xs mt-1">{Math.round((dlStatus.progress || 0) * 100)}%</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Botón atrás fijo — siempre visible encima del hero y del contenido */}
       <button
         data-tv-card
@@ -1737,6 +1902,17 @@ export default function Details() {
                         <p className="text-white text-sm font-medium truncate">{stream.name}</p>
                         <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
                       </div>
+                      {stream.streamType === 'torrent' && (
+                        <button
+                          tabIndex={0}
+                          className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
+                          title="Descargar para ver sin conexión"
+                          onClick={e => { e.stopPropagation(); handleTorrentDownload(stream) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleTorrentDownload(stream) } }}
+                        >
+                          <Download size={18} />
+                        </button>
+                      )}
                       <Play size={20} className="text-dark-400 flex-shrink-0" />
                     </div>
                   )
@@ -2180,6 +2356,17 @@ export default function Details() {
                         <p className="text-white text-sm font-medium truncate">{stream.name}</p>
                         <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
                       </div>
+                      {stream.streamType === 'torrent' && (
+                        <button
+                          tabIndex={0}
+                          className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
+                          title="Descargar para ver sin conexión"
+                          onClick={e => { e.stopPropagation(); handleTorrentDownload(stream) }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleTorrentDownload(stream) } }}
+                        >
+                          <Download size={18} />
+                        </button>
+                      )}
                       <Play size={20} className="text-dark-400 flex-shrink-0" />
                     </div>
                   )

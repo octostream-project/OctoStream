@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld('octostream', {
   // (jlibtorrent), implementado con WebTorrent en el proceso principal.
   torrent: {
     start: (arg) => ipcRenderer.invoke('torrent:start', arg),
+    listFiles: (arg) => ipcRenderer.invoke('torrent:listFiles', arg),
+    download: (arg) => ipcRenderer.invoke('torrent:download', arg),
+    listDownloads: () => ipcRenderer.invoke('torrent:listDownloads'),
+    deleteDownload: (arg) => ipcRenderer.invoke('torrent:deleteDownload', arg),
     stop: () => ipcRenderer.invoke('torrent:stop'),
     status: () => ipcRenderer.invoke('torrent:status'),
     on: (handler) => {

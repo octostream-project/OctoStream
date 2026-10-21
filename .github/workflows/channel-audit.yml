@@ -1,0 +1,36 @@
+name: Channel audit
+
+# Auditoría semanal en vivo de los canales plurtasko: catálogo + búsqueda.
+# Reporta una tabla en el log (nunca falla) — sirve para detectar webs que
+# rotaron de dominio o murieron sin esperar a que lo reporte un usuario.
+# Lanzable a mano con "Run workflow".
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # lunes 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit channels (report-only)
+        run: CHANNEL_AUDIT=1 npx vitest run channels.audit.test.js 2>&1 | tee audit.log
+
+      - name: Upload audit log
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-audit
+          path: audit.log

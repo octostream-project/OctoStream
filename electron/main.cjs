@@ -1196,11 +1196,16 @@ async function getTorrentEngine() {
         }
       },
       downloadDir: path.join(app.getPath('temp'), 'octostream-torrent'),
+      offlineDir: path.join(app.getPath('downloads'), 'OctoStream'),
     })
   }
   return torrentEngine
 }
 ipcMain.handle('torrent:start', async (_e, arg) => (await getTorrentEngine()).start(arg || {}))
+ipcMain.handle('torrent:listFiles', async (_e, arg) => (await getTorrentEngine()).listFiles(arg || {}))
+ipcMain.handle('torrent:download', async (_e, arg) => (await getTorrentEngine()).download(arg || {}))
+ipcMain.handle('torrent:listDownloads', async () => (await getTorrentEngine()).listDownloads())
+ipcMain.handle('torrent:deleteDownload', async (_e, arg) => (await getTorrentEngine()).deleteDownload(arg || {}))
 ipcMain.handle('torrent:stop', async () => (await getTorrentEngine()).stop())
 ipcMain.handle('torrent:status', async () => (await getTorrentEngine()).status())
 

@@ -49,6 +49,8 @@ export interface PlayOptions {
 export interface PickVideoResult {
   /** URI content:// persistible (SAF) — reproducible directamente en Media3 */
   uri: string
+  /** Todas las URIs seleccionadas (multi-pick: vídeo + .srt en un gesto) */
+  files?: Array<{ uri: string; name: string; size: number }>
   /** Nombre visible del archivo (OpenableColumns.DISPLAY_NAME) */
   name: string
   /** Tamaño en bytes (-1 si el provider no lo informa) */
@@ -207,6 +209,10 @@ export interface ExoPlayerPlugin {
    * play({localFile:true}).
    */
   pickSubtitle(): Promise<PickVideoResult>
+  /** SAF "Guardar como": escribe `content` en el archivo elegido por el usuario */
+  exportConfig(options: { filename?: string; content: string }): Promise<{ saved: boolean; uri?: string }>
+  /** SAF "Abrir": lee un archivo JSON y devuelve su contenido (tope 4 MB) */
+  importConfig(): Promise<{ content: string; name?: string }>
   playEmbed(options: PlayEmbedOptions): Promise<PlayEmbedResult>
   /**
    * Resuelve un embed de forma invisible: WebView oculto que deja correr el
@@ -244,6 +250,12 @@ export interface ExoPlayerPlugin {
   stopPip(): Promise<void>
   /** Indica si hay un mini-player PiP reproduciendo. */
   isPipActive(): Promise<{ active: boolean }>
+  /**
+   * Liveness del player nativo (player, PiP o diálogo de embed/resolver/carga).
+   * Usado por el watchdog del WebView: si la app quedó oculta y esto devuelve
+   * false, el player murió sin emitir 'closed' y hay que restaurar la UI.
+   */
+  isActive(): Promise<{ active: boolean }>
   addListener(eventName: 'playbackState', listener: (state: PlaybackState) => void): Promise<{
     remove: () => void
   }> | { remove: () => void }

@@ -13,6 +13,10 @@ export async function getTorrentEngine() {
     const t = window.octostream.torrent
     return {
       start: (o) => t.start(o),
+      listFiles: (o) => t.listFiles(o),
+      download: (o) => t.download(o),
+      listDownloads: () => t.listDownloads(),
+      deleteDownload: (o) => t.deleteDownload(o),
       stop: () => t.stop(),
       status: () => t.status(),
       addListener: (name, cb) => {

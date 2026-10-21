@@ -9,6 +9,7 @@ import {
   resolveEmbed, setChannels, setEpisodes, setNextEpisode,
   setCastRequestListener, setLoadingText, setPlaybackStateListener,
   isMpvEmbedded, mpvOscState, mpvOscMenu, mpvMouse, mpvKey, mpvPip, mpvClick,
+  isPlayerActive,
 } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
@@ -115,6 +116,8 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   // Cleanup del path nativo devuelto desde dentro de init() (async): el return
   // de init() se pierde — el cleanup real del useEffect llama a este ref.
   const exoCleanupRef = useRef(null)
+  // Intervalo del watchdog de liveness del player nativo (root oculto).
+  const watchdogRef = useRef(null)
   const torrentListenerRef = useRef(null)
   const torrentActiveRef = useRef(false)
   // Watchdog de torrents muertos: primer evento con 0 peers sostenidos.
@@ -608,6 +611,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         url: stream.url,
         season: meta?.season ?? undefined,
         episode: meta?.episode ?? undefined,
+        // Archivo concreto elegido por el usuario en el picker de Details
+        // (packs multi-archivo); sin él el motor auto-selecciona.
+        fileIndex: stream.torrentFileIndex ?? undefined,
         title: title || '',
       })
       if (cancelled) return null
@@ -989,6 +995,27 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         setError(`Error al iniciar el reproductor: ${e?.message || 'unknown'}`)
       })
 
+      // Watchdog: si el player nativo muere sin emitir 'closed' (excepción en
+      // el hilo de UI, crash del Activity…), el WebView queda oculto para
+      // siempre → pantalla negra permanente. Se arma al confirmar que el
+      // player está vivo; 2 sondeos seguidos sin UI nativa = cerró sin avisar.
+      // Sin armar a los ~90s también cuenta como muerto (nunca llegó a abrir).
+      if (android) {
+        const wd = { armed: false, misses: 0, startedAt: Date.now() }
+        watchdogRef.current = setInterval(async () => {
+          if (cancelled || closedRef.current || endedRef.current) return
+          const alive = await isPlayerActive()
+          if (alive) { wd.armed = true; wd.misses = 0; return }
+          if (!wd.armed && Date.now() - wd.startedAt < 90000) return
+          if (++wd.misses < 2) return
+          clearInterval(watchdogRef.current)
+          watchdogRef.current = null
+          console.warn('[Player] native player died without events — restoring UI')
+          restoreAppDom()
+          onPlaybackState({ state: 'closed' })
+        }, 5000)
+      }
+
       // Cleanup: parar el nativo y restaurar el DOM del WebView en Android.
       // Delay setPlayerOpen(false) so the Android back button that closed
       // ExoPlayer doesn't also trigger navigate(-1) in App.jsx.
@@ -1018,6 +1045,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     return () => {
       cancelled = true
       console.log('[Player] useEffect cleanup running, closedRef=', closedRef.current, 'hasExoCleanup=', !!exoCleanupRef.current)
+      if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null }
       // Stop the P2P engine if a torrent was playing (fire and forget).
       stopTorrentEngine()
       if (typeof exoCleanupRef.current === 'function') {

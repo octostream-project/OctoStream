@@ -52,14 +52,25 @@ import { getItemSync } from '../../../utils/storage.js'
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
 const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror]
 
+// Canales caídos (auditoría oct/2026): fuera del registro activo para que no
+// consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
+// código para reactivarlos cuando el sitio reviva:
+// - repelishd (.pics): anti-bot TLS — solo responde a navegadores reales.
+// - gnulatv: SPA sin HTML server-side — nada que scrapear.
+// - doramaexpress: 503 permanente en todos los TLDs conocidos.
+const DEAD_CHANNEL_IDS = new Set(['repelishd', 'gnulatv', 'doramaexpress'])
+
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
 // de torrents ni se emiten streams .torrent/magnet.
 const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror'])
 export const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
-const activeChannels = () => torrentSearchEnabled()
-  ? CHANNELS
-  : CHANNELS.filter(ch => !TORRENT_CHANNEL_IDS.has(ch.id))
+const activeChannels = () => {
+  const alive = CHANNELS.filter(ch => !DEAD_CHANNEL_IDS.has(ch.id))
+  return torrentSearchEnabled()
+    ? alive
+    : alive.filter(ch => !TORRENT_CHANNEL_IDS.has(ch.id))
+}
 
 // Extract TMDB numeric ID from a meta id like "tmdb-movie-12345" or "tmdb-series-67890"
 function extractTmdbId(id) {

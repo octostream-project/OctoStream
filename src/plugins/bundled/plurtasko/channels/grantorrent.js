@@ -14,7 +14,7 @@ const HOSTS = [
   'https://grantorrent.net/',
   'https://grantorrent.one/',
 ]
-const rotator = makeHostRotator(HOSTS)
+const rotator = makeHostRotator(HOSTS, 'octostream_host_grantorrent')
 
 const fetchHost = makeHtmlFetcher(rotator, fetchHtml)
 

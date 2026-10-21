@@ -9,6 +9,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/compat-css.mjs",
+    "lint": "eslint src",
+    "lint:check": "node scripts/lint-check.mjs",
+    "audit:channels": "node scripts/audit-channels.mjs",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron electron/main.cjs\"",
     "electron:build": "vite build && node scripts/fetch-aether.mjs && node scripts/fetch-ytdlp.mjs && node scripts/fetch-mpv.mjs && node scripts/bundle-torrent.mjs && electron-builder",

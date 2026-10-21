@@ -32,6 +32,17 @@ if (!versionCode) {
   process.exit(1)
 }
 
+// El code se deriva concatenando dígitos ("2.07" → 207 < "2.06.2" → 2062) —
+// este bug ya se cometió dos veces y deja updates que Android rechaza.
+// Rechaza cualquier bump que no sea estrictamente mayor que lo publicado.
+const prevVersion = existsSync('version.json') ? JSON.parse(readFileSync('version.json', 'utf8')) : null
+const isRehash = prevVersion?.versionName === versionName && prevVersion?.versionCode === versionCode
+if (prevVersion?.versionCode && versionCode <= prevVersion.versionCode && !isRehash) {
+  console.error(`versionCode ${versionCode} no es mayor que el publicado ${prevVersion.versionCode} (v${prevVersion.versionName})`)
+  console.error('recuerda: el code son los dígitos concatenados — usa X.Y.Z completo (2.07.4 → 2074)')
+  process.exit(1)
+}
+
 const gradlePath = 'android/app/build.gradle'
 if (existsSync(gradlePath)) {
   let g = readFileSync(gradlePath, 'utf8')

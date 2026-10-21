@@ -47,6 +47,7 @@ function useIdleScreensaver() {
     return { enabled: en, timeoutMs: Math.max(1, mins) * 60 * 1000 }
   }, [])
 
+  const resetTimerRef = useRef(() => {})
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (!enabled) return
@@ -54,16 +55,14 @@ function useIdleScreensaver() {
       // No activar durante la reproducción: el player nativo es un diálogo
       // que no cambia la ruta, así que el guard por pathname no lo ve.
       const playing = isPlayerOpen() || document.querySelector('[data-player-overlay]')
-      if (playing) { resetTimer(); return }
+      if (playing) { resetTimerRef.current(); return }
       setActive(true)
     }, timeoutMs)
   }, [enabled, timeoutMs])
+  useEffect(() => { resetTimerRef.current = resetTimer }, [resetTimer])
 
   useEffect(() => {
-    if (!enabled) {
-      setActive(false)
-      return
-    }
+    if (!enabled) return
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'touchmove', 'wheel', 'click']
     events.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
     resetTimer()
@@ -73,13 +72,14 @@ function useIdleScreensaver() {
     }
   }, [resetTimer, enabled])
 
-  // Don't trigger screensaver while playing video (details page or cast)
-  useEffect(() => {
-    if (active) {
-      const onPlayerPage = location.pathname.startsWith('/details/') || location.pathname === '/cast'
-      if (onPlayerPage) setActive(false)
-    }
-  }, [active, location.pathname])
+  // Don't trigger screensaver while playing video (details page or cast) —
+  // patrón "ajustar estado en render" (igual que routesMounted abajo).
+  const [prevPath, setPrevPath] = useState(location.pathname)
+  if (prevPath !== location.pathname) {
+    setPrevPath(location.pathname)
+    const onPlayerPage = location.pathname.startsWith('/details/') || location.pathname === '/cast'
+    if (active && onPlayerPage) setActive(false)
+  }
 
   const dismiss = useCallback(() => setActive(false), [])
   return { active, dismiss }
@@ -232,7 +232,7 @@ export default function App() {
           const s = await CloudProxy.getStatus()
           if (token !== lifecycleToken || paused) return
           if (!s.connected) await CloudProxy.disconnect()
-        } catch {}
+        } catch { /* sin estado o ya desconectado */ }
         return
       }
 

@@ -50,7 +50,20 @@ const DOMAINS = [
   'https://new.hdfull.one/',
 ]
 
-let activeDomain = DOMAINS[0]
+// Recuerda el último dominio vivo entre sesiones (rota de TLD constante —
+// sin esto cada arranque reprobaba los muertos primero).
+const HOST_KEY = 'octostream_host_hdfull'
+let activeDomain = (() => {
+  try {
+    const saved = typeof localStorage !== 'undefined' && localStorage.getItem(HOST_KEY)
+    if (saved && DOMAINS.some(d => d.replace(/\/+$/, '') === saved.replace(/\/+$/, ''))) return saved
+  } catch { /* storage no disponible */ }
+  return DOMAINS[0]
+})()
+function setActiveDomain(d) {
+  activeDomain = d
+  try { typeof localStorage !== 'undefined' && localStorage.setItem(HOST_KEY, d) } catch { /* noop */ }
+}
 let loggedIn = false
 let sessionCookies = ''  // Store session cookies from login response
 
@@ -109,7 +122,7 @@ async function ensureLogin() {
   const { username: USERNAME, password: PASSWORD } = getHdfullCredentials()
   if (!USERNAME || !PASSWORD) return false
 
-  for (const domain of DOMAINS) {
+  for (const domain of [activeDomain, ...DOMAINS.filter(d => d !== activeDomain)]) {
     activeDomain = domain
     try {
       // Step 1: GET login page to get CSRF token AND session cookie.
@@ -189,6 +202,7 @@ async function ensureLogin() {
           response.includes("window.location='/'") ||
           response.includes("window.location=''")) {
         loggedIn = true
+        setActiveDomain(domain)
         console.log(`[HDFull] Login successful on ${domain}`)
         return true
       }
@@ -198,6 +212,7 @@ async function ensureLogin() {
         const jdata = JSON.parse(response)
         if (jdata.status === 'OK') {
           loggedIn = true
+          setActiveDomain(domain)
           console.log(`[HDFull] Login successful (JSON) on ${domain}`)
           return true
         }

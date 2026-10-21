@@ -42,7 +42,14 @@ export default function UpdateChecker() {
     const sub = AppUpdater.addListener('downloadProgress', (p) => {
       if (p.percent >= 0) setPercent(p.percent)
     })
-    return () => { sub.then((h) => h.remove()).catch(() => {}) }
+    // "Buscar actualización" desde Ajustes: el descriptor ya verificado llega
+    // por evento y este diálogo lo muestra sin re-chequear.
+    const onShow = (e) => { if (e?.detail) setUpdate(e.detail) }
+    window.addEventListener('octostream:show-update', onShow)
+    return () => {
+      window.removeEventListener('octostream:show-update', onShow)
+      sub.then((h) => h.remove()).catch(() => {})
+    }
   }, [])
 
   // Descarga in-app del instalador de escritorio (paridad con Android):

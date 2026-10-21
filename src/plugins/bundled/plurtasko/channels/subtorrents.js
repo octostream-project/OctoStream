@@ -13,7 +13,7 @@ const HOSTS = [
   'https://www.subtorrents.nl/',
   'https://www.subtorrents.in/',
 ]
-const rotator = makeHostRotator(HOSTS)
+const rotator = makeHostRotator(HOSTS, 'octostream_host_subtorrents')
 
 const fetchHost = makeHtmlFetcher(rotator, fetchHtml)
 

@@ -20,7 +20,7 @@ const HOSTS = [
   'https://dontorrent.supply/',
   'https://www21.dontorrent.link/',
 ]
-const rotator = makeHostRotator(HOSTS)
+const rotator = makeHostRotator(HOSTS, 'octostream_host_dontorrent')
 
 // Fetch with host fallback: if the cached host fails, try the rest.
 const fetchHost = makeHtmlFetcher(rotator, fetchHtml)

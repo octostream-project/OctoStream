@@ -181,10 +181,70 @@ export async function pickLocalSubtitle() {
 /**
  * Reproduce un archivo local (content:// o file://) en el ExoPlayer nativo.
  * Salta la sanitización http(s): la URI solo procede del SAF picker.
+ * Reanudación automática: guarda la posición por URI (evento 'position',
+ * cada ~5s) y reanuda al volver a abrir el mismo archivo si startTime no
+ * viene dado. Posición >95% de la duración = ya visto → empieza de cero.
  */
+const localPosKey = (uri) => 'octostream_localpos_' + uri
+
 export async function playLocalFile({ uri, title, startTime, subtitles }, onStateChange) {
-  if (!isAndroidNative()) throw new Error('Solo disponible en Android')
-  stateListener = onStateChange
+  const key = localPosKey(uri)
+  let resumeAt = startTime || 0
+  if (!resumeAt) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || 'null')
+      if (saved?.position > 5 && (saved.duration <= 0 || saved.position < saved.duration * 0.95)) {
+        resumeAt = saved.position
+      }
+    } catch { /* noop */ }
+  }
+
+  const wrappedListener = typeof onStateChange === 'function'
+    ? (ev) => {
+        if (ev?.state === 'position' && ev.position > 0) {
+          try {
+            localStorage.setItem(key, JSON.stringify({
+              position: ev.position / 1000, // ms → s (los eventos llegan en ms)
+              duration: ev.duration / 1000,
+              at: Date.now(),
+            }))
+          } catch { /* noop */ }
+        } else if (ev?.state === 'ended') {
+          // Terminó: borrar la posición para que la próxima vez empiece de cero.
+          try { localStorage.removeItem(key) } catch { /* noop */ }
+        }
+        onStateChange(ev)
+      }
+    : onStateChange
+
+  if (!isAndroidNative()) {
+    // Electron: las descargas offline se reproducen con mpv por ruta local —
+    // misma reanudación de posición por URI/ruta que en Android.
+    const p = isElectron() ? window.octostream?.player : null
+    if (!p) throw new Error('Solo disponible en Android o la app de escritorio')
+    stateListener = wrappedListener
+    zapListener = null
+    ensureMpvEvents()
+    const arg = {
+      url: uri,
+      headers: {},
+      title: title || '',
+      startSec: resumeAt,
+      subtitles: subtitles || null,
+    }
+    let r = mpvActive ? await p.switch(arg) : null
+    if (r?.status !== 'playing') r = await p.open(arg)
+    if (r?.status !== 'playing') {
+      mpvActive = false
+      mpvEmbedded = false
+      throw new Error(r?.error || 'reproductor nativo no disponible')
+    }
+    mpvActive = true
+    mpvEmbedded = r.embedded !== false
+    return r
+  }
+
+  stateListener = wrappedListener
   zapListener = null
   episodeSelectListener = null
   seasonSelectListener = null
@@ -195,7 +255,7 @@ export async function playLocalFile({ uri, title, startTime, subtitles }, onStat
     localFile: true,
     title: title || '',
     mode: 'vod',
-    startTime: startTime || 0,
+    startTime: resumeAt,
     subtitles: subtitles || null,
   })
 }
@@ -360,6 +420,23 @@ export async function isPipActive() {
   if (!isAndroidNative()) return false
   try {
     const r = await ExoPlayer.isPipActive()
+    return r?.active === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * ¿Hay UI nativa viva (player, PiP, embed, resolver/carga)? El watchdog de
+ * VideoPlayer la sondea mientras el WebView está oculto: si el player nativo
+ * muere sin emitir 'closed' (p.ej. excepción en el hilo de UI), la app queda
+ * en pantalla negra permanente — con esto se detecta y se restaura.
+ * Fuera de Android siempre true (mpv va por otros canales de eventos).
+ */
+export async function isPlayerActive() {
+  if (!isAndroidNative()) return true
+  try {
+    const r = await ExoPlayer.isActive()
     return r?.active === true
   } catch {
     return false

@@ -83,9 +83,11 @@ function fetchTorrentFile(url, depth = 0) {
 }
 
 class TorrentEngine {
-  constructor({ sendEvent, downloadDir } = {}) {
+  constructor({ sendEvent, downloadDir, offlineDir } = {}) {
     this.sendEvent = typeof sendEvent === 'function' ? sendEvent : () => {}
     this.downloadDir = downloadDir || path.join(os.tmpdir(), 'octostream-torrent')
+    // Descargas offline: persistente (no temp). Main pasa ~/Downloads/OctoStream.
+    this.offlineDir = offlineDir || path.join(os.homedir(), 'Downloads', 'OctoStream')
     this.client = null
     this.torrent = null
     this.file = null
@@ -119,7 +121,55 @@ class TorrentEngine {
     this.sendEvent('torrentProgress', ev)
   }
 
-  async start({ url, season, episode } = {}) {
+  _addTorrent(client, source, { deselect = false, path: addPath } = {}) {
+    return new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('Timeout buscando metadata del torrent (45s) — puede no tener seeds')), META_TIMEOUT_MS)
+      let t
+      try {
+        t = client.add(source, { path: addPath || this.downloadDir, deselect })
+      } catch (e) {
+        clearTimeout(to)
+        return reject(e)
+      }
+      // Si el torrent ya estaba añadido (reuse desde listFiles), 'ready' puede
+      // no volver a disparar — comprobar el flag.
+      if (t.ready) { clearTimeout(to); return resolve(t) }
+      t.once('ready', () => { clearTimeout(to); resolve(t) })
+      t.once('error', (e) => { clearTimeout(to); reject(e instanceof Error ? e : new Error(String(e))) })
+    })
+  }
+
+  // Lista los archivos de vídeo sin descargar (deselect). El torrent queda
+  // vivo en this.metaTorrent para que start() lo reutilice — sin esto el
+  // picker de archivos pagaba el fetch de metadata del magnet dos veces.
+  async listFiles({ url } = {}) {
+    if (!url || typeof url !== 'string') throw new Error('URL de torrent vacía')
+    if (!/^magnet:/i.test(url) && !/^https?:\/\//i.test(url)) {
+      throw new Error('Solo magnet: o URL http(s) de .torrent')
+    }
+    const client = await this._getClient()
+    if (this.metaTorrent && this.metaUrl !== url) {
+      try { await new Promise(r => this.metaTorrent.destroy(r)) } catch { /* no-op */ }
+      this.metaTorrent = null
+    }
+    let source = url
+    if (!/^magnet:/i.test(url)) source = await fetchTorrentFile(url)
+    const torrent = await this._addTorrent(client, source, { deselect: true })
+    this.metaTorrent = torrent
+    this.metaUrl = url
+    return {
+      files: torrent.files.map((f, i) => ({ index: i, name: f.path || f.name, size: f.length })),
+      infoHash: torrent.infoHash,
+      numFiles: torrent.files.length,
+    }
+  }
+
+  async start({ url, season, episode, fileIndex } = {}) {
+    // Reutilizar el torrent de listFiles (si el usuario eligió archivo):
+    // stop() lo destruiría — guardarlo antes.
+    const reuse = (this.metaTorrent && this.metaUrl === url) ? this.metaTorrent : null
+    this.metaTorrent = null
+    this.metaUrl = null
     await this.stop()
     if (!url || typeof url !== 'string') throw new Error('URL de torrent vacía')
     if (!/^magnet:/i.test(url) && !/^https?:\/\//i.test(url)) {
@@ -131,29 +181,24 @@ class TorrentEngine {
     this._progress()
     this.timer = setInterval(() => this._progress(), PROGRESS_MS)
 
-    let source = url
-    if (!/^magnet:/i.test(url)) {
-      const buf = await fetchTorrentFile(url)
-      source = buf
-    }
-
-    const torrent = await new Promise((resolve, reject) => {
-      const to = setTimeout(() => reject(new Error('Timeout buscando metadata del torrent (45s) — puede no tener seeds')), META_TIMEOUT_MS)
-      let t
-      try {
-        t = client.add(source, { path: this.downloadDir })
-      } catch (e) {
-        clearTimeout(to)
-        return reject(e)
+    let torrent
+    if (reuse && !reuse.destroyed) {
+      torrent = reuse
+    } else {
+      let source = url
+      if (!/^magnet:/i.test(url)) {
+        const buf = await fetchTorrentFile(url)
+        source = buf
       }
-      t.once('ready', () => { clearTimeout(to); resolve(t) })
-      t.once('error', (e) => { clearTimeout(to); reject(e instanceof Error ? e : new Error(String(e))) })
-    })
+      torrent = await this._addTorrent(client, source)
+    }
 
     this.torrent = torrent
     this.state = 'metadata'
 
-    const file = pickFile(torrent.files, { season, episode })
+    const file = (fileIndex != null && torrent.files[fileIndex])
+      ? torrent.files[fileIndex]
+      : pickFile(torrent.files, { season, episode })
     if (!file) throw new Error('El torrent no contiene archivos')
     this.file = file
     // Prioriza este archivo y sus piezas bajo demanda; los demás no se bajan.
@@ -220,6 +265,81 @@ class TorrentEngine {
     })
   }
 
+  // Descarga offline: misma superficie que el plugin Android — baja el
+  // archivo elegido a offlineDir y el progreso sale por 'torrentProgress'.
+  // Comparte el slot del motor con start().
+  async download({ url, season, episode, fileIndex } = {}) {
+    await this.stop()
+    if (!url || typeof url !== 'string') throw new Error('URL de torrent vacía')
+    if (!/^magnet:/i.test(url) && !/^https?:\/\//i.test(url)) {
+      throw new Error('Solo magnet: o URL http(s) de .torrent')
+    }
+    const client = await this._getClient()
+    let source = url
+    if (!/^magnet:/i.test(url)) source = await fetchTorrentFile(url)
+    const torrent = await this._addTorrent(client, source, { deselect: true, path: this.offlineDir })
+    const file = (fileIndex != null && torrent.files[fileIndex])
+      ? torrent.files[fileIndex]
+      : pickFile(torrent.files, { season, episode })
+    if (!file) throw new Error('El torrent no contiene archivos')
+    torrent.files.forEach(f => { try { f.deselect() } catch { /* no-op */ } })
+    file.select()
+
+    this.torrent = torrent
+    this.file = file
+    this.state = 'downloading'
+    this._progress()
+    this.timer = setInterval(() => {
+      if (this.file && this.file.downloaded >= this.file.length) this.state = 'finished'
+      this._progress()
+    }, PROGRESS_MS)
+
+    return {
+      name: file.path || file.name,
+      path: path.join(this.offlineDir, file.path || file.name),
+      sizeBytes: file.length,
+      infoHash: torrent.infoHash,
+      fileIndex: torrent.files.indexOf(file),
+      complete: file.downloaded >= file.length,
+    }
+  }
+
+  _walkVideos(dir, root, out) {
+    let children
+    try { children = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const c of children) {
+      const p = path.join(dir, c.name)
+      if (c.isDirectory()) { this._walkVideos(p, root, out); continue }
+      if (!VIDEO_EXT.test(c.name)) continue
+      let size = 0
+      try { size = fs.statSync(p).size } catch { continue }
+      if (size <= 0) continue
+      out.push({ name: path.relative(root, p), path: p, size })
+    }
+  }
+
+  listDownloads() {
+    const files = []
+    this._walkVideos(this.offlineDir, this.offlineDir, files)
+    return { files }
+  }
+
+  deleteDownload({ path: p } = {}) {
+    if (!p || typeof p !== 'string') throw new Error('path requerido')
+    const root = path.resolve(this.offlineDir)
+    const target = path.resolve(p)
+    if (!target.startsWith(root + path.sep)) throw new Error('ruta fuera del directorio de descargas')
+    let deleted = false
+    try { deleted = fs.existsSync(target) && (fs.rmSync(target), true) } catch { /* no-op */ }
+    // Limpiar carpetas vacías del pack.
+    let parent = path.dirname(target)
+    while (parent !== root && parent.startsWith(root)) {
+      try { if (fs.readdirSync(parent).length) break; fs.rmdirSync(parent) } catch { break }
+      parent = path.dirname(parent)
+    }
+    return { deleted }
+  }
+
   async stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null }
     if (this.server) {
@@ -232,6 +352,13 @@ class TorrentEngine {
       this.torrent = null
       this.file = null
       await new Promise(r => t.destroy({ destroyStore: true }, r))
+    }
+    // Torrent "sólo metadata" dejado por un listFiles cuyo start nunca llegó.
+    if (this.metaTorrent) {
+      const m = this.metaTorrent
+      this.metaTorrent = null
+      this.metaUrl = null
+      try { await new Promise(r => m.destroy(r)) } catch { /* no-op */ }
     }
     // Limpia el directorio de descarga si quedó.
     try { fs.rmSync(this.downloadDir, { recursive: true, force: true }) } catch { /* best-effort */ }

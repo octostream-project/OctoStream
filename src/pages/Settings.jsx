@@ -11,6 +11,8 @@ import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from 
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { refreshWarpStatus, subscribeWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
+import { checkForUpdate } from '../utils/appUpdater.js'
+import { exportSettings, importSettings } from '../utils/configBackup.js'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -39,6 +41,9 @@ const TABS = [
 export default function Settings() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('autoplay')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateMsg, setUpdateMsg] = useState('')
+  const [backupMsg, setBackupMsg] = useState('')
 
   // Móvil: las pestañas horizontales quedan mal en pantallas estrechas —
   // se usa un menú de secciones (lista vertical) con vista de detalle.
@@ -1509,6 +1514,94 @@ export default function Settings() {
               <Puzzle size={18} />
               Gestionar plugins
             </button>
+          </div>
+
+          {isAndroidNative() && (
+            <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                  <Download className="text-primary-400" size={22} />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold">Actualizaciones</h3>
+                  <p className="text-dark-400 text-sm">
+                    La app busca novedades sola cada hora — aquí puedes forzarlo
+                  </p>
+                </div>
+              </div>
+              <button
+                data-tv-card
+                tabIndex={0}
+                disabled={checkingUpdate}
+                onClick={async () => {
+                  setCheckingUpdate(true)
+                  setUpdateMsg('')
+                  try {
+                    const u = await checkForUpdate({ force: true })
+                    if (u) window.dispatchEvent(new CustomEvent('octostream:show-update', { detail: u }))
+                    else setUpdateMsg('Ya estás en la última versión')
+                  } catch {
+                    setUpdateMsg('No se pudo comprobar — revisa la conexión')
+                  } finally {
+                    setCheckingUpdate(false)
+                  }
+                }}
+                className="btn-primary px-4 py-3 flex items-center gap-2"
+              >
+                <RefreshCw size={18} className={checkingUpdate ? 'animate-spin' : ''} />
+                {checkingUpdate ? 'Comprobando…' : 'Buscar actualización'}
+              </button>
+              {updateMsg && <p className="text-dark-400 text-sm mt-3">{updateMsg}</p>}
+            </div>
+          )}
+
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Download className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Copia de seguridad</h3>
+                <p className="text-dark-400 text-sm">
+                  Favoritos, historial, ajustes y claves en un archivo JSON
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={async () => {
+                  setBackupMsg('')
+                  try {
+                    const ok = await exportSettings()
+                    setBackupMsg(ok ? 'Copia guardada' : '')
+                  } catch (e) {
+                    setBackupMsg(`No se pudo exportar: ${e?.message || 'error'}`)
+                  }
+                }}
+                className="btn-secondary px-4 py-3 flex items-center gap-2"
+              >
+                <Download size={18} /> Exportar
+              </button>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={async () => {
+                  setBackupMsg('')
+                  try {
+                    const n = await importSettings()
+                    setBackupMsg(n > 0 ? `Restauradas ${n} claves — reinicia la app para aplicarlo todo` : '')
+                  } catch (e) {
+                    setBackupMsg(e?.message || 'No se pudo importar')
+                  }
+                }}
+                className="btn-secondary px-4 py-3 flex items-center gap-2"
+              >
+                <RefreshCw size={18} /> Importar
+              </button>
+            </div>
+            {backupMsg && <p className="text-dark-400 text-sm mt-3">{backupMsg}</p>}
           </div>
 
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">

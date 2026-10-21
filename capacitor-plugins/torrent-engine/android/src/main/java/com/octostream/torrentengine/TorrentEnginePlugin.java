@@ -15,6 +15,7 @@ import com.frostwire.jlibtorrent.TorrentInfo;
 import com.frostwire.jlibtorrent.TorrentStatus;
 import com.frostwire.jlibtorrent.swig.settings_pack;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -59,6 +60,9 @@ public class TorrentEnginePlugin extends Plugin {
     // Se poda por antigüedad y por tamaño total para no llenar el box.
     private static final long CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000;
     private static final long CACHE_MAX_BYTES = 3L * 1024 * 1024 * 1024;
+    // Caché de TorrentInfo para listFiles→start: sin ella el picker de
+    // archivos pagaba el fetchMagnet (~hasta 90s) dos veces seguidas.
+    private static final long TI_CACHE_MS = 5L * 60 * 1000;
 
     private SessionManager session;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -88,6 +92,70 @@ public class TorrentEnginePlugin extends Plugin {
     private volatile boolean running = false;
     private Runnable progressRunnable;
 
+    // Caché de TorrentInfo (listFiles → start comparten el fetch)
+    private TorrentInfo cachedTi;
+    private String cachedTiUrl;
+    private long cachedTiAt;
+
+    private TorrentInfo fetchTorrentInfo(String url, SessionManager sm) throws Exception {
+        if (cachedTi != null && url.equals(cachedTiUrl)
+                && System.currentTimeMillis() - cachedTiAt < TI_CACHE_MS) {
+            return cachedTi;
+        }
+        TorrentInfo ti;
+        if (url.startsWith("magnet:")) {
+            Log.i(TAG, "fetching magnet metadata…");
+            byte[] data = sm.fetchMagnet(url, METADATA_TIMEOUT_S);
+            if (data == null || data.length == 0) throw new Exception("Timeout obteniendo metadatos del magnet");
+            ti = TorrentInfo.bdecode(data);
+        } else {
+            ti = TorrentInfo.bdecode(downloadTorrentFile(url));
+        }
+        cachedTi = ti;
+        cachedTiUrl = url;
+        cachedTiAt = System.currentTimeMillis();
+        return ti;
+    }
+
+    /**
+     * Lista los archivos de vídeo de un torrent para que el usuario elija
+     * (packs de temporada con varios .mkv). Solo lee metadatos — el TorrentInfo
+     * queda cacheado y start() lo reutiliza si llega con fileIndex.
+     */
+    @PluginMethod
+    public void listFiles(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                SessionManager sm = ensureSession();
+                TorrentInfo ti = fetchTorrentInfo(url, sm);
+                FileStorage fs = ti.files();
+                int n = fs.numFiles();
+                JSArray files = new JSArray();
+                for (int i = 0; i < n; i++) {
+                    if (!isVideoFile(fs.fileName(i).toLowerCase(Locale.ROOT))) continue;
+                    JSObject f = new JSObject();
+                    f.put("index", i);
+                    f.put("name", fs.filePath(i));
+                    f.put("size", fs.fileSize(i));
+                    files.put(f);
+                }
+                JSObject ret = new JSObject();
+                ret.put("files", files);
+                ret.put("infoHash", ti.infoHash().toHex());
+                ret.put("numFiles", n);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "listFiles failed", e);
+                call.reject("Torrent: " + e.getMessage());
+            }
+        }, "torrent-list").start();
+    }
+
     private synchronized SessionManager ensureSession() {
         if (session == null) session = new SessionManager();
         if (!session.isRunning()) {
@@ -116,6 +184,7 @@ public class TorrentEnginePlugin extends Plugin {
         }
         final Integer season = call.getInt("season");
         final Integer episode = call.getInt("episode");
+        final Integer fileIndexArg = call.getInt("fileIndex");
         final String torrentUrl = url;
 
         new Thread(() -> {
@@ -125,22 +194,16 @@ public class TorrentEnginePlugin extends Plugin {
 
                 startProgressPoll();
 
-                // 1. Obtain TorrentInfo
-                TorrentInfo ti;
-                if (torrentUrl.startsWith("magnet:")) {
-                    Log.i(TAG, "fetching magnet metadata…");
-                    byte[] data = sm.fetchMagnet(torrentUrl, METADATA_TIMEOUT_S);
-                    if (data == null || data.length == 0) throw new Exception("Timeout obteniendo metadatos del magnet");
-                    ti = TorrentInfo.bdecode(data);
-                } else {
-                    byte[] data = downloadTorrentFile(torrentUrl);
-                    ti = TorrentInfo.bdecode(data);
-                }
+                // 1. Obtain TorrentInfo (cached si listFiles lo trajo justo antes)
+                TorrentInfo ti = fetchTorrentInfo(torrentUrl, sm);
                 torrentInfo = ti;
                 FileStorage fs = ti.files();
 
-                // 2. Pick the file to stream
-                int idx = pickFileIndex(fs, season, episode);
+                // 2. Pick the file to stream — el usuario pudo haber elegido
+                // uno concreto vía listFiles (fileIndex); si no, auto-pick.
+                int idx = (fileIndexArg != null && fileIndexArg >= 0 && fileIndexArg < fs.numFiles())
+                        ? fileIndexArg
+                        : pickFileIndex(fs, season, episode);
                 if (idx < 0) throw new Exception("El torrent no contiene un archivo de vídeo");
                 selectedFileIndex = idx;
                 fileOffset = fs.fileOffset(idx);
@@ -209,6 +272,157 @@ public class TorrentEnginePlugin extends Plugin {
     @PluginMethod
     public void status(PluginCall call) {
         call.resolve(currentStatus());
+    }
+
+    // ------------------------------------------------------------------
+    // Descarga offline: baja el archivo elegido al directorio persistente
+    // <external-files>/downloads (no caché — no lo toca evictSaveDir).
+    // Comparte el slot del motor: iniciar un stream otra descarga lo para.
+    // El progreso sale por los eventos 'torrentProgress' de startProgressPoll.
+    // ------------------------------------------------------------------
+
+    private File downloadsDir() {
+        File base = getContext().getExternalFilesDir(null);
+        if (base == null) base = getContext().getFilesDir();
+        return new File(base, "downloads");
+    }
+
+    @PluginMethod
+    public void download(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        final Integer season = call.getInt("season");
+        final Integer episode = call.getInt("episode");
+        final Integer fileIndexArg = call.getInt("fileIndex");
+        final String torrentUrl = url;
+
+        new Thread(() -> {
+            try {
+                SessionManager sm = ensureSession();
+                stopTorrentInternal();
+                startProgressPoll();
+
+                TorrentInfo ti = fetchTorrentInfo(torrentUrl, sm);
+                torrentInfo = ti;
+                FileStorage fs = ti.files();
+                int idx = (fileIndexArg != null && fileIndexArg >= 0 && fileIndexArg < fs.numFiles())
+                        ? fileIndexArg
+                        : pickFileIndex(fs, season, episode);
+                if (idx < 0) throw new Exception("El torrent no contiene un archivo de vídeo");
+                selectedFileIndex = idx;
+                fileOffset = fs.fileOffset(idx);
+                fileSize = fs.fileSize(idx);
+                pieceLength = ti.pieceLength();
+                lastFilePiece = (int) ((fileOffset + fileSize - 1) / pieceLength);
+
+                File dir = downloadsDir();
+                dir.mkdirs();
+                saveDir = dir;
+
+                // Si ya está completo en disco, no añadir nada a la sesión.
+                mediaFile = new File(dir, fs.filePath(idx));
+                String canonSave = dir.getCanonicalPath();
+                if (!mediaFile.getCanonicalPath().startsWith(canonSave + File.separator)) {
+                    throw new Exception("ruta de archivo fuera del directorio de descarga");
+                }
+                if (mediaFile.exists() && mediaFile.length() == fileSize) {
+                    JSObject done = new JSObject();
+                    done.put("name", fs.filePath(idx));
+                    done.put("path", mediaFile.getAbsolutePath());
+                    done.put("sizeBytes", fileSize);
+                    done.put("infoHash", ti.infoHash().toHex());
+                    done.put("fileIndex", idx);
+                    done.put("complete", true);
+                    call.resolve(done);
+                    return;
+                }
+
+                Priority[] pri = new Priority[fs.numFiles()];
+                Arrays.fill(pri, Priority.IGNORE);
+                pri[idx] = Priority.NORMAL;
+                sm.download(ti, dir, null, pri, null);
+
+                th = null;
+                for (int i = 0; i < 100 && th == null; i++) {
+                    th = sm.find(ti.infoHash());
+                    if (th == null) Thread.sleep(100);
+                }
+                if (th == null) throw new Exception("No se pudo añadir el torrent a la sesión");
+                th.resume();
+
+                JSObject ret = new JSObject();
+                ret.put("name", fs.filePath(idx));
+                ret.put("path", mediaFile.getAbsolutePath());
+                ret.put("sizeBytes", fileSize);
+                ret.put("infoHash", ti.infoHash().toHex());
+                ret.put("fileIndex", idx);
+                ret.put("complete", false);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "download failed", e);
+                cleanupTorrent();
+                call.reject("Torrent: " + e.getMessage());
+            }
+        }, "torrent-download").start();
+    }
+
+    /** Lista los vídeos completados o en progreso del directorio de descargas. */
+    @PluginMethod
+    public void listDownloads(PluginCall call) {
+        JSArray files = new JSArray();
+        try {
+            collectVideoFiles(downloadsDir(), downloadsDir(), files);
+        } catch (Throwable ignored) {}
+        call.resolve(new JSObject().put("files", files));
+    }
+
+    private void collectVideoFiles(File root, File dir, JSArray out) {
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File f : children) {
+            if (f.isDirectory()) { collectVideoFiles(root, f, out); continue; }
+            String name = f.getName().toLowerCase(Locale.ROOT);
+            if (!isVideoFile(name) || f.length() <= 0) continue;
+            JSObject o = new JSObject();
+            String rel = root.toURI().relativize(f.toURI()).getPath();
+            o.put("name", rel != null ? rel : f.getName());
+            o.put("path", f.getAbsolutePath());
+            o.put("size", f.length());
+            out.put(o);
+        }
+    }
+
+    /** Borra un archivo del directorio de descargas (path de listDownloads). */
+    @PluginMethod
+    public void deleteDownload(PluginCall call) {
+        String path = call.getString("path");
+        if (path == null || path.isEmpty()) {
+            call.reject("path is required");
+            return;
+        }
+        try {
+            File dir = downloadsDir();
+            File f = new File(path);
+            String canonSave = dir.getCanonicalPath();
+            // Misma contención que en start(): nunca borrar fuera de downloads/.
+            if (!f.getCanonicalPath().startsWith(canonSave + File.separator)) {
+                call.reject("ruta fuera del directorio de descargas");
+                return;
+            }
+            boolean deleted = f.exists() && f.delete();
+            // Limpiar carpetas vacías del pack.
+            File parent = f.getParentFile();
+            while (parent != null && !parent.getCanonicalPath().equals(canonSave)) {
+                if (!parent.delete()) break;
+                parent = parent.getParentFile();
+            }
+            call.resolve(new JSObject().put("deleted", deleted));
+        } catch (Exception e) {
+            call.reject("delete failed: " + e.getMessage());
+        }
     }
 
     @Override

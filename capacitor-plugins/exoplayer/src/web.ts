@@ -75,4 +75,16 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async isPipActive(): Promise<{ active: boolean }> {
     return { active: false }
   }
+
+  async isActive(): Promise<{ active: boolean }> {
+    return { active: false }
+  }
+
+  async exportConfig(_options: { filename?: string; content: string }): Promise<{ saved: boolean; uri?: string }> {
+    throw new Error('exportConfig is only available on Android')
+  }
+
+  async importConfig(): Promise<{ content: string; name?: string }> {
+    throw new Error('importConfig is only available on Android')
+  }
 }

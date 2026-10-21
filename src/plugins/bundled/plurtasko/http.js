@@ -481,18 +481,34 @@ export function decodeEntities(text) {
 // funcionó y, si falla, itera el resto en orden. `fn(host)` debe devolver el
 // resultado crudo; `valid(res)` decide si el host sirvió (por defecto truthy).
 // Devuelve { res, host } — res=null si ningún host respondió válido.
-export function makeHostRotator(hosts) {
+export function makeHostRotator(hosts, persistKey = null) {
   let working = hosts[0]
+  // persistKey: recuerda el último host vivo entre sesiones — si no, cada
+  // arranque en frío reprobaba primero los dominios muertos de la lista.
+  if (persistKey) {
+    try {
+      const saved = typeof localStorage !== 'undefined' && localStorage.getItem(persistKey)
+      if (saved && hosts.some(h => h.replace(/\/+$/, '') === saved.replace(/\/+$/, ''))) {
+        working = saved
+      }
+    } catch {}
+  }
+  const setWorking = (h) => {
+    working = h
+    if (persistKey) {
+      try { typeof localStorage !== 'undefined' && localStorage.setItem(persistKey, h) } catch {}
+    }
+  }
   return {
     get working() { return working },
-    set working(h) { working = h },
+    set working(h) { setWorking(h) },
     async rotate(fn, valid = r => !!r) {
       const tried = new Set()
       let host = working
       for (let i = 0; i < hosts.length; i++) {
         tried.add(host)
         const res = await fn(host)
-        if (valid(res)) { working = host; return { res, host } }
+        if (valid(res)) { setWorking(host); return { res, host } }
         host = hosts.find(h => !tried.has(h)) || host
       }
       return { res: null, host: working }
