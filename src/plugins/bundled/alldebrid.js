@@ -24,10 +24,13 @@ const AGENT = 'octostream_stream'
 // Solo host para logs: las URLs de unlock llevan token en el query.
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
-// All AllDebrid API calls require the Riseup tunnel on Android: the provider
-// records the source IP and binds unlocked links to it.
+// Las llamadas a AllDebrid prefieren el túnel Riseup en Android: el provider
+// registra la IP de salida y liga los links desbloqueados a ella. Soft-wait:
+// si el túnel está caído la petición sale por WARP/física — la consistencia
+// se mantiene porque unlock y playback salen por el mismo egress. El gate
+// duro anterior impedía usar AllDebrid sin Riseup configurado.
 async function apiGetJson(url) {
-  await waitForVpnTunnel(30000, { required: true })
+  try { await waitForVpnTunnel(20000) } catch {}
   return httpGetJson(url, {}, undefined, false, true)
 }
 
@@ -132,12 +135,12 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
   const key = getAlldebridApiKey()
   if (!key) throw new Error('AllDebrid API key not configured')
 
-  // AllDebrid binds unlocked URLs to the request IP. Never send unlock/status
-  // requests over the physical Spanish network if Riseup is not connected.
+  // AllDebrid binds unlocked URLs to the request IP. Prefiere el túnel
+  // cuando está arriba (soft-wait, igual que apiGetJson).
   const url = apiUrl(endpoint, method === 'GET' ? params : {}, base)
   let data
   if (method === 'POST') {
-    await waitForVpnTunnel(30000, { required: true })
+    try { await waitForVpnTunnel(20000) } catch {}
     data = await httpPostJson(
       url,
       new URLSearchParams(params).toString(),

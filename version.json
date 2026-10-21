@@ -1,18 +1,18 @@
 {
-  "versionCode": 2072,
-  "versionName": "2.07.2",
+  "versionCode": 2073,
+  "versionName": "2.07.3",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.2/octostream-2.07.2-arm64-v8a.apk",
-  "sha256": "87556d27e5345a8c8dd4c277ecb4812d87b105c2939f41a558c214ea22a1b4e0",
-  "notes": "Arranque fail-closed con VPN: la pantalla principal no se monta hasta que el túnel (WARP o Riseup) esté conectado — elimina la fuga de IP en imágenes y peticiones de catálogo durante el arranque. HDFull sale de WARP: su anti-bot rechaza las IPs de Cloudflare.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.3/octostream-2.07.3-arm64-v8a.apk",
+  "sha256": "3b0105936a6c1640fd50fbf9324829949033f579dfff3670679ea8b52c7b97d3",
+  "notes": "Correcciones de reproducción: los enlaces debrid ya responden al pulsar (bug TorBox) y AllDebrid funciona sin Riseup VPN — los torrents se resuelven por debrid antes de caer a P2P.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.2/octostream-2.07.2-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.2/octostream-2.07.2-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.2/octostream-2.07.2-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.3/octostream-2.07.3-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.3/octostream-2.07.3-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.3/octostream-2.07.3-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "87556d27e5345a8c8dd4c277ecb4812d87b105c2939f41a558c214ea22a1b4e0",
-    "armeabi-v7a": "a647c34183a51f7258bad6e42e38be6cc9a4c96bdc691aee57cea7beb06e7e0b",
-    "x86_64": "ac72b9bafbd2f45a154077852fd75645cf04c06857d28faab0c323d1ed3fc73e"
+    "arm64-v8a": "3b0105936a6c1640fd50fbf9324829949033f579dfff3670679ea8b52c7b97d3",
+    "armeabi-v7a": "08be1d7839afc081ab863e2c0ee2de63d0d112250e3622a971eabe7d0d3295df",
+    "x86_64": "72521831606afee43474d2ade89a6ae75257450591025a5c39c2ebff127ca4e4"
   }
 }
