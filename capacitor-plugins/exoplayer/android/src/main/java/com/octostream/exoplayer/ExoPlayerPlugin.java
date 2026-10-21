@@ -5,11 +5,13 @@ import com.octostream.exoplayer.R;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
 import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.os.Handler;
 import android.text.TextUtils;
 import android.os.Looper;
@@ -82,9 +84,12 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+
+import androidx.activity.result.ActivityResult;
 
 import com.google.android.gms.cast.framework.CastButtonFactory;
 import com.google.android.gms.cast.framework.CastContext;
@@ -3370,7 +3375,12 @@ public class ExoPlayerPlugin extends Plugin {
         }
         Uri parsedUrl = Uri.parse(url);
         String scheme = parsedUrl.getScheme();
-        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+        // content:// y file:// solo se aceptan cuando JS lo pide explícitamente
+        // (opción "Abrir desde USB"): las URLs de plugins siguen a http(s).
+        boolean localFile = call.getBoolean("localFile", false);
+        boolean schemeOk = scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")
+                || (localFile && (scheme.equalsIgnoreCase("content") || scheme.equalsIgnoreCase("file"))));
+        if (!schemeOk) {
             call.reject("invalid url scheme: only http/https are allowed");
             return;
         }
@@ -3475,6 +3485,54 @@ public class ExoPlayerPlugin extends Plugin {
                 call.reject("Failed to open player: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Picker de archivos del sistema (SAF) filtrado a vídeo. Lista USB/OTG,
+     * SD y providers cloud; la URI devuelta conserva permiso de lectura
+     * persistible y se reproduce con play({url, localFile:true}).
+     */
+    @PluginMethod
+    public void pickVideo(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        // Algunos providers etiquetan .mkv/.ts como octet-stream.
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[] { "video/*", "application/octet-stream" });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(call, intent, "pickVideoResult");
+    }
+
+    @ActivityCallback
+    private void pickVideoResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        Intent data = result != null ? result.getData() : null;
+        Uri uri = data != null ? data.getData() : null;
+        if (uri == null) {
+            call.reject("cancelled");
+            return;
+        }
+        try {
+            getContext().getContentResolver().takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {}
+        String name = "";
+        long size = -1;
+        try (Cursor c = getContext().getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                int si = c.getColumnIndex(OpenableColumns.SIZE);
+                if (ni >= 0 && c.getString(ni) != null) name = c.getString(ni);
+                if (si >= 0) size = c.getLong(si);
+            }
+        } catch (Exception ignored) {}
+        JSObject ret = new JSObject();
+        ret.put("uri", uri.toString());
+        ret.put("name", name);
+        ret.put("size", size);
+        call.resolve(ret);
     }
 
     private void openPlayer(String url, String streamType, boolean direct, String licenseUrl,
@@ -4658,7 +4716,12 @@ public class ExoPlayerPlugin extends Plugin {
         // If streamType was explicitly provided (not "hls" default), respect it
         // and only override if URL clearly indicates a different type
         String effectiveType = streamType != null ? streamType.toLowerCase() : "hls";
-        if (lowerUrl.contains(".m3u8") || lowerUrl.contains("m3u8")) {
+        String uriScheme = uri.getScheme();
+        if ("content".equalsIgnoreCase(uriScheme) || "file".equalsIgnoreCase(uriScheme)) {
+            // Ficheros locales (SAF/USB): las URIs no llevan extensión
+            // fiable — siempre progresivo.
+            effectiveType = "mp4";
+        } else if (lowerUrl.contains(".m3u8") || lowerUrl.contains("m3u8")) {
             effectiveType = "hls";
         } else if (lowerUrl.contains(".mp4") || lowerUrl.contains("videoplayback")
                 || lowerUrl.matches(".*\\.(mkv|avi|webm|mov|m4v|mpg|mpeg|wmv|flv|ts)([?#].*)?$")) {

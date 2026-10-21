@@ -39,6 +39,20 @@ export interface PlayOptions {
   longBuffering?: boolean
   /** Texto de la pantalla de carga inicial (por defecto "Cargando enlace…") */
   loadingText?: string
+  /**
+   * Permite URIs locales (content://, file://) — solo lo activa la opción
+   * "abrir archivo" de la app; las URLs de plugins siguen limitadas a http(s).
+   */
+  localFile?: boolean
+}
+
+export interface PickVideoResult {
+  /** URI content:// persistible (SAF) — reproducible directamente en Media3 */
+  uri: string
+  /** Nombre visible del archivo (OpenableColumns.DISPLAY_NAME) */
+  name: string
+  /** Tamaño en bytes (-1 si el provider no lo informa) */
+  size: number
 }
 
 export interface SetChannelsOptions {
@@ -181,6 +195,12 @@ export interface PlayPipOptions {
 
 export interface ExoPlayerPlugin {
   play(options: PlayOptions): Promise<{ status: string }>
+  /**
+   * Abre el picker de documentos del sistema (SAF) filtrado a vídeo —
+   * incluye USB/OTG, tarjetas SD y providers cloud. Devuelve una URI
+   * content:// con permiso persistible para play({url, localFile:true}).
+   */
+  pickVideo(): Promise<PickVideoResult>
   playEmbed(options: PlayEmbedOptions): Promise<PlayEmbedResult>
   /**
    * Resuelve un embed de forma invisible: WebView oculto que deja correr el

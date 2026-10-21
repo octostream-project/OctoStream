@@ -1,7 +1,9 @@
 import { useState, useRef } from 'react'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import { embedStreamPlugin } from '../plugins/builtIn/index.js'
-import { Play, Link2, Plus, Trash2, Clapperboard } from 'lucide-react'
+import { pickLocalVideo, playLocalFile } from '../utils/exoPlayer.js'
+import { isAndroidNative } from '../utils/platform.js'
+import { Play, Link2, Plus, Trash2, Clapperboard, Usb } from 'lucide-react'
 
 const STORAGE_KEY = 'octostream_custom_streams'
 
@@ -22,7 +24,21 @@ export default function AddStream() {
   const [name, setName] = useState('')
   const [playing, setPlaying] = useState(null)
   const [customStreams, setCustomStreams] = useState(loadCustomStreams)
+  const [localError, setLocalError] = useState('')
   const urlRef = useRef(null)
+
+  const handleLocalFile = async () => {
+    setLocalError('')
+    try {
+      const file = await pickLocalVideo()
+      if (!file?.uri) return
+      await playLocalFile({ uri: file.uri, title: file.name || 'Archivo local' })
+    } catch (e) {
+      if (e?.message !== 'cancelled') {
+        setLocalError(e?.message || 'No se pudo abrir el archivo')
+      }
+    }
+  }
 
   const handlePlay = (streamUrl, streamName) => {
     const resolved = embedStreamPlugin.resolveEmbed(streamUrl)
@@ -86,6 +102,26 @@ export default function AddStream() {
       <p className="text-dark-400 text-sm mb-6">
         Pega cualquier URL de video embed (YouTube, Vimeo, Dailymotion, Streamable, o cualquier iframe) y reprodúcela al instante.
       </p>
+
+      {isAndroidNative() && (
+        <div className="bg-dark-800 rounded-xl p-5 border border-dark-700 mb-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex-shrink-0 w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Usb className="text-primary-400" size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-medium">Abrir desde USB o archivo</p>
+                <p className="text-xs text-dark-500">Vídeos locales: USB OTG, SD o cualquier carpeta (mkv, mp4, avi…)</p>
+              </div>
+            </div>
+            <button onClick={handleLocalFile} className="btn-secondary flex-shrink-0">
+              Examinar
+            </button>
+          </div>
+          {localError && <p className="text-red-400 text-xs mt-3">{localError}</p>}
+        </div>
+      )}
 
       <div className="bg-dark-800 rounded-xl p-5 border border-dark-700 mb-6">
         <div className="space-y-4">

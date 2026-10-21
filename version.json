@@ -1,18 +1,18 @@
 {
-  "versionCode": 2070,
-  "versionName": "2.07.0",
+  "versionCode": 2071,
+  "versionName": "2.07.1",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-arm64-v8a.apk",
-  "sha256": "c47c657b3fa82ba43e02fafda7fcf90503c26e4b4ee401385ea9fa7ab8f195a0",
-  "notes": "Torrentio en castellano (language=spanish) limitado a 1080p — sin 4K/2160p. Canales actualizados a dominios actuales: AnimeYT reescrito, PelisPlusHD y DonTorrent corregidos. Ajustes de Red reparados: los toggles de WARP/Aether y auto-arranque de VPN vuelven a funcionar.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.1/octostream-2.07.1-arm64-v8a.apk",
+  "sha256": "b1634fa6180895a2c476416b3aa851549192a5b4077b986da9e0e994a3301a67",
+  "notes": "Abrir vídeos desde USB/archivo local: nuevo botón en Añadir Enlace que abre el selector de archivos del sistema (USB OTG, SD, carpetas) y reproduce mkv/mp4/avi directo en ExoPlayer. PIN de AllDebrid corregido: ya no exige tener Riseup VPN conectado para vincular la cuenta.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.0/octostream-2.07.0-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.1/octostream-2.07.1-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.1/octostream-2.07.1-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.07.1/octostream-2.07.1-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "c47c657b3fa82ba43e02fafda7fcf90503c26e4b4ee401385ea9fa7ab8f195a0",
-    "armeabi-v7a": "1bf3f35a76218eed16125e4b5bf7ca06e758ffdff71ccca19c029497ba0228b2",
-    "x86_64": "dd8b5eaf3dbb265c0ef5b5615f56a12ee824442739d2b4d12890451fc2a7ab05"
+    "arm64-v8a": "b1634fa6180895a2c476416b3aa851549192a5b4077b986da9e0e994a3301a67",
+    "armeabi-v7a": "74bdec38b08651871293a2a471349674c1004ca32ea3715f08a7e6c349956387",
+    "x86_64": "b86e11ffe5104947dee9133625a4473e0fd5d0be556c18ebcc4c22f397b40553"
   }
 }

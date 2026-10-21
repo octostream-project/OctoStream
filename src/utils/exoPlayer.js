@@ -160,6 +160,37 @@ export async function playStream(options, onStateChange) {
 }
 
 /**
+ * Abre el picker de documentos del sistema (SAF) filtrado a vídeo: lista
+ * USB/OTG, SD y providers cloud. Devuelve {uri, name, size} — la URI es
+ * content:// con permiso persistible, lista para playLocalFile.
+ */
+export async function pickLocalVideo() {
+  if (!isAndroidNative()) throw new Error('Solo disponible en Android')
+  return ExoPlayer.pickVideo()
+}
+
+/**
+ * Reproduce un archivo local (content:// o file://) en el ExoPlayer nativo.
+ * Salta la sanitización http(s): la URI solo procede del SAF picker.
+ */
+export async function playLocalFile({ uri, title, startTime }, onStateChange) {
+  if (!isAndroidNative()) throw new Error('Solo disponible en Android')
+  stateListener = onStateChange
+  zapListener = null
+  episodeSelectListener = null
+  seasonSelectListener = null
+  return ExoPlayer.play({
+    url: uri,
+    streamType: 'mp4',
+    direct: true,
+    localFile: true,
+    title: title || '',
+    mode: 'vod',
+    startTime: startTime || 0,
+  })
+}
+
+/**
  * Switch the native player to a new live channel without closing the dialog.
  * Called after a 'channelZap' event once JS has resolved the new stream.
  */

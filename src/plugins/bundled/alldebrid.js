@@ -31,6 +31,21 @@ async function apiGetJson(url) {
   return httpGetJson(url, {}, undefined, false, true)
 }
 
+// PIN flow: handshake de autenticación — a diferencia de /link/unlock no
+// genera URLs ligadas a la IP de salida. Espera al túnel si el usuario lo
+// tiene en autoconnect, pero NO bloquea el PIN cuando la VPN está caída:
+// vincular la cuenta no puede exigir tener la VPN ya configurada.
+async function apiGetJsonPin(url) {
+  try { await waitForVpnTunnel(15000) } catch {}
+  try {
+    return await httpGetJson(url, {}, undefined, false, false)
+  } catch (e) {
+    if (e?.code !== 'VPN_NOT_CONNECTED' && e?.code !== 'WARP_NOT_CONNECTED') throw e
+    // Túnel caído o mal configurado: el PIN sale por la física.
+    return httpGetJson(url, {}, undefined, true, false)
+  }
+}
+
 // RealDebrid fue eliminado del proyecto: limpia el token persistido de
 // instalaciones viejas para que no quede credencial huérfana en el dispositivo.
 try { removeItemSync('octostream_realdebrid_token') } catch {}
@@ -68,7 +83,7 @@ export function isAlldebridEnabled() {
 export async function getPin() {
   try {
     const url = `${API_BASE}/pin/get?agent=${AGENT}`
-    const data = await apiGetJson(url)
+    const data = await apiGetJsonPin(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       pin: data.data.pin,
@@ -86,7 +101,7 @@ export async function getPin() {
 export async function checkPin(pin, check) {
   try {
     const url = `${API_BASE}/pin/check?agent=${AGENT}&pin=${encodeURIComponent(pin)}&check=${encodeURIComponent(check)}`
-    const data = await apiGetJson(url)
+    const data = await apiGetJsonPin(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       activated: data.data.activated === true,
