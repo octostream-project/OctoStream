@@ -10,7 +10,9 @@ import { waitForWarp, warpAutoConnectEnabled } from './warpStatus.js'
 
 // Solo directos/servicios de TV con restricción geográfica evitan WARP.
 // El resto del tráfico de la app usa Aether/WARP.
-const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$/i
+// HDFull también va directo: su anti-bot rechaza las IPs de Cloudflare
+// (salida de WARP) — a través del túnel el login y las fichas no cargan.
+const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$|(^|\.)hdfull\.[a-z]{2,}$/i
 function isGeoHost(url) {
   try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
 }
@@ -63,7 +65,7 @@ async function nativeRequest(opts) {
   }
   // Riseup tiene prioridad sobre WARP cuando está en autoconnect.
   try {
-    if (!isVpnBootstrapHost(opts.url)
+    if (!isVpnBootstrapHost(opts.url) && !isGeoHost(opts.url)
         && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
       await waitForVpnTunnel(30000, { required: true })
     }
