@@ -6,7 +6,7 @@ import { fetchHtml, decodeEntities } from '../http.js'
 import { findSingleMatch, findMultipleMatches, normalizeServer, detectServerFromUrl } from '../scraper.js'
 import { detectLangFromText } from '../meta.js'
 
-const HOST = 'https://repelishd.courses/'
+const HOST = 'https://repelishd.pics/'
 
 export const repelishd = {
   id: 'repelishd',

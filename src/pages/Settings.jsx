@@ -9,7 +9,7 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
-import { refreshWarpStatus } from '../utils/warpStatus.js'
+import { refreshWarpStatus, subscribeWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 
 const LANG_LABELS = {
@@ -358,6 +358,56 @@ export default function Settings() {
       else if (st.connecting) setRiseupState('connecting')
     }).catch(() => {})
   }, [])
+
+  // Refleja el estado real del túnel WARP/Aether (también si se conecta o cae
+  // desde otra pantalla). No pisa 'connecting' mientras el handshake arranca.
+  useEffect(() => {
+    return subscribeWarpStatus(connected => {
+      setVpnStatus(prev => connected ? 'connected' : prev === 'connecting' ? prev : 'disconnected')
+    })
+  }, [])
+
+  const toggleVpn = async () => {
+    if (vpnStatus === 'connecting') return
+    setVpnError('')
+    try {
+      if (vpnStatus === 'connected') {
+        // Apagar WARP: desconecta y desactiva el auto-arranque para que no
+        // vuelva a levantarse solo en el próximo inicio.
+        localStorage.setItem('octostream_warp_autoconnect', 'false')
+        setVpnAutoConnect(false)
+        await CloudProxy.disconnect()
+        await refreshWarpStatus()
+        setVpnStatus('disconnected')
+      } else {
+        localStorage.setItem('octostream_warp_autoconnect', 'true')
+        setVpnAutoConnect(true)
+        setVpnStatus('connecting')
+        await CloudProxy.connect()
+        // El handshake puede tardar: sondea el estado hasta 15s.
+        for (let i = 0; i < 15; i++) {
+          const st = await CloudProxy.getStatus().catch(() => ({}))
+          if (st?.connected) { setVpnStatus('connected'); return }
+          if (!st?.connecting && i > 0) break // falló el handshake
+          await new Promise(r => setTimeout(r, 1000))
+        }
+        await refreshWarpStatus().catch(() => false)
+        setVpnStatus('disconnected')
+        setVpnError('WARP no conectó — comprueba la red e inténtalo de nuevo')
+      }
+    } catch (e) {
+      setVpnError(e?.message || 'Error con WARP')
+      setVpnStatus('disconnected')
+    }
+  }
+
+  const toggleVpnAutoConnect = () => {
+    const next = !vpnAutoConnect
+    setVpnAutoConnect(next)
+    localStorage.setItem('octostream_warp_autoconnect', next ? 'true' : 'false')
+    // Al desactivar la auto-conexión con el túnel activo, también se apaga.
+    if (!next && vpnStatus !== 'disconnected') toggleVpn()
+  }
 
   const toggleRiseup = async () => {
     setRiseupBusy(true); setRiseupMsg('')

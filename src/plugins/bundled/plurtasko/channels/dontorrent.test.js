@@ -13,7 +13,8 @@ vi.mock('../http.js', async () => {
 import { fetchHtml, postHtml, postJson } from '../http.js'
 import { dontorrent } from './dontorrent.js'
 
-const HOST = 'https://dontorrent.supply/'
+// Primer host de la lista de rotación del canal (el que responde el mock).
+const HOST = 'https://4144-don.mirror.pm/'
 
 const SEARCH_HTML = `<html><body>
 <!-- padding para superar el umbral de página válida de postToHost (>200 chars) -->

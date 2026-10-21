@@ -11,12 +11,13 @@ import { fetchHtml, postHtml, postJson, absoluteUrl, decodeEntities, makeHostRot
 import { findSingleMatch, findMultipleMatches, detectType, baseTitle as baseTitleOf } from '../scraper.js'
 import { extractQualityFromText, detectLangFromText } from '../meta.js'
 
-// Working hosts in order of preference. dontorrent.supply is the current
-// official domain (may be ISP-blocked); mirror.pm is the fallback mirror and
-// its numeric id rotates over time.
+// Working hosts in order of preference. mirror.pm is the fallback mirror and
+// its numeric id rotates over time; the official dontorrent.* domain rotates
+// TLDs weekly (supply → cloud → dad → city…).
 const HOSTS = [
-  'https://dontorrent.supply/',
   'https://4144-don.mirror.pm/',
+  'https://dontorrent.city/',
+  'https://dontorrent.supply/',
   'https://www21.dontorrent.link/',
 ]
 const rotator = makeHostRotator(HOSTS)
@@ -225,7 +226,7 @@ export const dontorrent = {
     // The site wraps the matched query term in <span class="text-secondary">…
     // inside the anchor, so capture the whole anchor body and strip tags.
     const matches = findMultipleMatches(html,
-      /<a href='(\/(?:pelicula|serie|documental)\/[^']+)'[^>]*class="text-decoration-none"[^>]*>([\s\S]*?)<\/a>/)
+      /<a href=["'](\/(?:pelicula|serie|documental)\/[^"']+)["'][^>]*class="[^"]*text-decoration-none[^"]*"[^>]*>([\s\S]*?)<\/a>/)
     for (const m of matches) {
       const itemUrl = absoluteUrl(m[1], host)
       if (seen.has(itemUrl)) continue

@@ -16,7 +16,10 @@ import { detectLangFromText, extractQualityFromText } from '../meta.js'
 import { withDefaultTrackers } from '../../../../utils/torrentFile.js'
 
 const BASE = 'https://torrentio.strem.fun'
+// Config de /configure: providers españoles + prioridad a audio castellano
+// (language=spanish) y exclusión de calidades por encima de 1080p (4k/2160p).
 const PROVIDERS = 'mejortorrent,wolfmax4k,cinecalidad'
+const CONFIG = `providers=${PROVIDERS}|language=spanish|qualityfilter=4k`
 
 export const torrentio = {
   id: 'torrentio',
@@ -29,7 +32,7 @@ export const torrentio = {
     if (!imdbId) return []
     const isSeries = type !== CONTENT_TYPES.MOVIE
     const id = isSeries ? `${imdbId}:${season || 1}:${episode || 1}` : imdbId
-    const url = `${BASE}/providers=${PROVIDERS}/stream/${isSeries ? 'series' : 'movie'}/${id}.json`
+    const url = `${BASE}/${CONFIG}/stream/${isSeries ? 'series' : 'movie'}/${id}.json`
     const data = await withTimeout(
       safeFetchJson(url, {}, signal),
       12000,

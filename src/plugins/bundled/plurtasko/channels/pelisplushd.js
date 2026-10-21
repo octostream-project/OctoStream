@@ -6,7 +6,7 @@ import { fetchHtml, decodeEntities, absoluteUrl } from '../http.js'
 import { findSingleMatch, findMultipleMatches, detectType, normalizeServer, detectServerFromUrl } from '../scraper.js'
 import { detectLangFromText } from '../meta.js'
 
-const HOST = 'https://pelisplushd.bz/'
+const HOST = 'https://pelisplushd.la/'
 
 export const pelisplushd = {
   id: 'pelisplushd',
@@ -113,6 +113,27 @@ export const pelisplushd = {
     // "Subtitulado"); sin pista el stream queda sin etiqueta.
     const pageLang = detectLangFromText(findSingleMatch(html, '<title[^>]*>(.*?)</title>') || '')
 
+    // Opciones del reproductor: <li class="playurl" data-url="…"
+    // data-name="Español Latino|Subtitulado|…"><a href="#optionN">server</a>.
+    const playurls = findMultipleMatches(html, 'data-url="([^"]+)"[^>]*data-name="([^"]*)"[^>]*class="playurl"[^>]*>[\\s\\S]*?<a[^>]*>([\\s\\S]*?)</a>')
+    for (const m of playurls) {
+      const videoUrl = m[1]
+      const lang = detectLangFromText(m[2]) || pageLang
+      const serverName = m[3].replace(/<[^>]*>/g, '').toLowerCase().trim()
+      if (!/^https?:/i.test(videoUrl)) continue
+      streams.push({
+        name: `${serverName || 'embed'}${lang ? ` (${lang})` : ''}`,
+        lang,
+        url: videoUrl,
+        streamType: normalizeServer(serverName),
+        quality: '',
+        server: serverName || 'embed',
+        pluginName: 'PelisPlusHD',
+        pluginId: 'plurtasko',
+      })
+    }
+    if (streams.length) return streams
+
     // Find embed69 iframe
     const embedMatch = findSingleMatch(html, '<iframe[^>]*src="(https?://embed69\\.org/[^"]*)"')
     if (embedMatch) {
@@ -188,10 +209,11 @@ export const pelisplushd = {
     const html = await fetchHtml(url)
     const items = []
 
-    // Extract content links with their data-title
-    const linkMatches = findMultipleMatches(html, 'href="(https?://pelisplushd\\.bz/(?:pelicula|serie|anime)/[^"]*)"[^>]*data-title="([^"]*)"')
+    // Extract content links with their data-title (el sitio usa hrefs
+    // relativos como href="/pelicula/…").
+    const linkMatches = findMultipleMatches(html, 'href="((?:https?://pelisplushd\\.[a-z]+)?/(?:pelicula|serie|anime)/[^"]*)"[^>]*data-title="([^"]*)"')
     for (const m of linkMatches) {
-      const itemUrl = m[1]
+      const itemUrl = absoluteUrl(m[1], HOST)
       let title = m[2] || ''
       title = title.replace(/^VER\s+/i, '').replace(/\s+Online.*$/i, '').replace(/\s*\(\d{4}\)\s*$/, '').trim()
       const itemType = detectType(itemUrl)
