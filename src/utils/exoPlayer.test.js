@@ -4,6 +4,7 @@ vi.mock('@octostream/exo-player', () => ({
   ExoPlayer: {
     addListener: vi.fn(),
     play: vi.fn(),
+    readTextFile: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
     stop: vi.fn(),
@@ -27,6 +28,7 @@ import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import {
   playStream,
+  playLocalFile,
   pausePlayback,
   resumePlayback,
   stopPlayback,
@@ -103,6 +105,19 @@ describe('playStream', () => {
       fastStart: false,
       loadingText: null,
     })
+  })
+})
+
+describe('playLocalFile', () => {
+  it('starts the video without waiting to read a subtitle from USB', async () => {
+    isAndroidNative.mockReturnValue(true)
+    ExoPlayer.play.mockResolvedValue({ status: 'playing' })
+    const subtitles = [{ url: 'content://usb/sub.srt', mimeType: 'application/x-subrip' }]
+    await playLocalFile({ uri: 'content://usb/video.mkv', subtitles, startTime: 0 })
+    expect(ExoPlayer.readTextFile).not.toHaveBeenCalled()
+    expect(ExoPlayer.play).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'content://usb/video.mkv', localFile: true, subtitles,
+    }))
   })
 })
 

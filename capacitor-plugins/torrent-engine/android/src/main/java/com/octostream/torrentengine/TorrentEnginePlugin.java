@@ -343,6 +343,16 @@ public class TorrentEnginePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /** Consulta sin tocar rutas ni volúmenes (pueden bloquearse en USB/SD). */
+    @PluginMethod
+    public void getStorageAccess(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED);
+        call.resolve(ret);
+    }
+
     /** Vuelve al directorio privado de la app. */
     @PluginMethod
     public void resetDownloadDir(PluginCall call) {

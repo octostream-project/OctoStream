@@ -144,7 +144,9 @@ export interface TorrentEnginePlugin {
   /** Borra un archivo del directorio de descargas (path de listDownloads) */
   deleteDownload(options: { path: string }): Promise<{ deleted: boolean }>
   /** Carpeta de descarga actual */
-  getDownloadDir(): Promise<DownloadDirInfo>
+    getDownloadDir(): Promise<DownloadDirInfo>
+    /** Consulta el permiso sin acceder al sistema de archivos. */
+    getStorageAccess(): Promise<{ granted: boolean }>
   /** Selector de carpeta de descargas (SAF en Android, diálogo en Electron) */
   pickDownloadDir(): Promise<PickDownloadDirResult>
 

@@ -15,6 +15,10 @@ import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosed
 import { CloudProxy } from './utils/cloudProxy.js'
 import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
 import { startLoadPlan } from './utils/loadPlan.js'
+import { AppUpdater } from './utils/appUpdater.js'
+import { getTorrentEngine } from './utils/torrentEngine.js'
+import { promptStorageAccessOnce } from './utils/storageAccessOnboarding.js'
+import { toast } from './components/ui/Toast.jsx'
 
 // Lazy-loaded pages: each route becomes its own chunk.
 const Home = lazy(() => import('./pages/Home.jsx'))
@@ -170,6 +174,45 @@ export default function App() {
     // internamente — no compite con el primer pintado ni filtra la IP.
     startLoadPlan()
   }, [initPlugins])
+
+  useEffect(() => {
+    if (!isAndroidNative()) return
+    let cancelled = false
+    let awaitingSettings = false
+    let listener
+    const sub = CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
+      if (!isActive || !awaitingSettings || cancelled) return
+      awaitingSettings = false
+      try {
+        const engine = await getTorrentEngine()
+        const access = await engine?.getStorageAccess?.()
+        if (cancelled) return
+        toast(access?.granted
+          ? 'Acceso al almacenamiento concedido'
+          : 'Puedes conceder acceso desde Descargas o elegir una carpeta con el selector del sistema')
+      } catch { /* El boton de Descargas sigue disponible. */ }
+    }).then(h => { if (cancelled) h.remove(); else listener = h }).catch(() => {})
+    const timer = setTimeout(async () => {
+      try {
+        const result = await promptStorageAccessOnce({
+          getVersion: () => AppUpdater.getAppVersion(),
+          getEngine: getTorrentEngine,
+          storage: localStorage,
+        })
+        if (!cancelled && result === 'opened') awaitingSettings = true
+        if (!cancelled && result === 'unavailable') {
+          toast.error('No se pudo abrir el acceso al almacenamiento; puedes usar el selector de Descargas')
+        }
+      } catch (e) {
+        console.warn('[App] Storage access prompt:', e?.message)
+      }
+    }, 1500)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      sub.then(() => listener?.remove()).catch(() => {})
+    }
+  }, [])
 
   // Keep WARP connected while Android backgrounds the app. Reconnect on
   // resume only if the tunnel or network was actually lost.
