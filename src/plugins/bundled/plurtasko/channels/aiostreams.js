@@ -71,9 +71,19 @@ export async function testAiostreamsConnection({ instance, uuid, password, manif
       // 1) El manifest declara qué recursos sirve la config — si no hay
       //    'stream', la URL no es de un addon de streams o está mal pegada.
       const manText = await withTimeout(httpGetText(`${man}/manifest.json`), TIMEOUT_MS, 'aiostreams timeout')
-      let manJson = null
-      try { manJson = JSON.parse(manText) } catch { /* no-JSON */ }
-      if (!manJson || !Array.isArray(manJson.resources)) {
+      // CapacitorHttp puede devolver el JSON ya parseado como objeto.
+      let manJson = typeof manText === 'object' && manText !== null ? manText : null
+      if (!manJson) {
+        try { manJson = JSON.parse(manText) } catch { /* no-JSON */ }
+      }
+      if (!manJson) {
+        // La petición respondió pero no trajo JSON: HTML de error del
+        // proxy/WARP, página de Cloudflare o cuerpo cortado. No es un
+        // problema de la URL — lo registramos para poder verlo en logcat.
+        console.warn('[aiostreams] manifest no-JSON:', String(manText).slice(0, 120))
+        return { ok: false, error: 'El manifest respondió algo que no es JSON (página de error o respuesta cortada) — si tienes VPN/WARP activa, prueba con ella apagada' }
+      }
+      if (!Array.isArray(manJson.resources)) {
         return { ok: false, error: 'La URL no es un manifest válido (debe acabar en /manifest.json)' }
       }
       const servesStreams = manJson.resources.some(r => (r.name || r) === 'stream')
@@ -92,8 +102,10 @@ export async function testAiostreamsConnection({ instance, uuid, password, manif
           TIMEOUT_MS,
           'aiostreams timeout'
         )
-        let json = null
-        try { json = JSON.parse(text) } catch { /* cortado/no-JSON */ }
+        let json = typeof text === 'object' && text !== null ? text : null
+        if (!json) {
+          try { json = JSON.parse(text) } catch { /* cortado/no-JSON */ }
+        }
         if (!json || !Array.isArray(json.streams)) {
           return { ok: false, error: 'La respuesta llegó incompleta o no es JSON — si tienes VPN/WARP activa, prueba con ella apagada' }
         }
