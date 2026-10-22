@@ -161,33 +161,42 @@ export default function DownloadsList() {
     }
   }
 
-  const handleSafPick = async () => {
+  const handleSafPick = () => {
     setPickingDir(true)
     // Si el DocumentsUI del sistema no llega a abrir (algunas ROMs), la
-    // promesa queda pendiente para siempre — quitamos el spinner a los 4s;
-    // si el picker abre tarde, la selección se aplica igual.
-    const unstick = setTimeout(() => setPickingDir(false), 4000)
-    try {
-      const engine = await getTorrentEngine()
-      const picked = await pickDownloadFolder()
-      const r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
-      if (r?.path) {
-        setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
-        toast.success('Carpeta de descargas guardada')
-        setDirPickerOpen(false)
+    // promesa queda pendiente para siempre — liberamos el spinner a los
+    // 4s y avisamos a los 8s; si el picker abre tarde, la selección se
+    // aplica igualmente al resolver.
+    let settled = false
+    const unstick = setTimeout(() => { if (!settled) setPickingDir(false) }, 4000)
+    const watchdog = setTimeout(() => {
+      if (!settled) toast('El selector de carpetas del sistema no respondió — si no se abrió, elige un volumen de la lista o permite el acceso al almacenamiento', 7000)
+    }, 8000)
+    ;(async () => {
+      try {
+        const engine = await getTorrentEngine()
+        const picked = await pickDownloadFolder()
+        const r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
+        if (r?.path) {
+          setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
+          toast.success('Carpeta de descargas guardada')
+          setDirPickerOpen(false)
+        }
+      } catch (e) {
+        if (e?.message === 'cancelled' || e?.cancelled) {
+          // Android no deja conceder la raíz del almacenamiento ni la raíz
+          // de Descargas — hay que elegir/crear una subcarpeta dentro.
+          toast('Para elegir carpeta con el selector del sistema, entra en Descargas (o SD/USB) y selecciona o crea una subcarpeta — la raíz no está permitida por Android.', 6000)
+        } else {
+          toast.error(e?.message || 'No se pudo elegir la carpeta')
+        }
+      } finally {
+        settled = true
+        clearTimeout(unstick)
+        clearTimeout(watchdog)
+        setPickingDir(false)
       }
-    } catch (e) {
-      if (e?.message === 'cancelled' || e?.cancelled) {
-        // Android no deja conceder la raíz del almacenamiento ni la raíz
-        // de Descargas — hay que elegir/crear una subcarpeta dentro.
-        toast('Para elegir carpeta con el selector del sistema, entra en Descargas (o SD/USB) y selecciona o crea una subcarpeta — la raíz no está permitida por Android.', 6000)
-      } else {
-        toast.error(e?.message || 'No se pudo elegir la carpeta')
-      }
-    } finally {
-      clearTimeout(unstick)
-      setPickingDir(false)
-    }
+    })()
   }
 
   const handleResetDir = async () => {

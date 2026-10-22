@@ -523,12 +523,29 @@ public class TorrentEnginePlugin extends Plugin {
             return;
         }
         try {
-            File d = new File(path);
-            d.mkdirs();
-            if (!d.isDirectory() || !d.canWrite()) {
-                call.reject("Sin permiso de escritura en " + path);
+            // mkdirs/canWrite en hilo con timeout: un volumen montado stale
+            // (SD/USB zombi) bloquea el FS para siempre — rechazar en 3s en
+            // vez de dejar la llamada pendiente y la UI girando.
+            boolean[] ok = { false };
+            Thread t = new Thread(() -> {
+                try {
+                    File d = new File(path);
+                    d.mkdirs();
+                    ok[0] = d.isDirectory() && d.canWrite();
+                } catch (Throwable ignored) {}
+            });
+            t.setDaemon(true);
+            t.start();
+            try {
+                t.join(3000);
+            } catch (InterruptedException ignored) {}
+            if (!ok[0]) {
+                call.reject(t.isAlive()
+                        ? "El almacenamiento no responde (volumen inaccesible)"
+                        : "Sin permiso de escritura en " + path);
                 return;
             }
+            File d = new File(path);
             getContext().getSharedPreferences(PREFS, 0).edit()
                     .putString("download_dir", d.getAbsolutePath())
                     .remove("download_tree").apply();
@@ -630,15 +647,39 @@ public class TorrentEnginePlugin extends Plugin {
                 getContext().getSharedPreferences(PREFS, 0).edit();
         JSObject ret = new JSObject();
         if (path != null && rawAccess) {
-            File dir = new File(path);
-            dir.mkdirs();
-            if (!dir.isDirectory() || !dir.canWrite()) {
-                call.reject("Sin permiso de escritura en esa carpeta");
-                return;
+            // Validar la ruta en un hilo con timeout: en un montaje stale
+            // (SD/USB que el sistema aún muestra pero que no responde)
+            // mkdirs()/canWrite() bloquean para siempre y la llamada jamás
+            // resolvía — la UI se quedaba girando sin mensaje. Si el FS no
+            // contesta en 3s, se cae a modo árbol SAF, que no toca rutas.
+            boolean[] ok = { false };
+            Thread t = new Thread(() -> {
+                try {
+                    File dir = new File(path);
+                    dir.mkdirs();
+                    ok[0] = dir.isDirectory() && dir.canWrite();
+                } catch (Throwable ignored) {}
+            });
+            t.setDaemon(true);
+            t.start();
+            try {
+                t.join(3000);
+            } catch (InterruptedException ignored) {}
+            if (!ok[0]) {
+                if (!t.isAlive()) {
+                    call.reject("Sin permiso de escritura en esa carpeta");
+                    return;
+                }
+                Log.w(TAG, "validación de carpeta sin respuesta (3s) — usando modo árbol SAF");
+                t.interrupt();
+                ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
+                ret.put("path", uri.toString());
+                ret.put("treeMode", true);
+            } else {
+                ed.putString("download_dir", path).remove("download_tree").apply();
+                ret.put("path", path);
+                ret.put("treeMode", false);
             }
-            ed.putString("download_dir", path).remove("download_tree").apply();
-            ret.put("path", path);
-            ret.put("treeMode", false);
         } else {
             // Modo SAF: sin acceso a rutas reales — la URI persistida basta
             // para leer/escribir vía ContentResolver.
