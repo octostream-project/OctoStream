@@ -388,8 +388,23 @@ public class TorrentEnginePlugin extends Plugin {
                 call.reject("Este dispositivo no tiene pantalla de permisos de almacenamiento");
                 return;
             }
+            // startActivity normal, SIN activity-result: el canal de resultados
+            // de este plugin no devuelve nada en algunas ROMs (por eso el
+            // picker SAF vive en exoplayer) y la promesa quedaba colgada para
+            // siempre con la UI girando. Se resuelve al abrir los ajustes y JS
+            // re-comprueba el permiso con getDownloadDir al volver a la app.
             try {
-                startActivityForResult(call, chosen, "storageAccessResult");
+                android.app.Activity act = getActivity();
+                if (act != null) {
+                    act.startActivity(chosen);
+                } else {
+                    chosen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(chosen);
+                }
+                JSObject ret = new JSObject();
+                ret.put("opened", true);
+                ret.put("granted", Environment.isExternalStorageManager());
+                call.resolve(ret);
             } catch (Exception e) {
                 call.reject("No se pudo abrir la pantalla de permisos: " + e.getMessage());
             }
@@ -702,8 +717,10 @@ public class TorrentEnginePlugin extends Plugin {
             if ("primary".equalsIgnoreCase(parts[0])) {
                 return new File(Environment.getExternalStorageDirectory(), rel).getAbsolutePath();
             }
-            File vol = new File("/storage/" + parts[0]);
-            if (vol.isDirectory()) return new File(vol, rel).getAbsolutePath();
+            // Do not call exists()/isDirectory() here: a stale SD/USB mount
+            // can block filesystem metadata calls indefinitely, before the
+            // bounded writable-path validation below gets a chance to run.
+            return new File("/storage/" + parts[0], rel).getAbsolutePath();
         } catch (Throwable ignored) {}
         return null;
     }

@@ -6,6 +6,12 @@ import { toast } from './ui/Toast.jsx'
 import Modal from './ui/Modal.jsx'
 import { Play, Trash2, Download, FolderOpen, Loader2, HardDrive, Usb, FolderSearch } from 'lucide-react'
 
+// Una llamada nativa que nunca resuelve no puede dejar la UI girando.
+const withTimeout = (p, ms) => Promise.race([
+  Promise.resolve(p),
+  new Promise(r => setTimeout(() => r(null), ms)),
+])
+
 // Lista de descargas offline (torrent + http): descarga en curso con
 // porcentaje, archivos completados (reproducir/borrar) y selector de la
 // carpeta destino. Se usa en Mi lista → Descargas y en Añadir Enlace.
@@ -15,6 +21,7 @@ export default function DownloadsList() {
   const [dirInfo, setDirInfo] = useState(null)
   const [pickingDir, setPickingDir] = useState(false)
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
+  const [dirPickerMessage, setDirPickerMessage] = useState('')
   const [volumes, setVolumes] = useState(null)
   const listenerRef = useRef(null)
   const canDownload = isAndroidNative() || isElectron()
@@ -127,7 +134,8 @@ export default function DownloadsList() {
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
-      const r = await engine?.setDownloadDirPath?.({ path: vol.path })
+      const r = await withTimeout(engine?.setDownloadDirPath?.({ path: vol.path }), 8000)
+      if (!r) toast.error('El almacenamiento no respondió — prueba con otro volumen')
       if (r?.path) {
         setDirInfo({ path: r.path, custom: true, treeMode: false })
         toast.success('Carpeta de descargas guardada')
@@ -140,19 +148,51 @@ export default function DownloadsList() {
     }
   }
 
+  // Re-comprueba el permiso all-files (al volver de la pantalla de ajustes)
+  // y recarga los volúmenes: con acceso aparece "Descargas del sistema".
+  const recheckStorageAccess = useCallback(async () => {
+    try {
+      const engine = await getTorrentEngine()
+      const dir = await withTimeout(engine?.getDownloadDir?.(), 4000)
+      if (!dir) return false
+      setDirInfo(dir)
+      if (dir.allFilesAccess) {
+        const res = await withTimeout(engine?.downloadVolumes?.(), 6000)
+        setVolumes(res?.volumes || [])
+      }
+      return !!dir.allFilesAccess
+    } catch { return false }
+  }, [])
+
+  const awaitingGrantRef = useRef(false)
+  useEffect(() => {
+    if (!isAndroidNative()) return
+    let handle
+    import('@capacitor/app').then(({ App }) => App.addListener('appStateChange', async ({ isActive }) => {
+      if (!isActive || !awaitingGrantRef.current) return
+      awaitingGrantRef.current = false
+      const ok = await recheckStorageAccess()
+      if (ok) toast.success('Acceso al almacenamiento concedido')
+      else toast('No se concedió el acceso — puedes usar las carpetas de la app o el selector del sistema', 6000)
+    })).then(h => { handle = h }).catch(() => {})
+    return () => { try { handle?.remove?.() } catch { /* noop */ } }
+  }, [recheckStorageAccess])
+
   const handleGrantStorage = async () => {
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
-      const r = await engine?.requestStorageAccess?.()
+      // El nativo resuelve al abrir los ajustes (sin esperar resultado); el
+      // timeout cubre el diálogo runtime de Android <=10 por si no vuelve.
+      const r = await withTimeout(engine?.requestStorageAccess?.(), 8000)
       if (r?.granted) {
+        await recheckStorageAccess()
         toast.success('Acceso al almacenamiento concedido')
-        setDirInfo(d => ({ ...(d || {}), allFilesAccess: true }))
-        // Recargar volúmenes: con all-files aparece "Descargas del sistema".
-        const res = await engine?.downloadVolumes?.()
-        setVolumes(res?.volumes || [])
+      } else if (r?.opened) {
+        awaitingGrantRef.current = true
+        setDirPickerMessage('Activa "Permitir acceso a todos los archivos" para OctoStream y vuelve a la app.')
       } else {
-        toast('No se concedió el acceso — puedes usar igualmente las carpetas de la app o el selector del sistema', 6000)
+        toast('No se pudo abrir la pantalla de permisos — usa las carpetas de la app o el selector del sistema', 6000)
       }
     } catch (e) {
       toast.error(e?.message || 'No se pudo pedir el permiso')
@@ -163,14 +203,23 @@ export default function DownloadsList() {
 
   const handleSafPick = () => {
     setPickingDir(true)
+    setDirPickerMessage('')
     // Si el DocumentsUI del sistema no llega a abrir (algunas ROMs), la
     // promesa queda pendiente para siempre — liberamos el spinner a los
     // 4s y avisamos a los 8s; si el picker abre tarde, la selección se
     // aplica igualmente al resolver.
     let settled = false
-    const unstick = setTimeout(() => { if (!settled) setPickingDir(false) }, 4000)
+    const unstick = setTimeout(() => {
+      if (!settled) {
+        setPickingDir(false)
+        setDirPickerMessage('Si el selector del sistema está abierto, termina allí la selección. Si no llegó a abrirse, prueba un volumen de la lista o vuelve a intentar.')
+      }
+    }, 4000)
     const watchdog = setTimeout(() => {
-      if (!settled) toast('El selector de carpetas del sistema no respondió — si no se abrió, elige un volumen de la lista o permite el acceso al almacenamiento', 7000)
+      if (!settled) {
+        setDirPickerMessage('El selector del sistema aún no devolvió una carpeta. Vuelve a OctoStream y prueba un volumen de la lista o permite el acceso al almacenamiento.')
+        toast('El selector de carpetas del sistema no respondió — elige un volumen de la lista o permite el acceso al almacenamiento', 7000)
+      }
     }, 8000)
     ;(async () => {
       try {
@@ -179,6 +228,7 @@ export default function DownloadsList() {
         const r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
         if (r?.path) {
           setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
+          setDirPickerMessage('')
           toast.success('Carpeta de descargas guardada')
           setDirPickerOpen(false)
         }
@@ -318,6 +368,11 @@ export default function DownloadsList() {
                 )
               })}
             </div>
+          )}
+          {dirPickerMessage && (
+            <p role="status" className="text-amber-300 text-sm mb-3" aria-live="polite">
+              {dirPickerMessage}
+            </p>
           )}
           {!dirInfo?.allFilesAccess && isAndroidNative() && (
             <button onClick={handleGrantStorage} disabled={pickingDir} className="btn-secondary w-full flex items-center justify-center gap-2 text-sm mb-2">

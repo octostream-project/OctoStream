@@ -280,17 +280,20 @@ public class CloudProxyPlugin extends Plugin {
                 mOvpnConn = null; mOvpnApi = null;
             }
         } catch (Exception ignored) {}
-        // Clean up proxy settings when the app is destroyed.
-        // stopAether() does process.waitFor(5s) — running it on the main
-        // thread here would risk an ANR, so the teardown goes to a
-        // background thread and only the proxy-clear posts back to main.
-        new Thread(() -> {
-            if (connected || aetherProcess != null) {
-                disconnect(false);
-            } else {
-                clearAppProxy();
-            }
-        }, "aether-destroy").start();
+        // Capacitor can destroy/recreate its Activity for configuration
+        // changes or while Android backgrounds the app. Do not tear WARP
+        // down in those cases: only stop it when the Activity is actually
+        // finishing (the user explicitly closed the app). Android also
+        // reaps app child processes if it kills the whole process.
+        android.app.Activity activity = getActivity();
+        if (activity != null && activity.isFinishing()) {
+            new Thread(() -> {
+                if (connected || aetherProcess != null) disconnect(false);
+                else clearAppProxy();
+            }, "aether-destroy").start();
+        } else {
+            Log.i(TAG, "Activity destroyed but not finishing; keeping WARP alive");
+        }
         super.handleOnDestroy();
     }
 

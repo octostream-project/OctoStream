@@ -171,11 +171,8 @@ export default function App() {
     startLoadPlan()
   }, [initPlugins])
 
-  // === Battery optimization: pause WARP when app goes to background ===
-  // Aether (WARP) uses CPU + network continuously. When the app is in
-  // background and not playing video, we disconnect WARP to save battery.
-  // When the app returns to foreground, we reconnect if auto-connect is on.
-  const warpPauseTimerRef = useRef(null)
+  // Keep WARP connected while Android backgrounds the app. Reconnect on
+  // resume only if the tunnel or network was actually lost.
   useEffect(() => {
     if (!isAndroidNative()) return
     let paused = false
@@ -183,32 +180,8 @@ export default function App() {
 
     const onPause = () => {
       paused = true
-      const token = ++lifecycleToken
+      lifecycleToken++
       console.log('[App] App paused (background)')
-      // Don't pause immediately — user might just be switching apps briefly.
-      // Wait 30s before disconnecting WARP (unless video is playing).
-      if (warpPauseTimerRef.current) clearTimeout(warpPauseTimerRef.current)
-      warpPauseTimerRef.current = setTimeout(async () => {
-        warpPauseTimerRef.current = null
-        if (!paused || token !== lifecycleToken) return
-        try {
-          const s = await CloudProxy.getStatus()
-          // The app may have resumed while getStatus() was in flight. Never
-          // disconnect a foreground session because of stale background work.
-          if (!paused || token !== lifecycleToken) return
-          // Stop Aether even if its tunnel already failed while the app was
-          // backgrounded. getStatus() can be false while libaether.so keeps
-          // retrying every few seconds, which wastes CPU and battery.
-          console.log('[App] Disconnecting WARP (battery save, keeping dead proxy; connected=' + !!s.connected + ')')
-          // Reset ready state so waitForWarp() blocks on next foreground
-          resetWarpReady()
-          // Keep the proxy pointing at the dead local port so requests fail
-          // instead of falling back to the real IP during the sleep period.
-          await CloudProxy.disconnectBackground()
-        } catch (e) {
-          console.warn('[App] Background WARP disconnect failed:', e?.message)
-        }
-      }, 30000) // 30s delay
     }
 
     const onResume = async () => {
@@ -218,17 +191,8 @@ export default function App() {
       // Recalentar las cachés si el plan lleva >10 min sin correr (las de
       // deportes caducan en minutos). No-op si está corriendo o es reciente.
       startLoadPlan()
-      // Cancel pending disconnect
-      if (warpPauseTimerRef.current) {
-        clearTimeout(warpPauseTimerRef.current)
-        warpPauseTimerRef.current = null
-      }
       if (localStorage.getItem('octostream_warp_autoconnect') === 'false') {
         setWarpBlocking(false)
-        // If the app went to background with WARP connected and autoconnect
-        // was later disabled, onPause still called disconnectBackground()
-        // which keeps the proxy pointing at a dead port. Clear it now so
-        // requests go direct instead of failing forever against 127.0.0.1:1820.
         try {
           const s = await CloudProxy.getStatus()
           if (token !== lifecycleToken || paused) return
@@ -288,7 +252,6 @@ export default function App() {
     })
 
     return () => {
-      if (warpPauseTimerRef.current) clearTimeout(warpPauseTimerRef.current)
       pauseListener.then(listener => listener.remove()).catch(() => {})
     }
   }, [])

@@ -3778,6 +3778,7 @@ public class ExoPlayerPlugin extends Plugin {
         displayedSeason = season > 0 ? season : firstEpisodeSeason(episodes);
         externalSubUrl = null;
         externalSubMime = null;
+        clearExternalCues();
         pendingSelectExternalSub = false;
         playerMode = mode != null ? mode : "vod";
         // Una lista de canales solo se envía para Live TV. Esto mantiene el
@@ -6405,6 +6406,7 @@ public class ExoPlayerPlugin extends Plugin {
                 // Al hacer zapping el subtítulo externo ya no aplica.
                 externalSubUrl = null;
                 externalSubMime = null;
+                clearExternalCues();
                 pendingSelectExternalSub = false;
                 lastDataSourceFactory = dsFactory;
                 lastStreamType = streamType;
@@ -7252,6 +7254,7 @@ public class ExoPlayerPlugin extends Plugin {
                 searchOpenSubtitlesOnline();
                 return;
             }
+            clearExternalCues();
             TrackSelectionParameters.Builder parameters = player.getTrackSelectionParameters().buildUpon()
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT);
             if (selected == 0) {
@@ -7400,39 +7403,126 @@ public class ExoPlayerPlugin extends Plugin {
                         new String[]{"No se pudo descargar el subtítulo"}, 0, s -> {}));
                 return;
             }
-            final String finalUri = dataUri;
-            final String finalMime = mime;
-            mainHandler.post(() -> applyExternalSubtitleData(finalUri, finalMime, langIso));
+            final List<long[]> times = new ArrayList<>();
+            final List<String> texts = new ArrayList<>();
+            try {
+                parseSubtitleCues(new String(android.util.Base64.decode(
+                        dataUri.substring(dataUri.indexOf(',') + 1), android.util.Base64.NO_WRAP),
+                        java.nio.charset.StandardCharsets.UTF_8), times, texts);
+            } catch (Exception ignored) {}
+            if (times.isEmpty()) {
+                mainHandler.post(() -> showInPlayerMenu("OpenSubtitles",
+                        new String[]{"Subtítulo vacío o formato no soportado"}, 0, s -> {}));
+                return;
+            }
+            mainHandler.post(() -> applyExternalCues(times, texts));
         }).start();
     }
 
-    private void applyExternalSubtitleData(String dataUri, String mime, String langIso) {
-        if (player == null) return;
-        externalSubUrl = dataUri;
-        externalSubMime = mime;
-        externalSubLang = langIso;
-        pendingSelectExternalSub = true;
-        externalSubSelectTries = 0;
-        try {
-            MediaSource src = buildMediaSource(currentUrl, lastStreamType,
-                    lastDataSourceFactory, lastDrmSessionManager, lastLicenseUrl);
-            lastMediaSource = src;
-            boolean wasPlaying = player.getPlayWhenReady();
-            // setMediaSource puede resetear el volumen a 0 — guardarlo y
-            // restaurarlo tras prepare() (igual que en switchChannel).
-            float savedVolume = player.getVolume();
-            if ("live".equals(playerMode)) {
-                player.setMediaSource(src);
-            } else {
-                long pos = player.getCurrentPosition();
-                player.setMediaSource(src, Math.max(0, pos));
+    // Subtítulo externo pintado por nosotros sobre el SubtitleView del player.
+    // Antes se reconstruía el MediaSource (setMediaSource+prepare) para meter
+    // el .srt como pista: eso re-bufferiza el vídeo entero y con streams
+    // debrid/torrent se quedaba pausado sin poder reanudar. Ahora la
+    // reproducción no se toca: un ticker sincroniza los cues con la posición.
+    private List<long[]> extCueTimes = null;
+    private List<String> extCueTexts = null;
+    private int extCueShown = -2;
+    private final Runnable extSubTicker = new Runnable() {
+        @Override public void run() {
+            if (player == null || extCueTimes == null) return;
+            // Offset positivo = el subtítulo aparece más tarde.
+            long pos = player.getCurrentPosition() - subtitleOffsetUs / 1000L;
+            int idx = -1;
+            for (int i = 0; i < extCueTimes.size(); i++) {
+                long[] t = extCueTimes.get(i);
+                if (pos >= t[0] && pos < t[1]) { idx = i; break; }
+                if (t[0] > pos) break;
             }
-            player.prepare();
-            if (savedVolume > 0f) player.setVolume(savedVolume);
-            if (wasPlaying) player.play();
-        } catch (Exception e) {
-            Log.e(TAG, "applyExternalSubtitle failed: " + e.getMessage());
+            if (idx != extCueShown) {
+                extCueShown = idx;
+                androidx.media3.ui.SubtitleView sv = playerView != null ? playerView.getSubtitleView() : null;
+                if (sv != null) {
+                    List<androidx.media3.common.text.Cue> cues = new ArrayList<>();
+                    if (idx >= 0) {
+                        cues.add(new androidx.media3.common.text.Cue.Builder()
+                                .setText(extCueTexts.get(idx)).build());
+                    }
+                    sv.setCues(cues);
+                }
+            }
+            mainHandler.postDelayed(this, 200);
         }
+    };
+
+    private void applyExternalCues(List<long[]> times, List<String> texts) {
+        if (player == null) return;
+        // Silenciar las pistas de texto internas para que no pisen los cues.
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build());
+        extCueTimes = times;
+        extCueTexts = texts;
+        extCueShown = -2;
+        mainHandler.removeCallbacks(extSubTicker);
+        mainHandler.post(extSubTicker);
+        Log.i(TAG, "External subtitle overlay active (" + times.size() + " cues)");
+    }
+
+    private void clearExternalCues() {
+        mainHandler.removeCallbacks(extSubTicker);
+        boolean had = extCueTimes != null;
+        extCueTimes = null;
+        extCueTexts = null;
+        extCueShown = -2;
+        if (had && playerView != null && playerView.getSubtitleView() != null) {
+            playerView.getSubtitleView().setCues(new ArrayList<>());
+        }
+    }
+
+    private static final java.util.regex.Pattern CUE_TIME = java.util.regex.Pattern.compile(
+            "((?:\\d+:)?\\d{1,2}:\\d{2}[,.]\\d{1,3})\\s*-->\\s*((?:\\d+:)?\\d{1,2}:\\d{2}[,.]\\d{1,3})");
+
+    // SRT y WebVTT: bloques separados por línea en blanco con "a --> b".
+    // Quita etiquetas <i>/<font>/{\an8} — el SubtitleView pinta texto plano.
+    private static void parseSubtitleCues(String text, List<long[]> times, List<String> texts) {
+        String[] blocks = text.replace("\r\n", "\n").replace('\r', '\n').split("\n\\s*\n");
+        for (String block : blocks) {
+            String[] lines = block.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                java.util.regex.Matcher m = CUE_TIME.matcher(lines[i]);
+                if (!m.find()) continue;
+                StringBuilder sb = new StringBuilder();
+                for (int j = i + 1; j < lines.length; j++) {
+                    String l = lines[j].replaceAll("<[^>]*>", "").replaceAll("\\{[^}]*\\}", "").trim();
+                    if (l.isEmpty()) continue;
+                    if (sb.length() > 0) sb.append('\n');
+                    sb.append(l);
+                }
+                if (sb.length() > 0) {
+                    times.add(new long[]{ cueMs(m.group(1)), cueMs(m.group(2)) });
+                    texts.add(sb.toString());
+                }
+                break;
+            }
+        }
+        // Orden por inicio: el ticker corta la búsqueda en cuanto pasa la posición.
+        Integer[] order = new Integer[times.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        java.util.Arrays.sort(order, (a, b) -> Long.compare(times.get(a)[0], times.get(b)[0]));
+        List<long[]> t2 = new ArrayList<>();
+        List<String> x2 = new ArrayList<>();
+        for (Integer o : order) { t2.add(times.get(o)); x2.add(texts.get(o)); }
+        times.clear(); times.addAll(t2);
+        texts.clear(); texts.addAll(x2);
+    }
+
+    private static long cueMs(String s) {
+        String[] p = s.replace(',', '.').split(":");
+        double secs = Double.parseDouble(p[p.length - 1]);
+        long mins = Long.parseLong(p[p.length - 2]);
+        long hours = p.length > 2 ? Long.parseLong(p[0]) : 0;
+        return (long) ((hours * 3600 + mins * 60) * 1000 + secs * 1000);
     }
 
     // El addon devuelve ISO-639-2 (spa, eng…); Media3 espera ISO-639-1.
@@ -9116,6 +9206,7 @@ public class ExoPlayerPlugin extends Plugin {
         controlsSeeking = false;
         mainHandler.removeCallbacks(hideControlsRunnable);
         mainHandler.removeCallbacks(controlsTickRunnable);
+        clearExternalCues();
         volumeSeek = null;
         volumePopup = null;
         speedLabel = null;
