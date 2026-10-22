@@ -1429,7 +1429,7 @@ export default function Settings() {
                   {aioTest.ok ? <Check size={16} className="flex-shrink-0 mt-0.5" /> : <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />}
                   <span>
                     {aioTest.ok
-                      ? `Conexión correcta — ${aioTest.results} fuente${aioTest.results === 1 ? '' : 's'} encontrada${aioTest.results === 1 ? '' : 's'}`
+                      ? `Conexión correcta — ${aioTest.results} fuente${aioTest.results === 1 ? '' : 's'} encontrada${aioTest.results === 1 ? '' : 's'}${aioTest.hint || ''}`
                       : aioTest.error}
                   </span>
                 </div>

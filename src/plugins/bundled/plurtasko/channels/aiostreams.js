@@ -35,12 +35,13 @@ export const AIO_KEYS = {
   manifest: 'octostream_aiostreams_manifest',
 }
 
-// Acepta la URL de manifest completa (…/manifest.json) o la base
-// (…/stremio/<uuid>/<config>) y devuelve la base de streams.
+// Acepta la URL de manifest (…/manifest.json), la de configuración
+// (…/configure) o la base (…/stremio/<uuid>/<config>) — devuelve la base
+// de streams. Rechaza URLs que no llevan el segmento /stremio/.
 export function manifestStreamBase(url) {
   const u = String(url || '').trim().replace(/\/+$/, '')
   if (!u) return ''
-  const base = u.replace(/\/manifest\.json(\?.*)?$/i, '')
+  const base = u.replace(/\/(manifest\.json|configure|stream)(\?.*)?$/i, '')
   return /\/stremio\//i.test(base) ? base : ''
 }
 
@@ -67,14 +68,41 @@ export async function testAiostreamsConnection({ instance, uuid, password, manif
 
   if (man) {
     try {
-      const text = await withTimeout(
-        httpGetText(`${man}/stream/movie/tt0137523.json`),
-        TIMEOUT_MS,
-        'aiostreams timeout'
-      )
+      // 1) El manifest declara qué recursos sirve la config — si no hay
+      //    'stream', la URL no es de un addon de streams o está mal pegada.
+      const manText = await withTimeout(httpGetText(`${man}/manifest.json`), TIMEOUT_MS, 'aiostreams timeout')
+      let manJson = null
+      try { manJson = JSON.parse(manText) } catch { /* no-JSON */ }
+      if (!manJson || !Array.isArray(manJson.resources)) {
+        return { ok: false, error: 'La URL no es un manifest válido (debe acabar en /manifest.json)' }
+      }
+      const servesStreams = manJson.resources.some(r => (r.name || r) === 'stream')
+      if (!servesStreams) {
+        return { ok: false, error: 'Este manifest no sirve streams — revisa tu configuración en /stremio/configure' }
+      }
+
+      // 2) Sonda real con 2 títulos muy populares — si ambos dan 0 la
+      //    config existe pero sus providers/filtros no devuelven nada.
+      //    Un JSON cortado (proxy/WARP trunca respuestas grandes) NO debe
+      //    contar como "0 fuentes": es un error de transporte.
       let results = 0
-      try { results = JSON.parse(text)?.streams?.length ?? 0 } catch { /* no-JSON */ }
-      return { ok: true, results }
+      for (const id of ['tt0137523', 'tt0468569']) {
+        const text = await withTimeout(
+          httpGetText(`${man}/stream/movie/${id}.json`),
+          TIMEOUT_MS,
+          'aiostreams timeout'
+        )
+        let json = null
+        try { json = JSON.parse(text) } catch { /* cortado/no-JSON */ }
+        if (!json || !Array.isArray(json.streams)) {
+          return { ok: false, error: 'La respuesta llegó incompleta o no es JSON — si tienes VPN/WARP activa, prueba con ella apagada' }
+        }
+        results += json.streams.length
+      }
+      const hint = results === 0
+        ? ' — la conexión funciona pero tu config no devuelve fuentes; revisa providers activados y filtros en /stremio/configure'
+        : ''
+      return { ok: true, results, hint }
     } catch (e) {
       return { ok: false, error: diagError(e) }
     }
@@ -132,11 +160,23 @@ export const aiostreams = {
     const id = isSeries ? `${imdbId}:${season || 1}:${episode || 1}` : imdbId
 
     if (cfg.manifest) {
-      const data = await withTimeout(
-        safeFetchJson(`${cfg.manifest}/stream/${stremioType}/${encodeURIComponent(id)}.json`, {}, signal),
+      const endpoint = `${cfg.manifest}/stream/${stremioType}/${encodeURIComponent(id)}.json`
+      // Las respuestas de AIOStreams son grandes (MBs con muchos addons) —
+      // por WARP/proxy pueden llegar truncadas, así que un null reintenta
+      // una vez antes de rendirse.
+      let data = await withTimeout(
+        safeFetchJson(endpoint, {}, signal),
         TIMEOUT_MS,
         'aiostreams timeout'
       )
+      if (!data && !signal?.aborted) {
+        data = await withTimeout(
+          safeFetchJson(endpoint, {}, signal),
+          TIMEOUT_MS,
+          'aiostreams timeout'
+        )
+      }
+      if (!data) console.warn(`[aiostreams] stream fetch failed or truncated for ${id}`)
       const list = Array.isArray(data?.streams) ? data.streams : []
       return list.map(stremioToStream).filter(Boolean)
     }
