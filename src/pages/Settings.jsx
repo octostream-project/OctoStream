@@ -12,7 +12,8 @@ import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/a
 import { refreshWarpStatus, subscribeWarpStatus } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
-import { exportSettings, importSettings } from '../utils/configBackup.js'
+import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
+import { setItemSync, removeItemSync } from '../utils/storage.js'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -44,6 +45,7 @@ export default function Settings() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
   const [backupMsg, setBackupMsg] = useState('')
+  const [backupCats, setBackupCats] = useState(() => Object.fromEntries(BACKUP_CATEGORIES.map(c => [c.id, true])))
 
   // Móvil: las pestañas horizontales quedan mal en pantallas estrechas —
   // se usa un menú de secciones (lista vertical) con vista de detalle.
@@ -307,14 +309,14 @@ export default function Settings() {
 
   const handleAioSave = () => {
     const inst = aioInstance.trim().replace(/\/+$/, '')
-    if (inst) localStorage.setItem('octostream_aiostreams_instance', inst)
-    else localStorage.removeItem('octostream_aiostreams_instance')
-    if (aioUuid.trim()) localStorage.setItem('octostream_aiostreams_uuid', aioUuid.trim())
-    else localStorage.removeItem('octostream_aiostreams_uuid')
-    if (aioPass) localStorage.setItem('octostream_aiostreams_password', aioPass)
-    else localStorage.removeItem('octostream_aiostreams_password')
-    if (aioManifest.trim()) localStorage.setItem('octostream_aiostreams_manifest', aioManifest.trim())
-    else localStorage.removeItem('octostream_aiostreams_manifest')
+    if (inst) setItemSync('octostream_aiostreams_instance', inst)
+    else removeItemSync('octostream_aiostreams_instance')
+    if (aioUuid.trim()) setItemSync('octostream_aiostreams_uuid', aioUuid.trim())
+    else removeItemSync('octostream_aiostreams_uuid')
+    if (aioPass) setItemSync('octostream_aiostreams_password', aioPass)
+    else removeItemSync('octostream_aiostreams_password')
+    if (aioManifest.trim()) setItemSync('octostream_aiostreams_manifest', aioManifest.trim())
+    else removeItemSync('octostream_aiostreams_manifest')
     setAioSaved(true)
     setTimeout(() => setAioSaved(false), 2000)
   }
@@ -1701,9 +1703,29 @@ export default function Settings() {
               <div>
                 <h3 className="text-white font-bold">Copia de seguridad</h3>
                 <p className="text-dark-400 text-sm">
-                  Favoritos, historial, ajustes y claves en un archivo JSON
+                  Elige qué incluir en el archivo JSON
                 </p>
               </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {BACKUP_CATEGORIES.map(cat => (
+                <label
+                  key={cat.id}
+                  data-tv-card
+                  tabIndex={0}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setBackupCats(c => ({ ...c, [cat.id]: !c[cat.id] })) } }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none text-sm transition-colors ${backupCats[cat.id] ? 'bg-primary-600/20 border-primary-500 text-white' : 'bg-dark-900 border-dark-700 text-dark-400'}`}
+                >
+                  <input
+                    type="checkbox"
+                    tabIndex={-1}
+                    checked={backupCats[cat.id]}
+                    onChange={() => setBackupCats(c => ({ ...c, [cat.id]: !c[cat.id] }))}
+                    className="accent-primary-500"
+                  />
+                  {cat.label}
+                </label>
+              ))}
             </div>
             <div className="flex flex-wrap gap-3">
               <button
@@ -1712,7 +1734,9 @@ export default function Settings() {
                 onClick={async () => {
                   setBackupMsg('')
                   try {
-                    const ok = await exportSettings()
+                    const cats = BACKUP_CATEGORIES.filter(c => backupCats[c.id]).map(c => c.id)
+                    if (!cats.length) { setBackupMsg('Marca al menos una sección'); return }
+                    const ok = await exportSettings(cats)
                     setBackupMsg(ok ? 'Copia guardada' : '')
                   } catch (e) {
                     setBackupMsg(`No se pudo exportar: ${e?.message || 'error'}`)
@@ -1728,7 +1752,9 @@ export default function Settings() {
                 onClick={async () => {
                   setBackupMsg('')
                   try {
-                    const n = await importSettings()
+                    const cats = BACKUP_CATEGORIES.filter(c => backupCats[c.id]).map(c => c.id)
+                    if (!cats.length) { setBackupMsg('Marca al menos una sección'); return }
+                    const n = await importSettings(cats)
                     setBackupMsg(n > 0 ? `Restauradas ${n} claves — reinicia la app para aplicarlo todo` : '')
                   } catch (e) {
                     setBackupMsg(e?.message || 'No se pudo importar')

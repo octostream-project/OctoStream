@@ -70,6 +70,14 @@ const SYNCED_KEYS = [
   'octostream_recent_searches',
   'octostream_tdspain_cache',
   'octostream_youtube_search_history',
+  'octostream_alldebrid_key',
+  'octostream_aiostreams_instance',
+  'octostream_aiostreams_uuid',
+  'octostream_aiostreams_password',
+  'octostream_aiostreams_manifest',
+  'octostream_warp_autoconnect',
+  'octostream_riseup_autoconnect',
+  'octostream_torrent_search',
 ]
 
 export async function getItem(key) {

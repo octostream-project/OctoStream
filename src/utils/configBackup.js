@@ -1,8 +1,9 @@
-// Backup de configuración: exporta todas las claves octostream_* de
-// localStorage a un JSON (favoritos, historial, ajustes, claves debrid/TMDB,
-// tokens de emparejamiento LAN, posiciones de archivos locales…) y las
-// restaura desde otro backup. En Android va por SAF (Guardar como / Abrir);
-// en web/Electron cae a descarga por blob + <input type=file>.
+// Backup de configuración: exporta claves octostream_* de localStorage a un
+// JSON (favoritos, historial, ajustes, claves debrid/TMDB, tokens de
+// emparejamiento LAN, posiciones de archivos locales…) y las restaura desde
+// otro backup. El usuario elige qué secciones incluir/restaurar.
+// En Android va por SAF (Guardar como / Abrir); en web/Electron cae a
+// descarga por blob + <input type=file>.
 
 import { isAndroidNative } from './platform.js'
 import { ExoPlayer } from '@octostream/exo-player'
@@ -10,28 +11,91 @@ import { ExoPlayer } from '@octostream/exo-player'
 const PREFIX = 'octostream_'
 const BACKUP_NAME = 'octostream-backup.json'
 
-function collectSettings() {
+// Secciones seleccionables del backup. `keys` casa exacto; `prefixes` casa
+// por prefijo (posiciones localpos_<ruta>, credenciales aiostreams_*/trakt_*).
+// Lo que no encaje en ninguna sección cae en 'settings'.
+export const BACKUP_CATEGORIES = [
+  {
+    id: 'lists',
+    label: 'Favoritos y Mi lista',
+    keys: ['octostream_favorites', 'octostream_watchlist'],
+    prefixes: [],
+  },
+  {
+    id: 'history',
+    label: 'Historial y progreso',
+    keys: [
+      'octostream_history',
+      'octostream_watched_episodes',
+      'octostream_search_history',
+      'octostream_recent_searches',
+      'octostream_youtube_search_history',
+      'octostream_youtube_live_search_history',
+    ],
+    prefixes: ['octostream_localpos_'],
+  },
+  {
+    id: 'accounts',
+    label: 'Cuentas y claves',
+    keys: [
+      'octostream_alldebrid_key',
+      'octostream_tmdb_key',
+      'octostream_opensubs_apikey',
+      'octostream_mdblist_key',
+      'octostream_hdfull_username',
+      'octostream_hdfull_password',
+      'octostream_pair_tokens',
+    ],
+    prefixes: ['octostream_aiostreams_', 'octostream_trakt_'],
+  },
+  {
+    id: 'settings',
+    label: 'Ajustes de la app',
+    keys: [],
+    prefixes: [],
+  },
+]
+
+export const ALL_CATEGORIES = BACKUP_CATEGORIES.map(c => c.id)
+
+function categoryOf(key) {
+  for (const cat of BACKUP_CATEGORIES) {
+    if (cat.id === 'settings') continue
+    if (cat.keys.includes(key)) return cat.id
+    if (cat.prefixes.some(p => key.startsWith(p))) return cat.id
+  }
+  return 'settings'
+}
+
+function collectSettings(categories) {
+  const wanted = categories ? new Set(categories) : null
   const settings = {}
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)
-    if (k?.startsWith(PREFIX)) settings[k] = localStorage.getItem(k)
+    if (!k?.startsWith(PREFIX)) continue
+    if (wanted && !wanted.has(categoryOf(k))) continue
+    settings[k] = localStorage.getItem(k)
   }
   return settings
 }
 
-function buildBackup() {
+function buildBackup(categories) {
   return JSON.stringify({
     app: 'octostream',
     kind: 'settings-backup',
     version: 1,
+    sections: categories || ALL_CATEGORIES,
     exportedAt: new Date().toISOString(),
-    settings: collectSettings(),
+    settings: collectSettings(categories),
   }, null, 2)
 }
 
-/** Exporta la configuración. Devuelve true si el usuario completó el guardado. */
-export async function exportSettings() {
-  const content = buildBackup()
+/**
+ * Exporta la configuración. `categories` limita las secciones incluidas
+ * (por defecto todas). Devuelve true si el usuario completó el guardado.
+ */
+export async function exportSettings(categories = null) {
+  const content = buildBackup(categories)
   if (isAndroidNative()) {
     try {
       const r = await ExoPlayer.exportConfig({ filename: BACKUP_NAME, content })
@@ -72,10 +136,11 @@ function readBackupText() {
 }
 
 /**
- * Importa una configuración desde un backup. Devuelve el nº de claves
+ * Importa una configuración desde un backup. `categories` limita qué
+ * secciones se restauran (por defecto todas). Devuelve el nº de claves
  * restauradas, 0 si el usuario canceló. Lanza si el JSON no es un backup.
  */
-export async function importSettings() {
+export async function importSettings(categories = null) {
   let text
   try {
     text = await readBackupText()
@@ -90,9 +155,11 @@ export async function importSettings() {
   if (data?.app !== 'octostream' || data?.kind !== 'settings-backup' || typeof data.settings !== 'object' || !data.settings) {
     throw new Error('El archivo no es una copia de OctoStream')
   }
+  const wanted = categories ? new Set(categories) : null
   let count = 0
   for (const [k, v] of Object.entries(data.settings)) {
     if (!k.startsWith(PREFIX) || typeof v !== 'string') continue
+    if (wanted && !wanted.has(categoryOf(k))) continue
     localStorage.setItem(k, v)
     count++
   }
