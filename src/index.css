@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 @config "../tailwind.config.js";
 
 :root {
@@ -9,6 +10,20 @@ html, body, #root {
   height: 100%;
   min-height: 100%;
   background: #020617;
+}
+
+body {
+  font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Indicador de foco por teclado fuera del modo TV (a11y). En .tv-mode ya
+   existe el estilo propio de foco con escala+halo, que gana por !important. */
+:is(button, a[href], [tabindex], .card):focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 10px;
 }
 
 * {

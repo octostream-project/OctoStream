@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import { searchMulti } from '../plugins/builtIn/tmdb.js'
 import ContentCard from '../components/ContentCard.jsx'
-import { Search as SearchIcon, X, Film, Tv, Radio, Layers, Clock, Trash2 } from 'lucide-react'
+import { Search as SearchIcon, SearchX, X, Film, Tv, Radio, Layers, Clock, Trash2 } from 'lucide-react'
 import { getJsonSync, setJsonSync } from '../utils/storage.js'
-import OctoLoader from '../components/OctoLoader.jsx'
-import LogoLoader from '../components/LogoLoader.jsx'
+import MediaGrid from '../components/ui/MediaGrid.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
+import { SkeletonGrid } from '../components/ui/SkeletonCard.jsx'
 
 const FILTERS = [
   { id: 'all', label: 'Todo', icon: Layers },
@@ -335,15 +336,11 @@ export default function SearchPage() {
       )}
 
       {loading && searchResults.length === 0 && (
-        <div className="flex items-center justify-center py-20">
-          <LogoLoader size={64} />
-        </div>
+        <SkeletonGrid />
       )}
 
       {!loading && input && searchResults.length === 0 && (
-        <div className="text-center py-20">
-          <p className="text-dark-400 text-lg">No se encontraron resultados para "{input}"</p>
-        </div>
+        <EmptyState icon={SearchX}>No se encontraron resultados para "{input}"</EmptyState>
       )}
 
       {searchResults.length > 0 && activeFilter === 'all' && (
@@ -359,11 +356,11 @@ export default function SearchPage() {
                   <h2 className="text-lg font-bold text-white">{typeLabels[type] || type}</h2>
                   <span className="text-xs text-dark-500 bg-dark-800 px-2 py-0.5 rounded-full">{items.length}</span>
                 </div>
-                <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                <MediaGrid>
                   {items.map(item => (
                     <ContentCard key={`${item.type}-${item.id}`} item={item} />
                   ))}
-                </div>
+                </MediaGrid>
               </div>
             )
           })}
@@ -375,19 +372,16 @@ export default function SearchPage() {
           <p className="text-dark-400 text-sm mb-4">
             {filteredResults.length} resultado{filteredResults.length !== 1 ? 's' : ''}
           </p>
-          <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <MediaGrid>
             {filteredResults.map(item => (
               <ContentCard key={`${item.type}-${item.id}`} item={item} />
             ))}
-          </div>
+          </MediaGrid>
         </>
       )}
 
       {!loading && !input && !recentSearches.length && (
-        <div className="text-center py-20">
-          <SearchIcon className="mx-auto text-dark-600 mb-4" size={48} />
-          <p className="text-dark-400 text-lg">Escribe para buscar contenido</p>
-        </div>
+        <EmptyState icon={SearchIcon}>Escribe para buscar contenido</EmptyState>
       )}
     </div>
   )

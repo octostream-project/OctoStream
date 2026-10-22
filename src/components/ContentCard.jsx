@@ -65,7 +65,7 @@ function Poster({ item }) {
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={handleError}
-      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-focus:scale-110"
     />
   )
 }
@@ -114,8 +114,8 @@ function ContentCard({ item }) {
             )}
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-        <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-300" />
+        <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-300">
           <div className="flex items-center justify-center bg-primary-600 rounded-lg py-2 text-sm font-medium">
             <Play size={16} className="mr-1" /> Ver ahora
           </div>
@@ -130,14 +130,14 @@ function ContentCard({ item }) {
       <div className="p-2">
         <h3 className="text-xs font-medium text-white truncate">{item.name}</h3>
         {item.nowPlaying ? (
-          <p className="text-[10px] text-primary-400 truncate mt-0.5" title={item.nowPlaying}>
-            ▶ {item.nowPlaying}
+          <p className="text-xs text-primary-400 truncate mt-0.5 flex items-center gap-1" title={item.nowPlaying}>
+            <Play size={10} className="flex-shrink-0 fill-primary-400" /> {item.nowPlaying}
           </p>
         ) : (
           <div className="flex items-center justify-between mt-0.5">
-            <span className="text-[10px] text-dark-400">{item.year || ''}</span>
+            <span className="text-xs text-dark-400">{item.year || ''}</span>
             {item.genres && item.genres.length > 0 && (
-              <span className="text-[10px] text-dark-500 truncate ml-1">{item.genres[0]}</span>
+              <span className="text-xs text-dark-500 truncate ml-1">{item.genres[0]}</span>
             )}
           </div>
         )}

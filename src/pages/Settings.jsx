@@ -119,6 +119,12 @@ export default function Settings() {
   const [hdfullTesting, setHdfullTesting] = useState(false)
   const [hdfullTestResult, setHdfullTestResult] = useState('') // 'ok' | 'fail' | ''
 
+  // AIOStreams (agregador tipo POV/Stremio: uuid + password por Basic auth)
+  const [aioInstance, setAioInstance] = useState(localStorage.getItem('octostream_aiostreams_instance') || 'https://aiostreams.elfhosted.com')
+  const [aioUuid, setAioUuid] = useState(localStorage.getItem('octostream_aiostreams_uuid') || '')
+  const [aioPass, setAioPass] = useState(localStorage.getItem('octostream_aiostreams_password') || '')
+  const [aioSaved, setAioSaved] = useState(false)
+
   // Clear PIN polling interval on unmount
   useEffect(() => {
     return () => {
@@ -295,6 +301,18 @@ export default function Settings() {
     else localStorage.setItem('octostream_alldebrid_key', key)
     setAdSaved(true)
     setTimeout(() => setAdSaved(false), 2000)
+  }
+
+  const handleAioSave = () => {
+    const inst = aioInstance.trim().replace(/\/+$/, '')
+    if (inst) localStorage.setItem('octostream_aiostreams_instance', inst)
+    else localStorage.removeItem('octostream_aiostreams_instance')
+    if (aioUuid.trim()) localStorage.setItem('octostream_aiostreams_uuid', aioUuid.trim())
+    else localStorage.removeItem('octostream_aiostreams_uuid')
+    if (aioPass) localStorage.setItem('octostream_aiostreams_password', aioPass)
+    else localStorage.removeItem('octostream_aiostreams_password')
+    setAioSaved(true)
+    setTimeout(() => setAioSaved(false), 2000)
   }
 
   // --- AllDebrid PIN flow ---
@@ -1328,11 +1346,84 @@ export default function Settings() {
           </div>
 
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="text-white font-bold">AIOStreams</h3>
+                <p className="text-dark-400 text-sm mt-1">
+                  Agregador de fuentes (providers + debrid) por IMDb — como el addon POV de Kodi
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={aioInstance}
+                onChange={e => setAioInstance(e.target.value)}
+                placeholder="https://aiostreams.elfhosted.com"
+                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+              />
+              <input
+                type="text"
+                value={aioUuid}
+                onChange={e => setAioUuid(e.target.value)}
+                placeholder="UUID"
+                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+              />
+              <input
+                type="password"
+                value={aioPass}
+                onChange={e => setAioPass(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAioSave()}
+                placeholder="Contraseña"
+                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+              />
+              {aioSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm">
+                  <Check size={16} />
+                  Guardado
+                </div>
+              )}
+              <button
+                onClick={handleAioSave}
+                className="w-full bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-lg px-4 py-3 transition-colors"
+              >
+                Guardar AIOStreams
+              </button>
+            </div>
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo configurarlo?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>
+                  Abre{' '}
+                  <a href={`${aioInstance.trim() || 'https://aiostreams.elfhosted.com'}/stremio/configure`} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300">
+                    {aioInstance.trim() || 'https://aiostreams.elfhosted.com'}/stremio/configure
+                    <ExternalLink size={12} className="inline ml-1" />
+                  </a>
+                </li>
+                <li>Activa los providers que quieras (en español: Torrentio ES, MediaFusion…)</li>
+                <li>Crea tu UUID y contraseña y pégalos arriba</li>
+              </ol>
+            </div>
+          </div>
+
+          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">AllDebrid API Key</span>
                 {localStorage.getItem('octostream_alldebrid_key') ? (
+                  <span className="flex items-center gap-1 text-green-400">
+                    <Check size={14} /> Configurada
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-dark-500">
+                    <AlertCircle size={14} /> No configurada
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-dark-400">AIOStreams (UUID + contraseña)</span>
+                {localStorage.getItem('octostream_aiostreams_uuid') && localStorage.getItem('octostream_aiostreams_password') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>

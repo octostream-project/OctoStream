@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
+    "@fontsource-variable/inter": "^5.3.0",
     "@octostream/cloud-proxy": "file:capacitor-plugins/cloud-proxy",
     "@octostream/exo-player": "file:capacitor-plugins/exoplayer",
     "@octostream/palantir": "file:capacitor-plugins/palantir",

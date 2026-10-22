@@ -45,12 +45,15 @@ import { grantorrent } from './channels/grantorrent.js'
 import { subtorrents } from './channels/subtorrents.js'
 import { bloghorror } from './channels/bloghorror.js'
 import { torrentio } from './channels/torrentio.js'
+import { estrenoscinesaa } from './channels/estrenoscinesaa.js'
+import { cinemitas } from './channels/cinemitas.js'
+import { aiostreams, aiostreamsConfig } from './channels/aiostreams.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
 // doramedplay excluido: el sitio pasó a ser 100% VIP (páginas de contenido
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
-const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror]
+const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas]
 
 // Canales caídos (auditoría oct/2026): fuera del registro activo para que no
 // consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
@@ -1476,7 +1479,36 @@ export const plurtaskoFactory = (config) => {
           }
         })()
 
-        await Promise.all([...channelPromises, torrentioPromise])
+        // AIOStreams: la instancia del usuario agrega providers + debrid
+        // (misma API que el addon POV de Kodi). Solo corre con uuid+password
+        // configurados en Ajustes → Debrid.
+        const aioPromise = (async () => {
+          if (!tmdbId || !aiostreamsConfig().enabled) return
+          try {
+            if (imdbId === null) imdbId = await imdbIdPromise
+            if (!imdbId) return
+            const rawStreams = await aiostreams.getStreamsByImdb({ imdbId, type, season, episode })
+            if (!rawStreams.length) return
+            const tagAio = (s) => ({ ...s, _channelId: 'aiostreams' })
+            const aioOnBatch = onBatch ? (batch) => {
+              allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
+              allStreams = allStreams.concat(batch.map(tagAio))
+              allStreams = dedupeTorrentStreams(allStreams)
+              onBatch(sortHdfull(allStreams))
+            } : null
+            const resolved = await resolveStreams(rawStreams, aioOnBatch, { season, episode })
+            if (resolved && resolved.length > 0) {
+              allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
+              allStreams = allStreams.concat(resolved.map(tagAio))
+              allStreams = dedupeTorrentStreams(allStreams)
+              if (onBatch) onBatch(sortHdfull(allStreams))
+            }
+          } catch (e) {
+            logWarn('[Plurtasko] AIOStreams failed:', String(e?.message || e))
+          }
+        })()
+
+        await Promise.all([...channelPromises, torrentioPromise, aioPromise])
 
         // Limpiar el marcador interno _channelId antes de devolver
         allStreams = sortHdfull(dedupeTorrentStreams(allStreams))

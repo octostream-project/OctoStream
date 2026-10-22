@@ -13,8 +13,6 @@
     "react-hooks/set-state-in-effect"
   ],
   "src/pages/Details.jsx": [
-    "no-empty",
-    "no-useless-escape",
     "react-hooks/immutability",
     "react-hooks/refs"
   ],

@@ -8,6 +8,9 @@ import VideoPlayer from '../components/VideoPlayer.jsx'
 import LazyImage from '../components/LazyImage.jsx'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
+import { parseStreamLang, parseStreamQuality, sortByLangPriority } from '../utils/streamMeta.js'
+import StreamList from '../components/StreamList.jsx'
+import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
@@ -17,105 +20,11 @@ import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
-import { Play, Heart, Star, ArrowLeft, Clock, Server, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download, Bookmark } from 'lucide-react'
+import { Play, Heart, Star, ArrowLeft, Clock, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download, Bookmark, X } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
-
-// Extract language code from stream name like "vidhide (LAT)" or "HDFull Esp hd1080"
-function parseStreamLang(stream) {
-  const fromText = (text) => {
-    if (!text) return ''
-    const t = String(text).toUpperCase()
-    const m = t.match(/[\(\[\{_\-\s](LAT(?:INO)?|ESP(?:SUB)?|CAST|VOSE|SUBS?|SUBT(?:ITULAD[OA])?|ENG|JAP|JPN|CAT|DUAL|MULTI)[\)\]\}_\-\s]/)
-      || t.match(/^[\s\(\[_-]*(LAT(?:INO)?|ESP(?:SUB)?|CAST|VOSE|SUBS?|SUBT(?:ITULAD[OA])?|ENG|JAP|JPN|CAT|DUAL|MULTI)[\)\]_\-\s\.]/)
-    const c = m?.[1] || ''
-    if (c) {
-      if (/^ESPSUB|^VOSE|^SUB/.test(c)) return 'SUB'
-      if (/^ESP|^CAST/.test(c)) return 'ESP'
-      if (/^LAT/.test(c)) return 'LAT'
-      if (/^ENG/.test(c)) return 'ENG'
-      if (/^JAP|^JPN/.test(c)) return 'JAP'
-      if (/^CAT/.test(c)) return 'CAT'
-      if (/^DUAL|^MULTI/.test(c)) return 'DUAL'
-    }
-    if (/\bVOSE\b|\bESPSUB\b|\bSUBT(ITULAD[OA]|ITULOS)?\b|\bSUBS?\b/.test(t)) return 'SUB'
-    if (/\bDUAL\b|\bMULTI(AUDIO|LANG)?\b/.test(t)) return 'DUAL'
-    if (/\bCASTELLANO\b|\bCAST\b|\bESPAÑOL\b|\bESPANOL\b|\bSPANISH\b|\bESP\b/.test(t)) return 'ESP'
-    if (/\bLATINO\b|\bLATAM\b|\bLAT\b/.test(t)) return 'LAT'
-    if (/\bENGLISH\b|\bINGLES\b|\bINGL[EÉ]S\b|\bENG\b/.test(t)) return 'ENG'
-    if (/\bJAPON[EÉ]S\b|\bJAP\b|\bJPN\b/.test(t)) return 'JAP'
-    if (/\bCATAL[AÀ]N?\b|\bCAT\b/.test(t)) return 'CAT'
-    return ''
-  }
-  if (stream.lang) {
-    const l = stream.lang.toUpperCase()
-    if (l.includes('ESPSUB') || l.includes('VOSE') || l.includes('SUB')) return 'SUB'
-    if (l.includes('ESP') || l.includes('CAST')) return 'ESP'
-    if (l.includes('LAT')) return 'LAT'
-    if (l.includes('DUAL') || l.includes('MULTI')) return 'DUAL'
-    if (l.includes('ENG')) return 'ENG'
-    if (l.includes('JAP') || l.includes('JPN')) return 'JAP'
-    if (l.includes('CAT')) return 'CAT'
-    return l
-  }
-  const fromName = fromText(stream.name) || fromText(stream.title)
-  if (fromName) return fromName
-  if (stream.url) {
-    try {
-      const file = decodeURIComponent(new URL(stream.url).pathname.split('/').pop() || '')
-      const fromFile = fromText(file)
-      if (fromFile) return fromFile
-    } catch {}
-  }
-  return ''
-}
-
-// Extract quality from stream name or field
-function parseStreamQuality(stream) {
-  if (stream.quality) return stream.quality.toUpperCase()
-  const name = (stream.name || '').toUpperCase()
-  if (/4K|2160P/.test(name)) return '4K'
-  if (/1080P|1080|FULLHD|FHD/.test(name)) return '1080P'
-  if (/720P|720|HD/.test(name)) return '720P'
-  if (/480P|480|DVD|RIP/.test(name)) return '480P'
-  return ''
-}
-
-function qualityColorClass(q) {
-  if (!q) return 'bg-dark-600'
-  if (q.includes('4K') || q.includes('2160')) return 'bg-purple-600'
-  if (q.includes('1080') || q.includes('FULL')) return 'bg-green-600'
-  if (q.includes('720') || q.includes('HD')) return 'bg-blue-600'
-  if (q.includes('480') || q.includes('DVD') || q.includes('RIP')) return 'bg-yellow-600'
-  return 'bg-dark-600'
-}
-
-function langColorClass(lang) {
-  if (lang === 'ESP' || lang === 'CAST') return 'text-green-400'
-  if (lang === 'LAT') return 'text-blue-400'
-  if (lang === 'SUB' || lang === 'VOSE') return 'text-yellow-400'
-  if (lang === 'ENG') return 'text-orange-400'
-  if (lang === 'DUAL') return 'text-purple-400'
-  return 'text-dark-400'
-}
-
-// Get language priority from settings (default: ESP, LAT, SUB, ENG).
-// Cacheada: antes leía localStorage + JSON.parse en cada llamada a sort.
-let langPriorityCache = null
-function getLangPriority() {
-  if (langPriorityCache) return langPriorityCache
-  try {
-    const saved = JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')
-    if (Array.isArray(saved) && saved.length > 0) {
-      langPriorityCache = saved
-      return saved
-    }
-  } catch {}
-  langPriorityCache = ['ESP', 'LAT', 'DUAL', 'SUB', 'ENG']
-  return langPriorityCache
-}
 
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
@@ -146,19 +55,6 @@ function debridErrorMessage(err) {
   // Diagnóstico: el mensaje genérico ocultaba el error real de la API
   // (p. ej. bloqueo por IP del túnel). Se muestra el motivo crudo.
   return `No se pudo desbloquear el enlace (debrid): ${e || 'error desconocido'}`
-}
-
-// Sort streams by language priority. Streams with no language go last.
-function sortByLangPriority(streams) {
-  if (!streams || streams.length === 0) return streams
-  const priority = getLangPriority()
-  const langRank = (stream) => {
-    const lang = parseStreamLang(stream)
-    if (!lang) return priority.length // no language = lowest priority
-    const idx = priority.indexOf(lang)
-    return idx === -1 ? priority.length : idx
-  }
-  return [...streams].sort((a, b) => langRank(a) - langRank(b))
 }
 
 export default function Details() {
@@ -237,8 +133,7 @@ export default function Details() {
     try {
       const engine = await getTorrentEngine()
       if (!engine?.download) {
-        setDlStatus({ name: 'Descargas no disponibles en esta plataforma', done: true })
-        setTimeout(() => setDlStatus(null), 4000)
+        toast.error('Descargas no disponibles en esta plataforma')
         return
       }
       setDlStatus({ name: stream.name || stream.server || 'torrent', progress: 0, done: false })
@@ -249,23 +144,15 @@ export default function Details() {
         episode: meta?.episode ?? undefined,
         fileIndex: fileIndex ?? undefined,
       })
-      if (res?.complete) setDlStatus({ name: res.name, progress: 1, done: true })
+      if (res?.complete) {
+        setDlStatus({ name: res.name, progress: 1, done: true })
+        toast.success(`Descarga completada: ${res.name}`)
+      }
     } catch (e) {
       console.warn('[Details] download failed:', e?.message)
-      setDlStatus({ name: 'Error al descargar', done: true })
+      setDlStatus(null)
+      toast.error(`Error al descargar: ${e?.message || 'fallo desconocido'}`)
     }
-  }
-
-  // ¿Se puede descargar como archivo? Solo vídeo progresivo: mp4/mkv
-  // directos y enlaces debrid (se desbloquean a un archivo). HLS/DASH y
-  // embeds no aplican — sería remux, no descarga.
-  const isDownloadableDirect = (stream) => {
-    if (!stream?.url) return false
-    if (stream.streamType === 'debrid') return true
-    if (stream.streamType === 'torrent' || stream.streamType === 'embed'
-        || stream.streamType === 'hls' || stream.streamType === 'dash') return false
-    if (/\.m3u8([?#]|$)|\.mpd([?#]|$)/i.test(stream.url)) return false
-    return stream.streamType === 'mp4' || inferStreamType(stream.url, '') === 'mp4'
   }
 
   // Descarga directa http(s): el enlace debrid se desbloquea primero y el
@@ -274,21 +161,20 @@ export default function Details() {
     try {
       const engine = await getTorrentEngine()
       if (!engine?.downloadHttp) {
-        setDlStatus({ name: 'Descargas no disponibles en esta plataforma', done: true })
-        setTimeout(() => setDlStatus(null), 4000)
+        toast.error('Descargas no disponibles en esta plataforma')
         return
       }
       let url = stream.url
       if (stream.streamType === 'debrid') {
         if (!isAlldebridEnabled()) {
-          setDlStatus({ name: 'Requiere AllDebrid (Ajustes → Debrid)', done: true })
-          setTimeout(() => setDlStatus(null), 4000)
+          toast.error('Requiere AllDebrid (Ajustes → Debrid)')
           return
         }
         setDlStatus({ name: 'Desbloqueando enlace debrid…', progress: 0, done: false })
         const r = await unlockDebrid(stream.url)
         if (!r?.link) {
-          setDlStatus({ name: debridErrorMessage(r?.error), done: true })
+          setDlStatus(null)
+          toast.error(debridErrorMessage(r?.error))
           return
         }
         url = r.link
@@ -298,10 +184,14 @@ export default function Details() {
       setDlStatus({ name: displayName, progress: 0, done: false })
       await ensureDlListener(engine)
       const res = await engine.downloadHttp({ url, name: displayName, headers: stream.headers })
-      if (res?.complete) setDlStatus({ name: res.name, progress: 1, done: true })
+      if (res?.complete) {
+        setDlStatus({ name: res.name, progress: 1, done: true })
+        toast.success(`Descarga completada: ${res.name}`)
+      }
     } catch (e) {
       console.warn('[Details] downloadHttp failed:', e?.message)
-      setDlStatus({ name: 'Error al descargar', done: true })
+      setDlStatus(null)
+      toast.error(`Error al descargar: ${e?.message || 'fallo desconocido'}`)
     }
   }
 
@@ -1474,9 +1364,10 @@ export default function Details() {
           <span className="flex-1">{episodeError}</span>
           <button
             onClick={() => setEpisodeError(null)}
-            className="text-dark-400 hover:text-white text-xs"
+            className="text-dark-400 hover:text-white"
+            aria-label="Cerrar aviso"
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
       )}
@@ -1892,10 +1783,6 @@ export default function Details() {
             <h2 className="text-xl font-bold text-white mb-4">
               Fuentes disponibles
             </h2>
-            {(() => {
-              const sortedStreams = sortByLangPriority(streams)
-            return (
-              <>
             {resolvingStream && (
               <div className="flex items-center gap-2 text-primary-400 mb-4">
                 <OctoLoader size={20} />
@@ -1904,94 +1791,12 @@ export default function Details() {
                 </span>
               </div>
             )}
-            {streams.length > 6 ? (
-              <div data-tv-list className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {sortedStreams.map((stream, i) => {
-                  const quality = parseStreamQuality(stream)
-                  const lang = parseStreamLang(stream)
-                  return (
-                    <button
-                      key={i}
-                      tabIndex={0}
-                      data-tv-item
-                      role="button"
-                      className={`flex flex-col gap-1.5 bg-dark-800 rounded-lg p-3 hover:bg-dark-700 transition-colors cursor-pointer text-left ${resolvingStream ? 'opacity-50 pointer-events-none' : ''}`}
-                      onClick={() => handlePlay(stream)}
-                      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlay(stream))}
-                    >
-                      <div className="flex items-center gap-2">
-                        {lang && (
-                          <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{lang}</span>
-                        )}
-                        {quality && (
-                          <span className={`text-xs ${qualityColorClass(quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{quality}</span>
-                        )}
-                        {!quality && !lang && (
-                          <span className="text-sm text-dark-400 font-medium">HD</span>
-                        )}
-                      </div>
-                      <span className="text-xs text-cyan-400 font-medium truncate">{stream.channelName || ''}</span>
-                      <div className="flex items-center gap-1 text-xs text-dark-400">
-                        <Server size={12} className="flex-shrink-0" />
-                        <span className="truncate">{stream.server || stream.pluginName}</span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div data-tv-list className="space-y-2">
-                {sortedStreams.map((stream, i) => {
-                  const quality = parseStreamQuality(stream)
-                  const lang = parseStreamLang(stream)
-                  return (
-                    <div
-                      key={i}
-                      tabIndex={0}
-                      data-tv-item
-                      role="button"
-                      className={`flex items-center gap-3 bg-dark-800 rounded-lg p-4 hover:bg-dark-700 transition-colors cursor-pointer ${resolvingStream ? 'opacity-50 pointer-events-none' : ''}`}
-                      onClick={() => handlePlay(stream)}
-                      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlay(stream))}
-                    >
-                      {lang && (
-                        <span className={`text-sm font-bold ${langColorClass(lang)} w-12 text-center flex-shrink-0`}>{lang}</span>
-                      )}
-                      {/\(debrid\)/i.test(stream.server || stream.name || '') || stream.viaDebrid ? (
-                        <span className="text-xs bg-emerald-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">DEBRID</span>
-                      ) : /\(p2p\)/i.test(stream.server || '') ? (
-                        <span className="text-xs bg-amber-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">P2P</span>
-                      ) : null}
-                      {quality && (
-                        <span className={`text-xs ${qualityColorClass(quality)} text-white px-2 py-1 rounded font-bold flex-shrink-0`}>{quality}</span>
-                      )}
-                      {!quality && !lang && (
-                        <span className="text-sm text-dark-400 font-medium w-12 text-center flex-shrink-0">HD</span>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">{stream.name}</p>
-                        <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
-                      </div>
-                      {(stream.streamType === 'torrent' || isDownloadableDirect(stream)) && (
-                        <button
-                          tabIndex={0}
-                          className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
-                          title="Descargar para ver sin conexión"
-                          onClick={e => { e.stopPropagation(); handleDownloadClick(stream) }}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleDownloadClick(stream) } }}
-                        >
-                          <Download size={18} />
-                        </button>
-                      )}
-                      <Play size={20} className="text-dark-400 flex-shrink-0" />
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-              </>
-            )
-            })()}
+            <StreamList
+              streams={sortByLangPriority(streams)}
+              onPlay={handlePlay}
+              onDownload={handleDownloadClick}
+              disabled={!!resolvingStream}
+            />
           </div>
         )}
 
@@ -2358,91 +2163,12 @@ export default function Details() {
         ) : episodeStreams.length > 0 ? (
           <div className="mt-6">
             <h3 className="text-lg font-bold text-white mb-4">Fuentes disponibles</h3>
-            {episodeStreams.length > 6 ? (
-              <div data-tv-list className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {sortByLangPriority(episodeStreams).map((stream, i) => {
-                  const quality = parseStreamQuality(stream)
-                  const lang = parseStreamLang(stream)
-                  return (
-                    <button
-                      key={i}
-                      tabIndex={0}
-                      data-tv-item
-                      role="button"
-                      className={`flex flex-col gap-1.5 bg-dark-800 rounded-lg p-3 hover:bg-dark-700 transition-colors cursor-pointer text-left ${resolvingStream ? 'opacity-50 pointer-events-none' : ''}`}
-                      onClick={() => handlePlay(stream)}
-                      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlay(stream))}
-                    >
-                      <div className="flex items-center gap-2">
-                        {lang && (
-                          <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{lang}</span>
-                        )}
-                        {quality && (
-                          <span className={`text-xs ${qualityColorClass(quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{quality}</span>
-                        )}
-                        {!quality && !lang && (
-                          <span className="text-sm text-dark-400 font-medium">HD</span>
-                        )}
-                      </div>
-                      <span className="text-xs text-cyan-400 font-medium truncate">{stream.channelName || ''}</span>
-                      <div className="flex items-center gap-1 text-xs text-dark-400">
-                        <Server size={12} className="flex-shrink-0" />
-                        <span className="truncate">{stream.server || stream.pluginName}</span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div data-tv-list className="space-y-2">
-                {sortByLangPriority(episodeStreams).map((stream, i) => {
-                  const quality = parseStreamQuality(stream)
-                  const lang = parseStreamLang(stream)
-                  return (
-                    <div
-                      key={i}
-                      tabIndex={0}
-                      data-tv-item
-                      role="button"
-                      className={`flex items-center gap-3 bg-dark-800 rounded-lg p-4 hover:bg-dark-700 transition-colors cursor-pointer ${resolvingStream ? 'opacity-50 pointer-events-none' : ''}`}
-                      onClick={() => handlePlay(stream)}
-                      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handlePlay(stream))}
-                    >
-                      {lang && (
-                        <span className={`text-sm font-bold ${langColorClass(lang)} w-12 text-center flex-shrink-0`}>{lang}</span>
-                      )}
-                      {/\(debrid\)/i.test(stream.server || stream.name || '') || stream.viaDebrid ? (
-                        <span className="text-xs bg-emerald-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">DEBRID</span>
-                      ) : /\(p2p\)/i.test(stream.server || '') ? (
-                        <span className="text-xs bg-amber-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">P2P</span>
-                      ) : null}
-                      {quality && (
-                        <span className={`text-xs ${qualityColorClass(quality)} text-white px-2 py-1 rounded font-bold flex-shrink-0`}>{quality}</span>
-                      )}
-                      {!quality && !lang && (
-                        <span className="text-sm text-dark-400 font-medium w-12 text-center flex-shrink-0">HD</span>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">{stream.name}</p>
-                        <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
-                      </div>
-                      {(stream.streamType === 'torrent' || isDownloadableDirect(stream)) && (
-                        <button
-                          tabIndex={0}
-                          className="p-2 text-dark-400 hover:text-primary-400 transition-colors flex-shrink-0"
-                          title="Descargar para ver sin conexión"
-                          onClick={e => { e.stopPropagation(); handleDownloadClick(stream) }}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleDownloadClick(stream) } }}
-                        >
-                          <Download size={18} />
-                        </button>
-                      )}
-                      <Play size={20} className="text-dark-400 flex-shrink-0" />
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            <StreamList
+              streams={sortByLangPriority(episodeStreams)}
+              onPlay={handlePlay}
+              onDownload={handleDownloadClick}
+              disabled={!!resolvingStream}
+            />
           </div>
         ) : (
           <div className="mt-8 text-center py-8">
@@ -2456,9 +2182,10 @@ export default function Details() {
             <span className="flex-1">{episodeError}</span>
             <button
               onClick={() => setEpisodeError(null)}
-              className="text-dark-400 hover:text-white text-xs"
+              className="text-dark-400 hover:text-white"
+              aria-label="Cerrar aviso"
             >
-              ✕
+              <X size={14} />
             </button>
           </div>
         )}
@@ -2484,8 +2211,9 @@ export default function Details() {
           <button
             onClick={() => setTrailerStream(null)}
             className="absolute top-4 right-4 z-10 btn-secondary p-2"
+            aria-label="Cerrar tráiler"
           >
-            ✕
+            <X size={18} />
           </button>
           <div className="aspect-video w-full max-w-4xl">
             <iframe

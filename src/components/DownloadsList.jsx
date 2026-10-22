@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { playLocalFile, pickDownloadFolder } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
+import { toast } from './ui/Toast.jsx'
 import { Play, Trash2, Download, FolderOpen, Loader2 } from 'lucide-react'
 
 // Lista de descargas offline (torrent + http): descarga en curso con
@@ -11,7 +12,6 @@ export default function DownloadsList() {
   const [downloads, setDownloads] = useState([])
   const [active, setActive] = useState(null)
   const [dirInfo, setDirInfo] = useState(null)
-  const [error, setError] = useState('')
   const [pickingDir, setPickingDir] = useState(false)
   const listenerRef = useRef(null)
   const canDownload = isAndroidNative() || isElectron()
@@ -42,6 +42,7 @@ export default function DownloadsList() {
       listenerRef.current = await engine.addListener('torrentProgress', ev => {
         if (ev?.state === 'finished' || ev?.progress >= 1) {
           setActive(null)
+          if (ev?.fileName) toast.success(`Descarga completada: ${ev.fileName}`)
           refresh()
         } else if (ev?.fileName || ev?.state === 'downloading') {
           setActive({ name: ev?.fileName || 'Descargando', progress: ev?.progress || 0 })
@@ -57,7 +58,6 @@ export default function DownloadsList() {
   }, [refresh])
 
   const handlePlay = async (file) => {
-    setError('')
     try {
       // URIs SAF (modo carpeta sin all-files) se pasan tal cual — el
       // player las abre por ContentResolver; rutas de archivo van con file://.
@@ -66,7 +66,7 @@ export default function DownloadsList() {
         : (isAndroidNative() ? `file://${file.path}` : file.path)
       await playLocalFile({ uri, title: file.name })
     } catch (e) {
-      setError(e?.message || 'No se pudo reproducir la descarga')
+      toast.error(e?.message || 'No se pudo reproducir la descarga')
     }
   }
 
@@ -74,12 +74,14 @@ export default function DownloadsList() {
     try {
       const engine = await getTorrentEngine()
       await engine?.deleteDownload?.({ path: file.path })
+      toast('Descarga eliminada')
       refresh()
-    } catch { /* noop */ }
+    } catch (e) {
+      toast.error(e?.message || 'No se pudo borrar la descarga')
+    }
   }
 
   const handlePickDir = async () => {
-    setError('')
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
@@ -93,13 +95,16 @@ export default function DownloadsList() {
         r = await engine?.pickDownloadDir?.()
       }
       if (r?.needsPermission) {
-        setError('Si tu Android no muestra el ajuste de almacenamiento, pulsa "Carpeta" otra vez: podrás elegir carpeta igualmente.')
+        toast('Si tu Android no muestra el ajuste de almacenamiento, pulsa "Carpeta" otra vez: podrás elegir carpeta igualmente.')
         return
       }
-      if (r?.path) setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
+      if (r?.path) {
+        setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
+        toast.success('Carpeta de descargas guardada')
+      }
     } catch (e) {
       if (e?.message !== 'cancelled' && !e?.cancelled) {
-        setError(e?.message || 'No se pudo elegir la carpeta')
+        toast.error(e?.message || 'No se pudo elegir la carpeta')
       }
     } finally {
       setPickingDir(false)
@@ -110,6 +115,7 @@ export default function DownloadsList() {
     try {
       const engine = await getTorrentEngine()
       await engine?.resetDownloadDir?.()
+      toast('Carpeta restablecida a la interna')
       refresh()
     } catch { /* noop */ }
   }
@@ -158,10 +164,10 @@ export default function DownloadsList() {
         </div>
       )}
 
-      {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
-
       {downloads.length === 0 && !active ? (
-        <p className="text-dark-500 text-sm">Nada descargado todavía. Usa el icono ⬇ en los enlaces de una ficha.</p>
+        <p className="text-dark-500 text-sm flex items-center gap-1">
+          Nada descargado todavía. Usa el icono <Download size={13} className="inline-block" /> en los enlaces de una ficha.
+        </p>
       ) : (
         <div className="space-y-2">
           {downloads.map((f, i) => (

@@ -14,7 +14,7 @@ import { fetchHtml, postHtml, postJson } from '../http.js'
 import { dontorrent } from './dontorrent.js'
 
 // Primer host de la lista de rotación del canal (el que responde el mock).
-const HOST = 'https://4144-don.mirror.pm/'
+const HOST = 'https://dontorrent.meme/'
 
 const SEARCH_HTML = `<html><body>
 <!-- padding para superar el umbral de página válida de postToHost (>200 chars) -->

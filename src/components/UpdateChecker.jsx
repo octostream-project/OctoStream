@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { checkForUpdate, AppUpdater } from '../utils/appUpdater.js'
 import { isAndroidNative } from '../utils/platform.js'
+import Modal from './ui/Modal.jsx'
 
 // Comprueba version.json del repo al arrancar (Android) y muestra el diálogo
 // de actualización: descarga con progreso → instalador del sistema.
@@ -95,73 +96,71 @@ export default function UpdateChecker() {
 
   // Diálogo de actualización de escritorio — descarga in-app como Android.
   if (desktopUpdate) {
-    const db = 'rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none'
+    const db = 'rounded-lg bg-dark-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none'
     return (
-      <div data-tv-modal className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
-        <div className="w-[min(90vw,480px)] rounded-2xl bg-slate-900 p-6 shadow-2xl">
-          <h2 className="text-xl font-bold text-white">
-            {phase === 'error' ? 'Error al actualizar' : `Nueva versión ${desktopUpdate.version}`}
-          </h2>
-          {phase === 'prompt' && (
-            <>
-              {desktopUpdate.notes ? (
-                <p className="mt-3 whitespace-pre-line text-sm text-slate-300 max-h-40 overflow-y-auto">{desktopUpdate.notes}</p>
-              ) : null}
-              {desktopUpdate.downloadSize ? (
-                <p className="mt-2 text-xs text-slate-400">
-                  {desktopUpdate.downloadName} · {Math.round(desktopUpdate.downloadSize / 1048576)} MB
-                </p>
-              ) : null}
-              <div className="mt-6 flex justify-end gap-3">
-                <button className={db} onClick={() => setDesktopUpdate(null)}>
-                  Ahora no
-                </button>
-                <button className={db} onClick={startDesktopDownload} autoFocus>
-                  {desktopUpdate.downloadUrl ? 'Descargar' : 'Abrir descarga'}
-                </button>
-              </div>
-            </>
-          )}
-          {phase === 'downloading' && (
-            <div className="mt-5">
-              <div className="h-3 w-full overflow-hidden rounded-full bg-slate-700">
-                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(percent, 3)}%` }} />
-              </div>
-              <p className="mt-2 text-center text-sm text-slate-400">
-                Descargando… {percent > 0 ? `${percent}%` : ''}
+      <Modal onClose={phase === 'downloading' ? undefined : () => { setDesktopUpdate(null); setPhase('prompt') }}>
+        <h2 className="text-xl font-bold text-white">
+          {phase === 'error' ? 'Error al actualizar' : `Nueva versión ${desktopUpdate.version}`}
+        </h2>
+        {phase === 'prompt' && (
+          <>
+            {desktopUpdate.notes ? (
+              <p className="mt-3 whitespace-pre-line text-sm text-dark-300 max-h-40 overflow-y-auto">{desktopUpdate.notes}</p>
+            ) : null}
+            {desktopUpdate.downloadSize ? (
+              <p className="mt-2 text-xs text-dark-400">
+                {desktopUpdate.downloadName} · {Math.round(desktopUpdate.downloadSize / 1048576)} MB
               </p>
+            ) : null}
+            <div className="mt-6 flex justify-end gap-3">
+              <button className={db} onClick={() => setDesktopUpdate(null)}>
+                Ahora no
+              </button>
+              <button className={db} onClick={startDesktopDownload} autoFocus>
+                {desktopUpdate.downloadUrl ? 'Descargar' : 'Abrir descarga'}
+              </button>
             </div>
-          )}
-          {phase === 'install' && (
-            <>
-              <p className="mt-3 text-sm text-slate-300">
-                Descarga completada. La app se cerrará y se iniciará la instalación de la nueva versión.
-              </p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
-                  Más tarde
-                </button>
-                <button className={db} onClick={startDesktopInstall} autoFocus>
-                  Instalar y reiniciar
-                </button>
-              </div>
-            </>
-          )}
-          {phase === 'error' && (
-            <>
-              <p className="mt-3 text-sm text-red-400">{error}</p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
-                  Cerrar
-                </button>
-                <button className={db} onClick={startDesktopDownload} autoFocus>
-                  Reintentar
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+          </>
+        )}
+        {phase === 'downloading' && (
+          <div className="mt-5">
+            <div className="h-3 w-full overflow-hidden rounded-full bg-dark-700">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(percent, 3)}%` }} />
+            </div>
+            <p className="mt-2 text-center text-sm text-dark-400">
+              Descargando… {percent > 0 ? `${percent}%` : ''}
+            </p>
+          </div>
+        )}
+        {phase === 'install' && (
+          <>
+            <p className="mt-3 text-sm text-dark-300">
+              Descarga completada. La app se cerrará y se iniciará la instalación de la nueva versión.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
+                Más tarde
+              </button>
+              <button className={db} onClick={startDesktopInstall} autoFocus>
+                Instalar y reiniciar
+              </button>
+            </div>
+          </>
+        )}
+        {phase === 'error' && (
+          <>
+            <p className="mt-3 text-sm text-red-400">{error}</p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button className={db} onClick={() => { setDesktopUpdate(null); setPhase('prompt') }}>
+                Cerrar
+              </button>
+              <button className={db} onClick={startDesktopDownload} autoFocus>
+                Reintentar
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
     )
   }
 
@@ -241,106 +240,104 @@ export default function UpdateChecker() {
     }
   }
 
-  const btn = 'rounded-lg bg-slate-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none'
+  const btn = 'rounded-lg bg-dark-700 px-6 py-3 font-medium text-white focus:bg-emerald-600 focus:outline-none'
 
   return (
-    <div data-tv-modal className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
-      <div className="w-[min(90vw,480px)] rounded-2xl bg-slate-900 p-6 shadow-2xl">
-        <h2 className="text-xl font-bold text-white">
-          {phase === 'error' ? 'Error al actualizar' : `Nueva versión ${update.versionName}`}
-        </h2>
+    <Modal onClose={update.force || phase === 'downloading' ? undefined : () => setUpdate(null)}>
+      <h2 className="text-xl font-bold text-white">
+        {phase === 'error' ? 'Error al actualizar' : `Nueva versión ${update.versionName}`}
+      </h2>
 
-        {phase === 'prompt' && (
-          <>
-            {update.notes ? <p className="mt-3 whitespace-pre-line text-sm text-slate-300">{update.notes}</p> : null}
-            <div className="mt-6 flex justify-end gap-3">
-              {!update.force && (
-                <button className={btn} onClick={() => setUpdate(null)} autoFocus={!update.force}>
-                  Ahora no
-                </button>
-              )}
-              <button className={btn} onClick={download} autoFocus>
-                Actualizar
+      {phase === 'prompt' && (
+        <>
+          {update.notes ? <p className="mt-3 whitespace-pre-line text-sm text-dark-300">{update.notes}</p> : null}
+          <div className="mt-6 flex justify-end gap-3">
+            {!update.force && (
+              <button className={btn} onClick={() => setUpdate(null)} autoFocus={!update.force}>
+                Ahora no
               </button>
-            </div>
-          </>
-        )}
-
-        {phase === 'downloading' && (
-          <div className="mt-5">
-            <div className="h-3 w-full overflow-hidden rounded-full bg-slate-700">
-              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(percent, 3)}%` }} />
-            </div>
-            <p className="mt-2 text-center text-sm text-slate-400">
-              Descargando… {percent > 0 ? `${percent}%` : ''}
-            </p>
-          </div>
-        )}
-
-        {phase === 'needPerm' && (
-          <>
-            <p className="mt-3 text-sm text-slate-300">
-              Android requiere permiso para instalar la actualización. Activa
-              &quot;Permitir desde esta fuente&quot; y vuelve.
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button className={btn} onClick={() => AppUpdater.openInstallSettings()} autoFocus>
-                Abrir ajustes
-              </button>
-              <button className={btn} onClick={startInstall}>
-                Instalar
-              </button>
-            </div>
-          </>
-        )}
-
-        {phase === 'reinstall' && (
-          <>
-            <p className="mt-3 text-sm text-slate-300">
-              Esta versión está firmada con una clave distinta y Android no permite
-              instalarla encima. Hay que desinstalar la app primero.
-            </p>
-            <p className="mt-3 text-sm text-amber-400">
-              Se perderán ajustes, favoritos e historial.
-            </p>
-            <p className="mt-3 text-sm text-slate-300">
-              Al pulsar &quot;Desinstalar y actualizar&quot; se abre el navegador
-              descargando la nueva versión y aparece la desinstalación: confírmala y,
-              cuando acabe la descarga, toca la notificación para instalar.
-            </p>
-            {reinstallApk?.saved && (
-              <p className="mt-3 text-sm text-emerald-400">
-                También hay una copia en Descargas ({reinstallApk.name}).
-              </p>
             )}
-            <div className="mt-6 flex justify-end gap-3">
-              <button className={btn} onClick={() => setUpdate(null)}>
-                Cancelar
-              </button>
-              {!reinstallApk?.saved && (
-                <button className={btn} onClick={downloadToDownloads}>
-                  Descargar a Descargas
-                </button>
-              )}
-              <button className={btn} onClick={uninstallAndUpdate} autoFocus>
-                Desinstalar y actualizar
-              </button>
-            </div>
-          </>
-        )}
+            <button className={btn} onClick={download} autoFocus>
+              Actualizar
+            </button>
+          </div>
+        </>
+      )}
 
-        {phase === 'error' && (
-          <>
-            <p className="mt-3 text-sm text-red-400">{error}</p>
-            <div className="mt-6 flex justify-end gap-3">
-              {!update.force && (
-                <button className={btn} onClick={() => setUpdate(null)}>Cerrar</button>
-              )}
-              <button className={btn} onClick={download} autoFocus>Reintentar</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+      {phase === 'downloading' && (
+        <div className="mt-5">
+          <div className="h-3 w-full overflow-hidden rounded-full bg-dark-700">
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(percent, 3)}%` }} />
+          </div>
+          <p className="mt-2 text-center text-sm text-dark-400">
+            Descargando… {percent > 0 ? `${percent}%` : ''}
+          </p>
+        </div>
+      )}
+
+      {phase === 'needPerm' && (
+        <>
+          <p className="mt-3 text-sm text-dark-300">
+            Android requiere permiso para instalar la actualización. Activa
+            &quot;Permitir desde esta fuente&quot; y vuelve.
+          </p>
+          <div className="mt-6 flex justify-end gap-3">
+            <button className={btn} onClick={() => AppUpdater.openInstallSettings()} autoFocus>
+              Abrir ajustes
+            </button>
+            <button className={btn} onClick={startInstall}>
+              Instalar
+            </button>
+          </div>
+        </>
+      )}
+
+      {phase === 'reinstall' && (
+        <>
+          <p className="mt-3 text-sm text-dark-300">
+            Esta versión está firmada con una clave distinta y Android no permite
+            instalarla encima. Hay que desinstalar la app primero.
+          </p>
+          <p className="mt-3 text-sm text-amber-400">
+            Se perderán ajustes, favoritos e historial.
+          </p>
+          <p className="mt-3 text-sm text-dark-300">
+            Al pulsar &quot;Desinstalar y actualizar&quot; se abre el navegador
+            descargando la nueva versión y aparece la desinstalación: confírmala y,
+            cuando acabe la descarga, toca la notificación para instalar.
+          </p>
+          {reinstallApk?.saved && (
+            <p className="mt-3 text-sm text-emerald-400">
+              También hay una copia en Descargas ({reinstallApk.name}).
+            </p>
+          )}
+          <div className="mt-6 flex justify-end gap-3">
+            <button className={btn} onClick={() => setUpdate(null)}>
+              Cancelar
+            </button>
+            {!reinstallApk?.saved && (
+              <button className={btn} onClick={downloadToDownloads}>
+                Descargar a Descargas
+              </button>
+            )}
+            <button className={btn} onClick={uninstallAndUpdate} autoFocus>
+              Desinstalar y actualizar
+            </button>
+          </div>
+        </>
+      )}
+
+      {phase === 'error' && (
+        <>
+          <p className="mt-3 text-sm text-red-400">{error}</p>
+          <div className="mt-6 flex justify-end gap-3">
+            {!update.force && (
+              <button className={btn} onClick={() => setUpdate(null)}>Cerrar</button>
+            )}
+            <button className={btn} onClick={download} autoFocus>Reintentar</button>
+          </div>
+        </>
+      )}
+    </Modal>
   )
 }

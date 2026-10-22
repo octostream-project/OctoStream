@@ -9,6 +9,7 @@ import { findSingleMatch, findMultipleMatches, baseTitle, makeTorrentStream, isS
 import { extractQualityFromText } from '../meta.js'
 
 const HOSTS = [
+  'https://grantorrent.zip/',
   'https://grantorrent.foo/',
   'https://grantorrent.mov/',
   'https://grantorrent.net/',

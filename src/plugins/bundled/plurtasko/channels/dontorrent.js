@@ -15,6 +15,7 @@ import { extractQualityFromText, detectLangFromText } from '../meta.js'
 // its numeric id rotates over time; the official dontorrent.* domain rotates
 // TLDs weekly (supply → cloud → dad → city…).
 const HOSTS = [
+  'https://dontorrent.meme/',
   'https://4144-don.mirror.pm/',
   'https://dontorrent.city/',
   'https://dontorrent.supply/',

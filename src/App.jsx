@@ -8,6 +8,7 @@ import BottomNav from './components/BottomNav.jsx'
 import Screensaver from './components/Screensaver.jsx'
 import RemotePlayReceiver from './components/RemotePlayReceiver.jsx'
 import UpdateChecker from './components/UpdateChecker.jsx'
+import { ToastHost } from './components/ui/Toast.jsx'
 import { useStore } from './store/useStore.js'
 import { isAndroidNative, isElectron } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
@@ -669,6 +670,7 @@ export default function App() {
         {screensaverActive && <Screensaver onDismiss={dismissScreensaver} />}
         {(android || isElectron()) && <RemotePlayReceiver />}
         {(android || isElectron()) && <UpdateChecker />}
+        <ToastHost />
       </div>
     </ErrorBoundary>
   )

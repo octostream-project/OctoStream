@@ -4,7 +4,10 @@ import ContentRow from '../components/ContentRow.jsx'
 import ContentCard from '../components/ContentCard.jsx'
 import ContinueWatching from '../components/ContinueWatching.jsx'
 import { Clapperboard, Film, Tv, PlayCircle, Globe } from 'lucide-react'
-import LogoLoader from '../components/LogoLoader.jsx'
+import Chip from '../components/ui/Chip.jsx'
+import MediaGrid from '../components/ui/MediaGrid.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
+import { SkeletonGrid, SkeletonRow } from '../components/ui/SkeletonCard.jsx'
 import { waitForWarp } from '../utils/warpStatus.js'
 
 // Only TMDB catalogs are shown on the Home page.
@@ -123,13 +126,11 @@ export default function Home() {
       const cats = TAB_CATS[tab] || MOVIE_CATS
       const type = TAB_TYPE[tab] || 'movie'
       const pluginId = TAB_PLUGIN[tab] || 'tmdb'
-      console.warn(`[Home] tab=${tab} pluginId=${pluginId} type=${type} cats=${cats.length}`)
 
       // If a specific category is selected, load it as a full-screen grid
       if (selectedCat) {
         try {
           const items = await pluginManager.getCatalogContent(pluginId, selectedCat, type, 0, 60)
-          console.warn(`[Home] selectedCat=${selectedCat} items=${items?.length || 0}`)
           // Ignore if a newer request was started
           if (myReqId !== reqIdRef.current) return
           setGridItems(items || [])
@@ -146,7 +147,6 @@ export default function Home() {
       const loadOne = async (cat) => {
         try {
           const items = await pluginManager.getCatalogContent(pluginId, cat.id, type, 0, 20)
-          console.warn(`[Home] loadOne cat=${cat.id} items=${items?.length || 0}`)
           if (myReqId !== reqIdRef.current) return
           if (items && items.length > 0) {
             setRows(prev => [...prev, { title: cat.name, items, key: cat.id }])
@@ -172,92 +172,41 @@ export default function Home() {
 
       {/* Tab selector: Películas / Series / Anime / Dorama */}
       <div className="flex gap-2 mb-4 mt-6 flex-wrap" data-tv-row>
-        <button
-          onClick={() => { setTab('movie'); setSelectedCat(null) }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            tab === 'movie' ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-          }`}
-        >
-          <Film size={18} />
-          Películas
-        </button>
-        <button
-          onClick={() => { setTab('series'); setSelectedCat(null) }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            tab === 'series' ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-          }`}
-        >
-          <Tv size={18} />
-          Series
-        </button>
-        <button
-          onClick={() => { setTab('anime'); setSelectedCat(null) }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            tab === 'anime' ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-          }`}
-        >
-          <PlayCircle size={18} />
-          Anime
-        </button>
-        <button
-          onClick={() => { setTab('dorama'); setSelectedCat(null) }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-            tab === 'dorama' ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-          }`}
-        >
-          <Globe size={18} />
-          Dorama
-        </button>
+        <Chip active={tab === 'movie'} icon={Film} onClick={() => { setTab('movie'); setSelectedCat(null) }}>Películas</Chip>
+        <Chip active={tab === 'series'} icon={Tv} onClick={() => { setTab('series'); setSelectedCat(null) }}>Series</Chip>
+        <Chip active={tab === 'anime'} icon={PlayCircle} onClick={() => { setTab('anime'); setSelectedCat(null) }}>Anime</Chip>
+        <Chip active={tab === 'dorama'} icon={Globe} onClick={() => { setTab('dorama'); setSelectedCat(null) }}>Dorama</Chip>
       </div>
 
       {/* Category selector */}
       <div className="flex flex-wrap gap-2 mb-6" data-tv-row>
-        <button
-          onClick={() => setSelectedCat(null)}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            selectedCat === null ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-          }`}
-        >
-          Todas
-        </button>
+        <Chip size="sm" active={selectedCat === null} onClick={() => setSelectedCat(null)}>Todas</Chip>
         {cats.map(cat => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedCat(cat.id)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              selectedCat === cat.id ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-            }`}
-          >
+          <Chip key={cat.id} size="sm" active={selectedCat === cat.id} onClick={() => setSelectedCat(cat.id)}>
             {cat.name}
-          </button>
+          </Chip>
         ))}
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center min-h-[40vh]">
-          <LogoLoader size={80} />
-        </div>
+        selectedCat
+          ? <SkeletonGrid />
+          : <div className="space-y-8"><SkeletonRow /><SkeletonRow /><SkeletonRow /></div>
       ) : selectedCat ? (
         // Single category: full-screen grid
         gridItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-            <Clapperboard className="text-dark-600" size={64} />
-            <p className="text-dark-400 text-lg">No hay contenido disponible</p>
-          </div>
+          <EmptyState icon={Clapperboard}>No hay contenido disponible</EmptyState>
         ) : (
-          <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <MediaGrid>
             {gridItems.map(item => (
               <ContentCard key={`${item.type}-${item.id}`} item={item} />
             ))}
-          </div>
+          </MediaGrid>
         )
       ) : (
         // "Todas": horizontal rows
         rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-            <Clapperboard className="text-dark-600" size={64} />
-            <p className="text-dark-400 text-lg">No hay contenido disponible</p>
-          </div>
+          <EmptyState icon={Clapperboard}>No hay contenido disponible</EmptyState>
         ) : (
           rows.map((row) => (
             <ContentRow key={row.key} title={row.title} items={row.items} />

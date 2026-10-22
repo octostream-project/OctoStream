@@ -26,12 +26,15 @@ import { jkanime } from './jkanime.js'
 import { dontorrent } from './dontorrent.js'
 import { grantorrent } from './grantorrent.js'
 import { subtorrents } from './subtorrents.js'
+import { estrenoscinesaa } from './estrenoscinesaa.js'
+import { cinemitas } from './cinemitas.js'
 
 const CHANNELS = [
   animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd,
   animeav1, hdfull, entrepeliculasyseries, serieskao, flizzmovies,
   pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt,
   tioanime, jkanime, dontorrent, grantorrent, subtorrents,
+  estrenoscinesaa, cinemitas,
 ]
 
 const QUERY_BY_KIND = {

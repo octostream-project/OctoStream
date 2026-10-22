@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import ContentCard from '../components/ContentCard.jsx'
 import DownloadsList from '../components/DownloadsList.jsx'
+import MediaGrid from '../components/ui/MediaGrid.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { Bookmark, CheckCircle2, Clock, Heart, Download } from 'lucide-react'
 
@@ -96,14 +98,11 @@ export default function Favorites() {
           <DownloadsList />
         </div>
       ) : items.length === 0 ? (
-        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dark-800 bg-dark-900/50 px-6 text-center">
-          {category === 'completed' ? <CheckCircle2 className="text-dark-600" size={56} /> : <Bookmark className="text-dark-600" size={56} />}
-          <p className="max-w-lg text-dark-300">{empty}</p>
-        </div>
+        <EmptyState icon={category === 'completed' ? CheckCircle2 : Bookmark}>{empty}</EmptyState>
       ) : (
-        <div data-tv-grid className="media-card-grid grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        <MediaGrid>
           {items.map(item => <ContentCard key={`${item.type}-${item.id}`} item={item} />)}
-        </div>
+        </MediaGrid>
       )}
     </div>
   )

@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import { pluginManager } from '../plugins/manager.js'
 import ContentCard from '../components/ContentCard.jsx'
 import OctoLoader from '../components/OctoLoader.jsx'
-import LogoLoader from '../components/LogoLoader.jsx'
+import MediaGrid from '../components/ui/MediaGrid.jsx'
+import { SkeletonGrid } from '../components/ui/SkeletonCard.jsx'
 
 export default function Catalog() {
   const { pluginId, catalogId, type } = useParams()
@@ -44,8 +45,8 @@ export default function Catalog() {
 
   if (loading && items.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <LogoLoader size={80} />
+      <div className="p-4 lg:p-6">
+        <SkeletonGrid />
       </div>
     )
   }
@@ -55,11 +56,11 @@ export default function Catalog() {
       <h1 className="text-2xl font-bold text-white mb-6">
         {items.length > 0 ? '' : 'Catálogo'}
       </h1>
-      <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <MediaGrid>
         {items.map(item => (
           <ContentCard key={`${item.type}-${item.id}`} item={item} />
         ))}
-      </div>
+      </MediaGrid>
       {hasMore && (
         <div className="flex justify-center mt-8">
           <button
