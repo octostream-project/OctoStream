@@ -358,50 +358,149 @@ public class TorrentEnginePlugin extends Plugin {
      * cuando el SAF tree picker no existe (algunas ROMs) o el sistema
      * rechaza la selección (raíz/Descargas no se pueden conceder).
      */
+    /**
+     * Pide explícitamente el acceso de escritura al almacenamiento:
+     *  - API <= 29: diálogo runtime WRITE_EXTERNAL_STORAGE.
+     *  - API 30+: pantalla de ajustes "Acceso a todos los archivos"
+     *    (ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION). En GrapheneOS se
+     *    muestra como Storage Scopes. Sin este gesto el sistema nunca pregunta
+     *    nada y solo se podían usar las carpetas privadas de la app.
+     */
+    @PluginMethod
+    public void requestStorageAccess(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            Intent intent;
+            try {
+                intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            } catch (Throwable t) {
+                intent = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+            }
+            try {
+                startActivityForResult(call, intent, "storageAccessResult");
+            } catch (Exception e) {
+                try {
+                    Intent generic = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    startActivityForResult(call, generic, "storageAccessResult");
+                } catch (Exception e2) {
+                    call.reject("No se pudo abrir la pantalla de permisos: " + e2.getMessage());
+                }
+            }
+            return;
+        }
+        if (getPermissionState("storageWrite") == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("storageWrite", call, "storageAccessPermCallback");
+    }
+
+    @PermissionCallback
+    private void storageAccessPermCallback(PluginCall call) {
+        if (call == null) return;
+        JSObject ret = new JSObject();
+        ret.put("granted", getPermissionState("storageWrite") == PermissionState.GRANTED);
+        call.resolve(ret);
+    }
+
+    @ActivityCallback
+    private void storageAccessResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        JSObject ret = new JSObject();
+        ret.put("granted", Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void downloadVolumes(PluginCall call) {
-        JSArray volumes = new JSArray();
+        // La enumeración va en un hilo con timeout: StatFs/canWrite sobre un
+        // montaje stale (SD/USB medio desconectado) puede bloquear el I/O de
+        // forma irrecuperable y la promesa JS nunca resolvía — spinner
+        // infinito en el selector de carpeta.
+        java.util.concurrent.ExecutorService ex =
+                java.util.concurrent.Executors.newSingleThreadExecutor();
+        JSArray volumes;
         try {
-            android.os.storage.StorageManager sm =
-                    getContext().getSystemService(android.os.storage.StorageManager.class);
-            File[] dirs = getContext().getExternalFilesDirs(null);
-            for (File dir : dirs) {
-                if (dir == null) continue;
-                File dl = new File(dir, "downloads");
-                dl.mkdirs();
-                JSObject v = new JSObject();
-                v.put("path", dl.getAbsolutePath());
-                String label = null;
-                boolean removable = false;
-                try {
-                    android.os.storage.StorageVolume vol =
-                            sm != null ? sm.getStorageVolume(dir) : null;
-                    if (vol != null) {
-                        label = vol.getDescription(getContext());
-                        removable = vol.isRemovable();
-                    }
-                } catch (Throwable ignored) {}
-                if (label == null || label.isEmpty()) {
-                    label = removable ? "Externo" : "Interno";
-                }
-                v.put("label", label);
-                v.put("removable", removable);
-                long free = -1;
-                try {
-                    android.os.StatFs st = new android.os.StatFs(dir.getAbsolutePath());
-                    free = st.getAvailableBytes();
-                } catch (Throwable ignored) {}
-                v.put("freeBytes", free);
-                v.put("writable", dl.isDirectory() && dl.canWrite());
-                volumes.put(v);
-            }
+            volumes = ex.submit(this::listWritableVolumes)
+                    .get(4, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Throwable t) {
-            call.reject("No se pudieron listar volúmenes: " + t.getMessage());
-            return;
+            volumes = new JSArray();
+        } finally {
+            ex.shutdownNow();
         }
         JSObject ret = new JSObject();
         ret.put("volumes", volumes);
         call.resolve(ret);
+    }
+
+    // Enumera getExternalFilesDirs → {label, path, removable, freeBytes,
+    // writable}. Sin mkdirs: crear la carpeta es trabajo de
+    // setDownloadDirPath cuando el usuario elige el volumen (evita carpetas
+    // huérfanas en volúmenes no elegidos y un punto menos de bloqueo).
+    private JSArray listWritableVolumes() {
+        JSArray volumes = new JSArray();
+        android.os.storage.StorageManager sm =
+                getContext().getSystemService(android.os.storage.StorageManager.class);
+        File[] dirs = getContext().getExternalFilesDirs(null);
+        for (File dir : dirs) {
+            if (dir == null) continue;
+            File dl = new File(dir, "downloads");
+            JSObject v = new JSObject();
+            v.put("path", dl.getAbsolutePath());
+            String label = null;
+            boolean removable = false;
+            try {
+                android.os.storage.StorageVolume vol =
+                        sm != null ? sm.getStorageVolume(dir) : null;
+                if (vol != null) {
+                    label = vol.getDescription(getContext());
+                    removable = vol.isRemovable();
+                }
+            } catch (Throwable ignored) {}
+            if (label == null || label.isEmpty()) {
+                label = removable ? "Externo" : "Interno";
+            }
+            v.put("label", label);
+            v.put("removable", removable);
+            long free = -1;
+            try {
+                android.os.StatFs st = new android.os.StatFs(dir.getAbsolutePath());
+                free = st.getAvailableBytes();
+            } catch (Throwable ignored) {}
+            v.put("freeBytes", free);
+            v.put("writable", dir.isDirectory() && dir.canWrite());
+            volumes.put(v);
+        }
+        // Con acceso a todo el almacenamiento (o WRITE en API<=29) también
+        // se ofrece la carpeta pública Download del sistema.
+        boolean allFiles = Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED;
+        if (allFiles) {
+            try {
+                File pub = new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS), "OctoStream");
+                JSObject v = new JSObject();
+                v.put("path", pub.getAbsolutePath());
+                v.put("label", "Descargas del sistema");
+                v.put("removable", false);
+                v.put("systemPublic", true);
+                long free = -1;
+                try {
+                    android.os.StatFs st = new android.os.StatFs(
+                            Environment.getExternalStorageDirectory().getAbsolutePath());
+                    free = st.getAvailableBytes();
+                } catch (Throwable ignored) {}
+                v.put("freeBytes", free);
+                v.put("writable", true); // la escritura se valida en setDownloadDirPath
+                volumes.put(v);
+            } catch (Throwable ignored) {}
+        }
+        return volumes;
     }
 
     /**

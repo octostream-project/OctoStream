@@ -197,7 +197,33 @@ export async function pickDownloadFolder() {
  */
 const localPosKey = (uri) => 'octostream_localpos_' + uri
 
+// Los subtítulos locales se pre-leen a UTF-8 y viajan como data: URI.
+// Motivo: la lectura vía ContentResolver dentro del loader de ExoPlayer
+// puede colgar la preparación del vídeo en providers SAF lentos/rotos
+// (y los .srt en Latin-1 salían con tildes corruptas como UTF-8).
+async function toDataUriSubtitles(subtitles) {
+  if (!subtitles?.length || !isAndroidNative()) return subtitles
+  return Promise.all(subtitles.map(async s => {
+    const url = String(s?.url || '')
+    if (!url.startsWith('content://') && !url.startsWith('file://')) return s
+    try {
+      const r = await ExoPlayer.readTextFile({ uri: url })
+      if (!r?.text) return s
+      const bytes = new TextEncoder().encode(r.text)
+      let bin = ''
+      for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
+      }
+      const mime = s.mimeType || 'application/x-subrip'
+      return { ...s, url: `data:${mime};base64,${btoa(bin)}` }
+    } catch {
+      return s // falla la lectura: conserva la URI original
+    }
+  }))
+}
+
 export async function playLocalFile({ uri, title, startTime, subtitles }, onStateChange) {
+  subtitles = await toDataUriSubtitles(subtitles)
   const key = localPosKey(uri)
   let resumeAt = startTime || 0
   if (!resumeAt) {

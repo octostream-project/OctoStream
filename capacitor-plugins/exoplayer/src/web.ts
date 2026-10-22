@@ -91,4 +91,8 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async importConfig(): Promise<{ content: string; name?: string }> {
     throw new Error('importConfig is only available on Android')
   }
+
+  async readTextFile(_options: { uri: string }): Promise<{ text: string }> {
+    throw new Error('readTextFile is only available on Android')
+  }
 }

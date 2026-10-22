@@ -50,7 +50,7 @@ export interface PickVideoResult {
   /** URI content:// persistible (SAF) — reproducible directamente en Media3 */
   uri: string
   /** Todas las URIs seleccionadas (multi-pick: vídeo + .srt en un gesto) */
-  files?: Array<{ uri: string; name: string; size: number }>
+  files?: Array<{ uri: string; name: string; size: number; mimeType?: string }>
   /** Nombre visible del archivo (OpenableColumns.DISPLAY_NAME) */
   name: string
   /** Tamaño en bytes (-1 si el provider no lo informa) */
@@ -219,6 +219,12 @@ export interface ExoPlayerPlugin {
   exportConfig(options: { filename?: string; content: string }): Promise<{ saved: boolean; uri?: string }>
   /** SAF "Abrir": lee un archivo JSON y devuelve su contenido (tope 4 MB) */
   importConfig(): Promise<{ content: string; name?: string }>
+  /**
+   * Lee un archivo de texto vía ContentResolver (content://file://) y lo
+   * devuelve decodificado a UTF-8 — detecta UTF-8/BOM y cae a
+   * Windows-1252 para los .srt en Latin-1 (tope 8 MB).
+   */
+  readTextFile(options: { uri: string }): Promise<{ text: string }>
   playEmbed(options: PlayEmbedOptions): Promise<PlayEmbedResult>
   /**
    * Resuelve un embed de forma invisible: WebView oculto que deja correr el

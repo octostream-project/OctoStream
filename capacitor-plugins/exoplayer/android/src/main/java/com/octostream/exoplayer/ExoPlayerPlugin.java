@@ -3432,9 +3432,11 @@ public class ExoPlayerPlugin extends Plugin {
                 JSONObject s = subsJson.optJSONObject(i);
                 if (s == null) continue;
                 String subUrl = s.optString("url", "");
-                // http(s) para subs de plugins; content://file:// solo en la
-                // ruta localFile (subtítulo elegido por el usuario con SAF).
-                boolean isLocalSub = subUrl.startsWith("content://") || subUrl.startsWith("file://");
+                // http(s) para subs de plugins; content://file:// y data:
+                // solo en la ruta localFile (subtítulo elegido con SAF y
+                // pre-leído a UTF-8 por JS para no depender del provider).
+                boolean isLocalSub = subUrl.startsWith("content://") || subUrl.startsWith("file://")
+                        || subUrl.startsWith("data:");
                 if (subUrl.isEmpty() || !(subUrl.startsWith("http://") || subUrl.startsWith("https://")
                         || (localFile && isLocalSub))) continue;
                 String mime = s.optString("mimeType", "").toLowerCase(java.util.Locale.ROOT);
@@ -3701,7 +3703,58 @@ public class ExoPlayerPlugin extends Plugin {
         o.put("uri", uri.toString());
         o.put("name", name);
         o.put("size", size);
+        try {
+            String mime = getContext().getContentResolver().getType(uri);
+            o.put("mimeType", mime != null ? mime : "");
+        } catch (Exception ignored) {}
         return o;
+    }
+
+    /**
+     * Lee un archivo de texto (subtítulo .srt/.vtt/…) vía ContentResolver y lo
+     * devuelve como String UTF-8 — detecta UTF-8/BOM y cae a Windows-1252
+     * (los .srt españoles suelen venir en Latin-1 y decodificados como UTF-8
+     * salen con caracteres rotos). Así el subtítulo llega al player como
+     * data: URI sin dependencia del provider SAF en tiempo de reproducción.
+     */
+    @PluginMethod
+    public void readTextFile(PluginCall call) {
+        String uriStr = call.getString("uri", "");
+        if (uriStr.isEmpty()) { call.reject("uri vacía"); return; }
+        try (java.io.InputStream in = getContext().getContentResolver().openInputStream(Uri.parse(uriStr));
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            if (in == null) { call.reject("no se pudo abrir el archivo"); return; }
+            byte[] buf = new byte[16384];
+            int r;
+            while ((r = in.read(buf)) >= 0) {
+                if (bos.size() > 8 * 1024 * 1024) { call.reject("archivo demasiado grande"); return; }
+                bos.write(buf, 0, r);
+            }
+            byte[] raw = bos.toByteArray();
+            String text = decodeTextUtf8(raw);
+            JSObject ret = new JSObject();
+            ret.put("text", text);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("error leyendo: " + e.getMessage());
+        }
+    }
+
+    // UTF-8 estricto; si falla la validación, el archivo es casi seguro
+    // Windows-1252/Latin-1 (áéíóúñ¿¡ de los .srt españoles).
+    private static String decodeTextUtf8(byte[] raw) {
+        // BOM UTF-8
+        if (raw.length >= 3 && raw[0] == (byte) 0xEF && raw[1] == (byte) 0xBB && raw[2] == (byte) 0xBF) {
+            return new String(raw, 3, raw.length - 3, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        java.nio.charset.CharsetDecoder dec = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT);
+        try {
+            return dec.decode(java.nio.ByteBuffer.wrap(raw)).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return new String(raw, java.nio.charset.Charset.forName("windows-1252"));
+        }
     }
 
     private void openPlayer(String url, String streamType, boolean direct, String licenseUrl,

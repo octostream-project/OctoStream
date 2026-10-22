@@ -46,6 +46,10 @@ export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
     throw new Error('Selector de carpeta solo disponible en Android/Electron')
   }
 
+  async requestStorageAccess(): Promise<{ granted: boolean }> {
+    return { granted: false }
+  }
+
   async resetDownloadDir(): Promise<void> {}
 
   async stop(): Promise<void> {}

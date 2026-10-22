@@ -38,6 +38,7 @@ export default function AddStream() {
       if (!files.length) return
       // Multi-selección: el .srt/.vtt elegido junto al vídeo se engancha solo.
       const isSub = f => /\.(srt|vtt|ass|ssa)$/i.test(f.name || '')
+        || /subrip|subtitle|vtt|srt/i.test(f.mimeType || '')
       const subtitle = files.find(isSub) || null
       const video = files.find(f => !isSub(f)) || null
       if (!video?.uri) { setLocalError('No se seleccionó ningún vídeo'); return }

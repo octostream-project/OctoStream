@@ -111,7 +111,12 @@ export default function DownloadsList() {
     setDirPickerOpen(true)
     try {
       const engine = await getTorrentEngine()
-      const res = await engine?.downloadVolumes?.()
+      // Si un volumen montado cuelga el listado nativo, no dejar el
+      // spinner para siempre: a los 6s se muestra la lista vacía.
+      const res = await Promise.race([
+        engine?.downloadVolumes?.(),
+        new Promise(r => setTimeout(() => r(null), 6000)),
+      ])
       setVolumes(res?.volumes || [])
     } catch {
       setVolumes([])
@@ -135,8 +140,33 @@ export default function DownloadsList() {
     }
   }
 
+  const handleGrantStorage = async () => {
+    setPickingDir(true)
+    try {
+      const engine = await getTorrentEngine()
+      const r = await engine?.requestStorageAccess?.()
+      if (r?.granted) {
+        toast.success('Acceso al almacenamiento concedido')
+        setDirInfo(d => ({ ...(d || {}), allFilesAccess: true }))
+        // Recargar volúmenes: con all-files aparece "Descargas del sistema".
+        const res = await engine?.downloadVolumes?.()
+        setVolumes(res?.volumes || [])
+      } else {
+        toast('No se concedió el acceso — puedes usar igualmente las carpetas de la app o el selector del sistema', 6000)
+      }
+    } catch (e) {
+      toast.error(e?.message || 'No se pudo pedir el permiso')
+    } finally {
+      setPickingDir(false)
+    }
+  }
+
   const handleSafPick = async () => {
     setPickingDir(true)
+    // Si el DocumentsUI del sistema no llega a abrir (algunas ROMs), la
+    // promesa queda pendiente para siempre — quitamos el spinner a los 4s;
+    // si el picker abre tarde, la selección se aplica igual.
+    const unstick = setTimeout(() => setPickingDir(false), 4000)
     try {
       const engine = await getTorrentEngine()
       const picked = await pickDownloadFolder()
@@ -155,6 +185,7 @@ export default function DownloadsList() {
         toast.error(e?.message || 'No se pudo elegir la carpeta')
       }
     } finally {
+      clearTimeout(unstick)
       setPickingDir(false)
     }
   }
@@ -249,6 +280,11 @@ export default function DownloadsList() {
             </div>
           ) : (
             <div className="space-y-2 mb-4">
+              {volumes.length === 0 && (
+                <p className="text-dark-500 text-sm py-2">
+                  No se detectó almacenamiento — prueba con el selector del sistema.
+                </p>
+              )}
               {volumes.map((v) => {
                 const Icon = v.removable ? Usb : HardDrive
                 const root = v.path.replace(/\/Android\/data\/.*$/, '')
@@ -273,6 +309,12 @@ export default function DownloadsList() {
                 )
               })}
             </div>
+          )}
+          {!dirInfo?.allFilesAccess && isAndroidNative() && (
+            <button onClick={handleGrantStorage} disabled={pickingDir} className="btn-secondary w-full flex items-center justify-center gap-2 text-sm mb-2">
+              <HardDrive size={15} />
+              Permitir acceso a todo el almacenamiento
+            </button>
           )}
           <button onClick={handleSafPick} disabled={pickingDir} className="btn-secondary w-full flex items-center justify-center gap-2 text-sm">
             {pickingDir ? <Loader2 size={15} className="animate-spin" /> : <FolderSearch size={15} />}

@@ -162,6 +162,12 @@ export interface TorrentEnginePlugin {
   downloadVolumes(): Promise<{ volumes: DownloadVolume[] }>
   /** Fija la carpeta por ruta real (de downloadVolumes u otra escribible) */
   setDownloadDirPath(options: { path: string }): Promise<PickDownloadDirResult>
+  /**
+   * Pide el acceso de escritura al almacenamiento: diálogo runtime en
+   * API<=29, pantalla "Acceso a todos los archivos" en API 30+
+   * (Storage Scopes en GrapheneOS). Devuelve si quedó concedido.
+   */
+  requestStorageAccess(): Promise<{ granted: boolean }>
   /** Vuelve a la carpeta por defecto */
   resetDownloadDir(): Promise<void>
   stop(): Promise<void>
