@@ -20,6 +20,8 @@ export async function getTorrentEngine() {
       deleteDownload: (o) => t.deleteDownload(o),
       getDownloadDir: () => t.getDownloadDir(),
       pickDownloadDir: () => t.pickDownloadDir(),
+      setDownloadDirPath: (o) => t.setDownloadDirPath ? t.setDownloadDirPath(o) : t.pickDownloadDir(o),
+      downloadVolumes: () => t.downloadVolumes ? t.downloadVolumes() : Promise.resolve({ volumes: [] }),
       resetDownloadDir: () => t.resetDownloadDir(),
       stop: () => t.stop(),
       status: () => t.status(),

@@ -3,7 +3,8 @@ import { getTorrentEngine } from '../utils/torrentEngine.js'
 import { playLocalFile, pickDownloadFolder } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { toast } from './ui/Toast.jsx'
-import { Play, Trash2, Download, FolderOpen, Loader2 } from 'lucide-react'
+import Modal from './ui/Modal.jsx'
+import { Play, Trash2, Download, FolderOpen, Loader2, HardDrive, Usb, FolderSearch } from 'lucide-react'
 
 // Lista de descargas offline (torrent + http): descarga en curso con
 // porcentaje, archivos completados (reproducir/borrar) y selector de la
@@ -13,6 +14,8 @@ export default function DownloadsList() {
   const [active, setActive] = useState(null)
   const [dirInfo, setDirInfo] = useState(null)
   const [pickingDir, setPickingDir] = useState(false)
+  const [dirPickerOpen, setDirPickerOpen] = useState(false)
+  const [volumes, setVolumes] = useState(null)
   const listenerRef = useRef(null)
   const canDownload = isAndroidNative() || isElectron()
 
@@ -81,29 +84,74 @@ export default function DownloadsList() {
     }
   }
 
+  // Android: modal con volúmenes escribibles sin permisos (interno/SD/USB)
+  // + opción SAF para otra carpeta. En algunas ROMs el tree picker no
+  // existe, y el sistema rechaza elegir la raíz o Descargas raíz — los
+  // volúmenes de la app funcionan siempre.
   const handlePickDir = async () => {
+    if (!isAndroidNative()) {
+      setPickingDir(true)
+      try {
+        const engine = await getTorrentEngine()
+        const r = await engine?.pickDownloadDir?.()
+        if (r?.path) {
+          setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
+          toast.success('Carpeta de descargas guardada')
+        }
+      } catch (e) {
+        if (e?.message !== 'cancelled' && !e?.cancelled) {
+          toast.error(e?.message || 'No se pudo elegir la carpeta')
+        }
+      } finally {
+        setPickingDir(false)
+      }
+      return
+    }
+    setVolumes(null)
+    setDirPickerOpen(true)
+    try {
+      const engine = await getTorrentEngine()
+      const res = await engine?.downloadVolumes?.()
+      setVolumes(res?.volumes || [])
+    } catch {
+      setVolumes([])
+    }
+  }
+
+  const handleVolumePick = async (vol) => {
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
-      let r
-      if (isAndroidNative()) {
-        // El picker SAF vive en el plugin exoplayer (activity-result probado);
-        // torrent-engine solo persiste la URI elegida en sus prefs.
-        const picked = await pickDownloadFolder()
-        r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
-      } else {
-        r = await engine?.pickDownloadDir?.()
+      const r = await engine?.setDownloadDirPath?.({ path: vol.path })
+      if (r?.path) {
+        setDirInfo({ path: r.path, custom: true, treeMode: false })
+        toast.success('Carpeta de descargas guardada')
+        setDirPickerOpen(false)
       }
-      if (r?.needsPermission) {
-        toast('Si tu Android no muestra el ajuste de almacenamiento, pulsa "Carpeta" otra vez: podrás elegir carpeta igualmente.')
-        return
-      }
+    } catch (e) {
+      toast.error(e?.message || 'No se pudo usar esa carpeta')
+    } finally {
+      setPickingDir(false)
+    }
+  }
+
+  const handleSafPick = async () => {
+    setPickingDir(true)
+    try {
+      const engine = await getTorrentEngine()
+      const picked = await pickDownloadFolder()
+      const r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
       if (r?.path) {
         setDirInfo({ path: r.path, custom: true, treeMode: r.treeMode })
         toast.success('Carpeta de descargas guardada')
+        setDirPickerOpen(false)
       }
     } catch (e) {
-      if (e?.message !== 'cancelled' && !e?.cancelled) {
+      if (e?.message === 'cancelled' || e?.cancelled) {
+        // Android no deja conceder la raíz del almacenamiento ni la raíz
+        // de Descargas — hay que elegir/crear una subcarpeta dentro.
+        toast('Para elegir carpeta con el selector del sistema, entra en Descargas (o SD/USB) y selecciona o crea una subcarpeta — la raíz no está permitida por Android.', 6000)
+      } else {
         toast.error(e?.message || 'No se pudo elegir la carpeta')
       }
     } finally {
@@ -187,6 +235,50 @@ export default function DownloadsList() {
             </div>
           ))}
         </div>
+      )}
+
+      {dirPickerOpen && (
+        <Modal onClose={() => setDirPickerOpen(false)} labelledBy="dl-dir-title">
+          <h3 id="dl-dir-title" className="text-white font-semibold mb-1">Carpeta de descargas</h3>
+          <p className="text-dark-500 text-xs mb-4">
+            Las opciones de la app funcionan sin permisos en cualquier Android.
+          </p>
+          {volumes === null ? (
+            <div className="flex items-center gap-2 text-dark-500 text-sm py-4">
+              <Loader2 size={15} className="animate-spin" /> Buscando almacenamiento…
+            </div>
+          ) : (
+            <div className="space-y-2 mb-4">
+              {volumes.map((v) => {
+                const Icon = v.removable ? Usb : HardDrive
+                const root = v.path.replace(/\/Android\/data\/.*$/, '')
+                return (
+                  <button
+                    key={v.path}
+                    onClick={() => handleVolumePick(v)}
+                    disabled={!v.writable || pickingDir}
+                    className="w-full flex items-center gap-3 bg-dark-700/60 hover:bg-dark-600/60 rounded-lg p-3 text-left disabled:opacity-40"
+                  >
+                    <Icon size={18} className="text-primary-400 flex-shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-white text-sm truncate">{v.label}</span>
+                      <span className="block text-xs text-dark-500 truncate">{root}</span>
+                    </span>
+                    {v.freeBytes > 0 && (
+                      <span className="text-xs text-dark-500 flex-shrink-0">
+                        {v.freeBytes >= 1e9 ? `${(v.freeBytes / 1e9).toFixed(1)} GB` : `${Math.round(v.freeBytes / 1e6)} MB`} libres
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <button onClick={handleSafPick} disabled={pickingDir} className="btn-secondary w-full flex items-center justify-center gap-2 text-sm">
+            {pickingDir ? <Loader2 size={15} className="animate-spin" /> : <FolderSearch size={15} />}
+            Otra carpeta (selector del sistema)
+          </button>
+        </Modal>
       )}
     </div>
   )

@@ -3554,6 +3554,7 @@ public class ExoPlayerPlugin extends Plugin {
         if (call == null) return;
         try {
             Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+            Log.i(TAG, "pickFolder result: uri=" + uri);
             if (uri == null) { call.reject("cancelled"); return; }
             try {
                 getContext().getContentResolver().takePersistableUriPermission(uri,

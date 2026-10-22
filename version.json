@@ -1,18 +1,18 @@
 {
-  "versionCode": 2082,
-  "versionName": "2.08.2",
+  "versionCode": 2083,
+  "versionName": "2.08.3",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-arm64-v8a.apk",
-  "sha256": "46070cf989bfb70a90d018a1450b40301a235c9fa2a3ed83189f040bdaa722cc",
-  "notes": "Nuevos canales castellanos EstrenosCinesaA y CineMitas, AIOStreams, refactor UI con primitivas compartidas",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.3/octostream-2.08.3-arm64-v8a.apk",
+  "sha256": "f339aaa2c0e8dfa475fe71474932057cff55de4ccf064719423196392b8ff261",
+  "notes": "Selector de carpeta de descargas por volumenes (interno/SD/USB) sin depender de SAF ni ajustes del sistema",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.3/octostream-2.08.3-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.3/octostream-2.08.3-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.3/octostream-2.08.3-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "46070cf989bfb70a90d018a1450b40301a235c9fa2a3ed83189f040bdaa722cc",
-    "armeabi-v7a": "ef75ee23dc230073172b64a46c0ae9b9a52d4f910355e8483b462b82de80ef5d",
-    "x86_64": "99bb41b2ff1748112f4b1ff8be52719fb348a2a8146320d1bb9c6ae91431a08d"
+    "arm64-v8a": "f339aaa2c0e8dfa475fe71474932057cff55de4ccf064719423196392b8ff261",
+    "armeabi-v7a": "09f811bece3512b54cb28c3962a17a088df9878c4ce264a02f9ba7e2edd0f458",
+    "x86_64": "58a09823e44e8f731c806787603213149999fd6eb83b824008d020eb41102177"
   }
 }

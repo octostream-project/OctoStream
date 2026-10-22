@@ -352,6 +352,91 @@ public class TorrentEnginePlugin extends Plugin {
     }
 
     /**
+     * Lista los volúmenes con carpeta de la app escribible sin permisos
+     * (getExternalFilesDirs → interno, SD, USB OTG). Cada entrada:
+     * {label, path, removable, freeBytes, writable}. Es la vía garantizada
+     * cuando el SAF tree picker no existe (algunas ROMs) o el sistema
+     * rechaza la selección (raíz/Descargas no se pueden conceder).
+     */
+    @PluginMethod
+    public void downloadVolumes(PluginCall call) {
+        JSArray volumes = new JSArray();
+        try {
+            android.os.storage.StorageManager sm =
+                    getContext().getSystemService(android.os.storage.StorageManager.class);
+            File[] dirs = getContext().getExternalFilesDirs(null);
+            for (File dir : dirs) {
+                if (dir == null) continue;
+                File dl = new File(dir, "downloads");
+                dl.mkdirs();
+                JSObject v = new JSObject();
+                v.put("path", dl.getAbsolutePath());
+                String label = null;
+                boolean removable = false;
+                try {
+                    android.os.storage.StorageVolume vol =
+                            sm != null ? sm.getStorageVolume(dir) : null;
+                    if (vol != null) {
+                        label = vol.getDescription(getContext());
+                        removable = vol.isRemovable();
+                    }
+                } catch (Throwable ignored) {}
+                if (label == null || label.isEmpty()) {
+                    label = removable ? "Externo" : "Interno";
+                }
+                v.put("label", label);
+                v.put("removable", removable);
+                long free = -1;
+                try {
+                    android.os.StatFs st = new android.os.StatFs(dir.getAbsolutePath());
+                    free = st.getAvailableBytes();
+                } catch (Throwable ignored) {}
+                v.put("freeBytes", free);
+                v.put("writable", dl.isDirectory() && dl.canWrite());
+                volumes.put(v);
+            }
+        } catch (Throwable t) {
+            call.reject("No se pudieron listar volúmenes: " + t.getMessage());
+            return;
+        }
+        JSObject ret = new JSObject();
+        ret.put("volumes", volumes);
+        call.resolve(ret);
+    }
+
+    /**
+     * Fija la carpeta de descarga por ruta real (para las rutas de
+     * downloadVolumes u otras que ya sean escribibles). No pide permisos:
+     * valida mkdirs+canWrite y persiste en download_dir (modo ruta).
+     */
+    @PluginMethod
+    public void setDownloadDirPath(PluginCall call) {
+        String path = call.getString("path");
+        if (path == null || path.isEmpty()) {
+            call.reject("path vacío");
+            return;
+        }
+        try {
+            File d = new File(path);
+            d.mkdirs();
+            if (!d.isDirectory() || !d.canWrite()) {
+                call.reject("Sin permiso de escritura en " + path);
+                return;
+            }
+            getContext().getSharedPreferences(PREFS, 0).edit()
+                    .putString("download_dir", d.getAbsolutePath())
+                    .remove("download_tree").apply();
+            JSObject ret = new JSObject();
+            ret.put("path", d.getAbsolutePath());
+            ret.put("custom", true);
+            ret.put("treeMode", false);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.reject("No se pudo usar la carpeta: " + t.getMessage());
+        }
+    }
+
+    /**
      * Selector de carpeta (SAF OPEN_DOCUMENT_TREE). Siempre va directo al
      * picker del sistema — sin pantallas de ajustes: en varios Android
      * (GrapheneOS/Storage Scopes, algunos fabricantes) la pantalla de
@@ -396,6 +481,7 @@ public class TorrentEnginePlugin extends Plugin {
         if (call == null) return;
         try {
             Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+            Log.i(TAG, "pickDownloadDir result: uri=" + uri);
             if (uri == null) { call.reject("cancelled"); return; }
             try {
                 getContext().getContentResolver().takePersistableUriPermission(uri,

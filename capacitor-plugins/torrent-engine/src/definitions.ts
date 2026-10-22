@@ -113,6 +113,16 @@ export interface PickDownloadDirResult {
   needsPermission?: boolean
 }
 
+export interface DownloadVolume {
+  /** Etiqueta del volumen (p.ej. "Almacenamiento interno", "Tarjeta SD", "USB") */
+  label: string
+  /** Ruta escribible de la app en ese volumen (…/Android/data/pkg/files/downloads) */
+  path: string
+  removable: boolean
+  freeBytes: number
+  writable: boolean
+}
+
 export interface TorrentEnginePlugin {
   start(options: TorrentStartOptions): Promise<TorrentStartResult>
   /** Lista los archivos de vídeo del torrent (solo metadatos) para picker UI */
@@ -144,6 +154,14 @@ export interface TorrentEnginePlugin {
    * modo ruta real (con all-files) o árbol SAF.
    */
   setDownloadDir(options: { treeUri: string }): Promise<PickDownloadDirResult>
+  /**
+   * Volúmenes montados con carpeta de la app escribible sin permisos
+   * (interno, SD, USB OTG). Vía garantizada cuando el SAF tree picker no
+   * existe en la ROM o el sistema rechaza la selección (raíz/Descargas).
+   */
+  downloadVolumes(): Promise<{ volumes: DownloadVolume[] }>
+  /** Fija la carpeta por ruta real (de downloadVolumes u otra escribible) */
+  setDownloadDirPath(options: { path: string }): Promise<PickDownloadDirResult>
   /** Vuelve a la carpeta por defecto */
   resetDownloadDir(): Promise<void>
   stop(): Promise<void>

@@ -1,5 +1,5 @@
 import { WebPlugin } from '@capacitor/core'
-import type { DownloadDirInfo, HttpDownloadOptions, HttpDownloadResult, PickDownloadDirResult, TorrentDownloadResult, TorrentEnginePlugin, TorrentListResult, TorrentStartOptions, TorrentStartResult, TorrentStatusResult } from './definitions'
+import type { DownloadDirInfo, DownloadVolume, HttpDownloadOptions, HttpDownloadResult, PickDownloadDirResult, TorrentDownloadResult, TorrentEnginePlugin, TorrentListResult, TorrentStartOptions, TorrentStartResult, TorrentStatusResult } from './definitions'
 
 export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
   async start(_options: TorrentStartOptions): Promise<TorrentStartResult> {
@@ -35,6 +35,14 @@ export class TorrentEngineWeb extends WebPlugin implements TorrentEnginePlugin {
   }
 
   async setDownloadDir(_options: { treeUri: string }): Promise<PickDownloadDirResult> {
+    throw new Error('Selector de carpeta solo disponible en Android/Electron')
+  }
+
+  async downloadVolumes(): Promise<{ volumes: DownloadVolume[] }> {
+    return { volumes: [] }
+  }
+
+  async setDownloadDirPath(_options: { path: string }): Promise<PickDownloadDirResult> {
     throw new Error('Selector de carpeta solo disponible en Android/Electron')
   }
 
