@@ -1,18 +1,18 @@
 {
-  "versionCode": 2084,
-  "versionName": "2.08.4",
+  "versionCode": 2085,
+  "versionName": "2.08.5",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.4/octostream-2.08.4-arm64-v8a.apk",
-  "sha256": "9fb5f40e604059781857aaacc908a383e03f84aeeb67fab40fa1733a68b0ba64",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.5/octostream-2.08.5-arm64-v8a.apk",
+  "sha256": "5c60c9cfd04e81c730dc7d4639cc3f15942f963ef9ff6a11a60fca7cae02e926",
   "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.4/octostream-2.08.4-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.4/octostream-2.08.4-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.4/octostream-2.08.4-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.5/octostream-2.08.5-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.5/octostream-2.08.5-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.5/octostream-2.08.5-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "9fb5f40e604059781857aaacc908a383e03f84aeeb67fab40fa1733a68b0ba64",
-    "armeabi-v7a": "ef3d9cb6bba78b33ee44fcfa6233752f5b8ad24ca41370dcc05898111ad48d59",
-    "x86_64": "e050963e4d32404cc11e341abde466478179c0661d161f81c39584fcf7dc8847"
+    "arm64-v8a": "5c60c9cfd04e81c730dc7d4639cc3f15942f963ef9ff6a11a60fca7cae02e926",
+    "armeabi-v7a": "ab9f252a054ca74d996949b0546d3fd3181e3a19747ce394ed305a78e8e930e8",
+    "x86_64": "cd00cb1d9300c522f823c1c7499eba27fae5704094f116c7ece268fb986efc30"
   }
 }

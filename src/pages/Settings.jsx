@@ -124,6 +124,7 @@ export default function Settings() {
   const [aioUuid, setAioUuid] = useState(localStorage.getItem('octostream_aiostreams_uuid') || '')
   const [aioPass, setAioPass] = useState(localStorage.getItem('octostream_aiostreams_password') || '')
   const [aioSaved, setAioSaved] = useState(false)
+  const [aioManifest, setAioManifest] = useState(localStorage.getItem('octostream_aiostreams_manifest') || '')
   const [aioTest, setAioTest] = useState(null) // null | {loading:true} | {ok,results} | {ok:false,error}
 
   // Clear PIN polling interval on unmount
@@ -312,6 +313,8 @@ export default function Settings() {
     else localStorage.removeItem('octostream_aiostreams_uuid')
     if (aioPass) localStorage.setItem('octostream_aiostreams_password', aioPass)
     else localStorage.removeItem('octostream_aiostreams_password')
+    if (aioManifest.trim()) localStorage.setItem('octostream_aiostreams_manifest', aioManifest.trim())
+    else localStorage.removeItem('octostream_aiostreams_manifest')
     setAioSaved(true)
     setTimeout(() => setAioSaved(false), 2000)
   }
@@ -320,7 +323,7 @@ export default function Settings() {
     setAioTest({ loading: true })
     try {
       const { testAiostreamsConnection } = await import('../plugins/bundled/plurtasko/channels/aiostreams.js')
-      setAioTest(await testAiostreamsConnection({ instance: aioInstance, uuid: aioUuid, password: aioPass }))
+      setAioTest(await testAiostreamsConnection({ instance: aioInstance, uuid: aioUuid, password: aioPass, manifest: aioManifest }))
     } catch (e) {
       setAioTest({ ok: false, error: e?.message || 'Error desconocido' })
     }
@@ -1366,28 +1369,41 @@ export default function Settings() {
               </div>
             </div>
             <div className="space-y-3">
-              <input
-                type="text"
-                value={aioInstance}
-                onChange={e => setAioInstance(e.target.value)}
-                placeholder="https://aiostreams.elfhosted.com"
-                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
-              />
-              <input
-                type="text"
-                value={aioUuid}
-                onChange={e => setAioUuid(e.target.value)}
-                placeholder="UUID"
-                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
-              />
-              <input
-                type="password"
-                value={aioPass}
-                onChange={e => setAioPass(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAioSave()}
-                placeholder="Contraseña"
-                className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
-              />
+              <div>
+                <label className="text-dark-400 text-xs mb-1 block">URL de manifest (recomendado — funciona en elfhosted sin contraseña)</label>
+                <input
+                  type="text"
+                  value={aioManifest}
+                  onChange={e => setAioManifest(e.target.value)}
+                  placeholder="https://aiostreams.elfhosted.com/stremio/<uuid>/<config>/manifest.json"
+                  className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+              <div className="border-t border-dark-700 pt-3">
+                <label className="text-dark-400 text-xs mb-1 block">Alternativa (solo self-hosted con Search API activada)</label>
+                <input
+                  type="text"
+                  value={aioInstance}
+                  onChange={e => setAioInstance(e.target.value)}
+                  placeholder="https://aiostreams.elfhosted.com"
+                  className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none mb-2"
+                />
+                <input
+                  type="text"
+                  value={aioUuid}
+                  onChange={e => setAioUuid(e.target.value)}
+                  placeholder="UUID"
+                  className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none mb-2"
+                />
+                <input
+                  type="password"
+                  value={aioPass}
+                  onChange={e => setAioPass(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAioSave()}
+                  placeholder="Contraseña"
+                  className="w-full bg-dark-700 text-white rounded-lg px-4 py-3 border border-dark-600 focus:border-primary-500 focus:outline-none"
+                />
+              </div>
               {aioSaved && (
                 <div className="flex items-center gap-2 text-green-400 text-sm">
                   <Check size={16} />
@@ -1430,7 +1446,9 @@ export default function Settings() {
                   </a>
                 </li>
                 <li>Activa los providers que quieras (en español: Torrentio ES, MediaFusion…)</li>
-                <li>Crea tu UUID y contraseña y pégalos arriba</li>
+                <li>Crea una contraseña → te dará un UUID y la URL de instalación</li>
+                <li>Copia la URL de manifest (termina en <code>/manifest.json</code>) y pégala en el primer campo</li>
+                <li>UUID + contraseña solo hacen falta en instancias propias con la Search API activada (elfhosted la tiene desactivada)</li>
               </ol>
             </div>
           </div>
@@ -1451,8 +1469,8 @@ export default function Settings() {
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-dark-400">AIOStreams (UUID + contraseña)</span>
-                {localStorage.getItem('octostream_aiostreams_uuid') && localStorage.getItem('octostream_aiostreams_password') ? (
+                <span className="text-dark-400">AIOStreams (manifest o UUID + contraseña)</span>
+                {localStorage.getItem('octostream_aiostreams_manifest') || (localStorage.getItem('octostream_aiostreams_uuid') && localStorage.getItem('octostream_aiostreams_password')) ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
