@@ -208,15 +208,43 @@ export const aiostreams = {
 // ── Respuesta protocolo Stremio ────────────────────────────────────────────
 // streams[]: {name, title|description, url?, infoHash?, fileIdx?,
 //             sources["tracker:…"|"dht:…"], behaviorHints{proxyHeaders}}
+// Extrae de la descripción formateada de AIOStreams los datos que la UI
+// necesita: caché del debrid ("⚡Ready (AD)" / "⏳Not Ready (AD)"), addon
+// origen (🔍), indexador (📡) y tamaño (📦).
+function parseAioDescription(desc) {
+  const t = String(desc || '')
+  const cached = /not ready|⏳|downloading/i.test(t) ? false
+    : /ready|cached|⚡/i.test(t) ? true : undefined
+  const addon = (t.match(/🔍\s*([^\n]+)/)?.[1] || '').trim()
+  const indexer = (t.match(/📡\s*([^\n]+)/)?.[1] || '').trim()
+  const size = (t.match(/📦\s*([\d.,]+\s*[GMTK]i?B)/i)?.[1] || '').trim()
+  return { cached, addon, indexer, size }
+}
+
+// Idioma del archivo real: primero el filename de behaviorHints (lleva los
+// códigos del release, "…ESP.LATINO…"), luego el bingeGroup (nombres en
+// inglés: "Spanish", "English"…) y por último la descripción.
+function detectAioLang(s) {
+  const filename = s.behaviorHints?.filename || ''
+  const binge = String(s.behaviorHints?.bingeGroup || '').split('|').slice(1).join(' ')
+  const desc = String(s.description || s.title || '')
+  // Un archivo con pistas ESP+LATINO no es "Esp" puro: es multi-audio.
+  if (/\b(esp|cast|spanish)\b/i.test(`${filename} ${binge}`) && /\b(lat|latino)\b/i.test(`${filename} ${binge}`)) return 'Dual'
+  return detectLangFromText(filename) || detectLangFromText(binge) || detectLangFromText(desc)
+}
+
 function stremioToStream(s) {
   const name = String(s.name || 'AIOStreams')
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
-  const lang = detectLangFromText(info)
+  const meta = parseAioDescription(s.description)
+  const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
   const headers = s.behaviorHints?.proxyHeaders?.request
     || s.behaviorHints?.proxyHeaders?.response
     || undefined
+  // "🚀 FHD" como server no dice nada; mejor el addon/indexador real.
+  const serverLabel = [meta.indexer, meta.addon].filter(Boolean).join(' · ') || name
 
   const hash = (s.infoHash || '').toLowerCase()
   if (hash) {
@@ -227,11 +255,13 @@ function stremioToStream(s) {
       if (/^https?:|^udp:/.test(tr)) magnet += `&tr=${encodeURIComponent(tr)}`
     }
     if (s.fileIdx != null) magnet += `&so=${s.fileIdx}`
-    const stream = makeTorrentStream(name, withDefaultTrackers(magnet), quality, label)
-    stream.name = `${name}${lang ? ` (${lang})` : ''} ${quality}`
+    const stream = makeTorrentStream(serverLabel, withDefaultTrackers(magnet), quality, label)
+    stream.name = `${serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
     stream.lang = lang
     stream.title = label
     stream.headers = headers
+    stream.cached = meta.cached
+    stream.size = meta.size || undefined
     stream.pluginName = 'AIOStreams'
     stream.channelName = 'AIOStreams'
     return stream
@@ -240,15 +270,16 @@ function stremioToStream(s) {
   const url = String(s.url || s.externalUrl || '')
   if (!/^https?:/i.test(url)) return null
   return {
-    name: `${name}${lang ? ` (${lang})` : ''} ${quality}${label ? ` · ${label}` : ''}`,
+    name: `${serverLabel}${lang ? ` (${lang})` : ''} ${quality}${label ? ` · ${label}` : ''}`,
     url,
     streamType: inferStreamType(url, 'mp4'),
     quality,
-    server: name,
+    server: serverLabel,
     lang,
     title: label,
     headers,
-    cached: Boolean(s.behaviorHints?.cached) || undefined,
+    size: meta.size || undefined,
+    cached: meta.cached ?? (Boolean(s.behaviorHints?.cached) || undefined),
     pluginName: 'AIOStreams',
     channelName: 'AIOStreams',
     pluginId: 'plurtasko',

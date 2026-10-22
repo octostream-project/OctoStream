@@ -31,6 +31,12 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
                 {lang && (
                   <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{lang}</span>
                 )}
+                {stream.cached === true && (
+                  <span className="text-xs text-emerald-400 flex-shrink-0" title="Cacheado en debrid">⚡</span>
+                )}
+                {stream.cached === false && (
+                  <span className="text-xs text-amber-400 flex-shrink-0" title="No cacheado — el debrid lo descarga al reproducir">⏳</span>
+                )}
                 {quality && (
                   <span className={`text-xs ${qualityColorClass(quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{quality}</span>
                 )}
@@ -76,6 +82,12 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             ) : /\(p2p\)/i.test(stream.server || '') ? (
               <span className="text-xs bg-amber-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">P2P</span>
             ) : null}
+            {stream.cached === true && (
+              <span className="text-xs bg-emerald-700 text-white px-2 py-1 rounded font-bold flex-shrink-0" title="Cacheado en debrid — reproduce al instante">⚡</span>
+            )}
+            {stream.cached === false && (
+              <span className="text-xs bg-amber-700 text-white px-2 py-1 rounded font-bold flex-shrink-0" title="No cacheado — el debrid empieza a descargarlo al reproducir">⏳</span>
+            )}
             {quality && (
               <span className={`text-xs ${qualityColorClass(quality)} text-white px-2 py-1 rounded font-bold flex-shrink-0`}>{quality}</span>
             )}
