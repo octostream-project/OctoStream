@@ -3777,6 +3777,7 @@ public class ExoPlayerPlugin extends Plugin {
         seasonList = seasons;
         displayedSeason = season > 0 ? season : firstEpisodeSeason(episodes);
         externalSubUrl = null;
+        externalSubMime = null;
         pendingSelectExternalSub = false;
         playerMode = mode != null ? mode : "vod";
         // Una lista de canales solo se envía para Live TV. Esto mantiene el
@@ -4923,7 +4924,8 @@ public class ExoPlayerPlugin extends Plugin {
         final MediaItem.SubtitleConfiguration externalSubConfig =
                 (externalSubUrl != null && !externalSubUrl.isEmpty())
                         ? new MediaItem.SubtitleConfiguration.Builder(Uri.parse(externalSubUrl))
-                                .setMimeType(externalSubUrl.toLowerCase().contains(".vtt")
+                                .setMimeType(externalSubMime != null ? externalSubMime
+                                        : externalSubUrl.toLowerCase().contains(".vtt")
                                         ? androidx.media3.common.MimeTypes.TEXT_VTT
                                         : androidx.media3.common.MimeTypes.APPLICATION_SUBRIP)
                                 .setLanguage(externalSubLang)
@@ -6402,6 +6404,7 @@ public class ExoPlayerPlugin extends Plugin {
                 DataSource.Factory dsFactory = buildStreamDataSourceFactory(url, headers, direct, false);
                 // Al hacer zapping el subtítulo externo ya no aplica.
                 externalSubUrl = null;
+                externalSubMime = null;
                 pendingSelectExternalSub = false;
                 lastDataSourceFactory = dsFactory;
                 lastStreamType = streamType;
@@ -7342,13 +7345,72 @@ public class ExoPlayerPlugin extends Plugin {
         return 2;
     }
 
+    // MIME del subtítulo externo activo — cuando la URL es una data: URI el
+    // tipo no se puede inferir del path, así que se guarda aquí.
+    private String externalSubMime = null;
+
     // Aplica un subtítulo side-loaded: reconstruye el MediaSource con la
     // configuración de subtítulo y continúa desde la posición actual.
+    // La descarga se hace aquí (hilo de fondo) y el texto viaja como data:
+    // URI — dl.opensubtitles.com sirve los .srt gzipados y a menudo en
+    // Windows-1252: un body comprimido llegaba crudo al parser y un
+    // ParserException dentro de SingleSampleMediaSource TUMBA la
+    // reproducción entera (treatLoadErrorsAsEndOfStream solo cubre errores
+    // de red, no de parseo). Con el texto ya decodificado no hay nada que
+    // pueda romperse en el loader.
     private void applyExternalSubtitle(String url, String lang) {
         if (player == null || url == null || url.isEmpty()) return;
         if (!url.startsWith("http://") && !url.startsWith("https://")) return;
-        externalSubUrl = url;
-        externalSubLang = opensubsToIso1(lang);
+        final String langIso = opensubsToIso1(lang);
+        new Thread(() -> {
+            String dataUri;
+            String mime;
+            try {
+                OkHttpClient client = sharedOkHttpClient();
+                Response resp = client.newCall(new Request.Builder().url(url).build()).execute();
+                if (!resp.isSuccessful() || resp.body() == null) {
+                    throw new Exception("HTTP " + resp.code());
+                }
+                byte[] raw = resp.body().bytes();
+                // Content-Encoding: gzip ya lo quita OkHttp; esto cubre un
+                // body gzipado sin la cabecera (serve de dl.opensubtitles).
+                if (raw.length >= 2 && (raw[0] & 0xFF) == 0x1F && (raw[1] & 0xFF) == 0x8B) {
+                    try (java.util.zip.GZIPInputStream gz =
+                                 new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(raw));
+                         ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                        byte[] buf = new byte[16384];
+                        int r;
+                        while ((r = gz.read(buf)) >= 0) bos.write(buf, 0, r);
+                        raw = bos.toByteArray();
+                    }
+                }
+                String text = decodeTextUtf8(raw);
+                mime = text.replaceFirst("^\\s+", "").startsWith("WEBVTT")
+                        ? androidx.media3.common.MimeTypes.TEXT_VTT
+                        : androidx.media3.common.MimeTypes.APPLICATION_SUBRIP;
+                String subtype = mime.equals(androidx.media3.common.MimeTypes.TEXT_VTT)
+                        ? "text/vtt" : "application/x-subrip";
+                dataUri = "data:" + subtype + ";base64,"
+                        + android.util.Base64.encodeToString(text.getBytes(
+                                java.nio.charset.StandardCharsets.UTF_8),
+                                android.util.Base64.NO_WRAP);
+            } catch (Exception e) {
+                Log.e(TAG, "subtitle download failed: " + e.getMessage());
+                mainHandler.post(() -> showInPlayerMenu("OpenSubtitles",
+                        new String[]{"No se pudo descargar el subtítulo"}, 0, s -> {}));
+                return;
+            }
+            final String finalUri = dataUri;
+            final String finalMime = mime;
+            mainHandler.post(() -> applyExternalSubtitleData(finalUri, finalMime, langIso));
+        }).start();
+    }
+
+    private void applyExternalSubtitleData(String dataUri, String mime, String langIso) {
+        if (player == null) return;
+        externalSubUrl = dataUri;
+        externalSubMime = mime;
+        externalSubLang = langIso;
         pendingSelectExternalSub = true;
         externalSubSelectTries = 0;
         try {

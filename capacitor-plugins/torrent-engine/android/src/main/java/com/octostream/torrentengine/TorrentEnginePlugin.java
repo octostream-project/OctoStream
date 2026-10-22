@@ -369,22 +369,29 @@ public class TorrentEnginePlugin extends Plugin {
     @PluginMethod
     public void requestStorageAccess(PluginCall call) {
         if (Build.VERSION.SDK_INT >= 30) {
-            Intent intent;
-            try {
-                intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
-            } catch (Throwable t) {
-                intent = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+            // Cadena de intents: pantalla all-files específica de la app →
+            // listado general all-files → ficha de la app (siempre existe;
+            // en GrapheneOS/Storage Scopes el acceso se concede desde ahí).
+            android.content.pm.PackageManager pm = getContext().getPackageManager();
+            Intent app = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            app.setData(Uri.parse("package:" + getContext().getPackageName()));
+            Intent generic = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+            Intent details = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            details.setData(Uri.parse("package:" + getContext().getPackageName()));
+            Intent chosen = null;
+            for (Intent i : new Intent[] { app, generic, details }) {
+                try {
+                    if (i.resolveActivity(pm) != null) { chosen = i; break; }
+                } catch (Throwable ignored) {}
+            }
+            if (chosen == null) {
+                call.reject("Este dispositivo no tiene pantalla de permisos de almacenamiento");
+                return;
             }
             try {
-                startActivityForResult(call, intent, "storageAccessResult");
+                startActivityForResult(call, chosen, "storageAccessResult");
             } catch (Exception e) {
-                try {
-                    Intent generic = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                    startActivityForResult(call, generic, "storageAccessResult");
-                } catch (Exception e2) {
-                    call.reject("No se pudo abrir la pantalla de permisos: " + e2.getMessage());
-                }
+                call.reject("No se pudo abrir la pantalla de permisos: " + e.getMessage());
             }
             return;
         }
