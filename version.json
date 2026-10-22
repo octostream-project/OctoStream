@@ -1,18 +1,18 @@
 {
-  "versionCode": 2081,
-  "versionName": "2.08.1",
+  "versionCode": 2082,
+  "versionName": "2.08.2",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-arm64-v8a.apk",
-  "sha256": "502896dc9ec3d275a850cd126e04d315eae45d513cc833b3ceba397885968c93",
-  "notes": "Selector de carpeta de descargas movido al picker SAF del plugin de vídeo (el mismo que ya funcionaba para cargar archivos USB) — corrige el spinner infinito al elegir carpeta en GrapheneOS y otros dispositivos.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-arm64-v8a.apk",
+  "sha256": "46070cf989bfb70a90d018a1450b40301a235c9fa2a3ed83189f040bdaa722cc",
+  "notes": "Nuevos canales castellanos EstrenosCinesaA y CineMitas, AIOStreams, refactor UI con primitivas compartidas",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.2/octostream-2.08.2-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "502896dc9ec3d275a850cd126e04d315eae45d513cc833b3ceba397885968c93",
-    "armeabi-v7a": "0a027dad8aaa24f2ba8327808e706e478299cbf346c7b97fff1bb664aa2116b8",
-    "x86_64": "43e326124e6ca55e92d9a15978cb7123eea32a7470c2d8429e761fe5fe2fced6"
+    "arm64-v8a": "46070cf989bfb70a90d018a1450b40301a235c9fa2a3ed83189f040bdaa722cc",
+    "armeabi-v7a": "ef75ee23dc230073172b64a46c0ae9b9a52d4f910355e8483b462b82de80ef5d",
+    "x86_64": "99bb41b2ff1748112f4b1ff8be52719fb348a2a8146320d1bb9c6ae91431a08d"
   }
 }
