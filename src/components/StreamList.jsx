@@ -68,6 +68,9 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             {lang && (
               <span className={`text-sm font-bold ${langColorClass(lang)} w-12 text-center flex-shrink-0`}>{lang}</span>
             )}
+            {stream.pluginName === 'AIOStreams' && (
+              <span className="text-xs bg-violet-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">AIO</span>
+            )}
             {/\(debrid\)/i.test(stream.server || stream.name || '') || stream.viaDebrid ? (
               <span className="text-xs bg-emerald-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">DEBRID</span>
             ) : /\(p2p\)/i.test(stream.server || '') ? (

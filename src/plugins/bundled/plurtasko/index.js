@@ -55,13 +55,16 @@ import { getItemSync } from '../../../utils/storage.js'
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
 const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas]
 
-// Canales caídos (auditoría oct/2026): fuera del registro activo para que no
+// Canales caídos (auditoría feb/2026): fuera del registro activo para que no
 // consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
 // código para reactivarlos cuando el sitio reviva:
-// - repelishd (.pics): anti-bot TLS — solo responde a navegadores reales.
-// - gnulatv: SPA sin HTML server-side — nada que scrapear.
+// - gnulatv: todos los TLDs conocidos (gnulahd.nu, gnula.nu, ww3/ww4…) muertos.
 // - doramaexpress: 503 permanente en todos los TLDs conocidos.
-const DEAD_CHANNEL_IDS = new Set(['repelishd', 'gnulatv', 'doramaexpress'])
+// - entrepeliculasyseries: .nz y .to sin respuesta, .mx/.store/.in muertos.
+// - pelisgratishd: .zip devuelve 0 bytes, .to 404, .io/.lat aparcados.
+// - pelisplushd: .la muerto, .nz secuestrado, .to tras Cloudflare total.
+// RepelisHD se reactivó migrando a CineHDPlus (cinehdplus.work + playlatinsrc).
+const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd'])
 
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
@@ -510,6 +513,17 @@ const BLOCKED_SERVERS = [
   'streamplay', 'stape.fun', 'watchadsontape',
 ]
 
+// Hosts que SÓLO sirven con debrid (file hosts: 1fichier, rapidgator…).
+// Sin cuenta activa son páginas de descarga/captcha, nunca un stream —
+// se ocultan por completo; con debrid pasan y se desbloquean.
+const DEBRID_ONLY_HOSTS = [
+  '1fichier', 'rapidgator', 'turbobit', 'hitfile',
+  'katfile', 'filefactory', 'file.al', 'filedot', 'filespace', 'filerio',
+  'filezip', 'prefiles', 'alfafile', 'simfileshare', 'world-files',
+  'plustream', 'embedsito', 'uploadfox', 'xupalace', 'up2box', 'ddownload',
+  'mega.nz', 'nitroflare', 'wupfile', 'drop.download', 'bigfile',
+]
+
 // Servers that may be unlocked through debrid.
 // When a debrid account is configured, these are NOT filtered out.
 // Host candidates that debrid may support.
@@ -646,6 +660,11 @@ async function resolveStreams(streams, onBatch, context = {}) {
       } else {
         return true
       }
+    }
+    // Hosts exclusivos de debrid (1fichier y demás file hosts): sin cuenta
+    // activa no son reproducibles — se ocultan en vez de dar enlaces muertos.
+    if (!debridActive && DEBRID_ONLY_HOSTS.some(b => urlLower.includes(b) || serverLower.includes(b))) {
+      return true
     }
     // Filter YouTube trailers, "pelicula completa", "full movie" by name
     if (/youtube|trailer|pelicula completa|full movie|pelicula\s*completa/i.test(nameLower)) return true

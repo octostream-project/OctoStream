@@ -36,6 +36,42 @@ export function aiostreamsConfig() {
   return { instance, uuid, password, enabled: Boolean(uuid && password) }
 }
 
+// Comprobador de conexión para Ajustes → Debrid → AIOStreams. Hace una
+// búsqueda real por IMDb (Fight Club, siempre indexada) y traduce el
+// resultado a diagnóstico legible: auth inválida, endpoint ausente,
+// instancia caída/timeout o OK con número de resultados.
+export async function testAiostreamsConnection({ instance, uuid, password } = {}) {
+  const cfg = aiostreamsConfig()
+  const inst = ((instance ?? cfg.instance) || DEFAULT_INSTANCE).trim().replace(/\/+$/, '')
+  const u = (uuid ?? cfg.uuid).trim()
+  const p = password ?? cfg.password
+  if (!/^https?:\/\//i.test(inst)) {
+    return { ok: false, error: 'Instancia inválida: debe empezar por http(s)://' }
+  }
+  if (!u || !p) {
+    return { ok: false, error: 'Falta UUID o contraseña' }
+  }
+  const url = `${inst}/api/v1/search?type=movie&id=tt0137523&requiredFields=parsedFile`
+  try {
+    const { httpGetText } = await import('../../../../utils/httpClient.js')
+    const text = await withTimeout(
+      httpGetText(url, { Authorization: `Basic ${btoa(`${u}:${p}`)}` }),
+      TIMEOUT_MS,
+      'aiostreams timeout'
+    )
+    let results = 0
+    try { results = JSON.parse(text)?.data?.results?.length ?? 0 } catch { /* HTML/no-JSON */ }
+    return { ok: true, results }
+  } catch (e) {
+    const msg = String(e?.message || e)
+    if (/HTTP 401|HTTP 403/.test(msg)) return { ok: false, error: 'UUID o contraseña incorrectos (401/403)' }
+    if (/HTTP 404/.test(msg)) return { ok: false, error: 'La instancia no expone /api/v1/search (404)' }
+    if (/timeout|ETIMEDOUT/i.test(msg)) return { ok: false, error: 'La instancia no responde (timeout)' }
+    if (/ENOTFOUND|EAI_AGAIN|ERR_NAME/i.test(msg)) return { ok: false, error: 'Dominio de la instancia no resuelve' }
+    return { ok: false, error: `No se pudo conectar: ${msg}` }
+  }
+}
+
 export const aiostreams = {
   id: 'aiostreams',
   name: 'AIOStreams',
@@ -92,6 +128,7 @@ function toStream(item) {
     stream.seeds = seeders
     stream.seasonPack = Boolean(parsed.seasonPack) || undefined
     stream.pluginName = 'AIOStreams'
+    stream.channelName = 'AIOStreams'
     return stream
   }
 
@@ -110,6 +147,7 @@ function toStream(item) {
     viaDebrid: service !== 'direct',
     cached: Boolean(item.cached) || undefined,
     pluginName: 'AIOStreams',
+    channelName: 'AIOStreams',
     pluginId: 'plurtasko',
   }
 }

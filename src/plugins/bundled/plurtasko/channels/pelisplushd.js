@@ -6,7 +6,7 @@ import { fetchHtml, decodeEntities, absoluteUrl } from '../http.js'
 import { findSingleMatch, findMultipleMatches, detectType, normalizeServer, detectServerFromUrl } from '../scraper.js'
 import { detectLangFromText } from '../meta.js'
 
-const HOST = 'https://pelisplushd.la/'
+const HOST = 'https://pelisplushd.to/'
 
 export const pelisplushd = {
   id: 'pelisplushd',

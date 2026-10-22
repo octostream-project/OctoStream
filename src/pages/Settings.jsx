@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp, Loader2 } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -124,6 +124,7 @@ export default function Settings() {
   const [aioUuid, setAioUuid] = useState(localStorage.getItem('octostream_aiostreams_uuid') || '')
   const [aioPass, setAioPass] = useState(localStorage.getItem('octostream_aiostreams_password') || '')
   const [aioSaved, setAioSaved] = useState(false)
+  const [aioTest, setAioTest] = useState(null) // null | {loading:true} | {ok,results} | {ok:false,error}
 
   // Clear PIN polling interval on unmount
   useEffect(() => {
@@ -313,6 +314,16 @@ export default function Settings() {
     else localStorage.removeItem('octostream_aiostreams_password')
     setAioSaved(true)
     setTimeout(() => setAioSaved(false), 2000)
+  }
+
+  const handleAioTest = async () => {
+    setAioTest({ loading: true })
+    try {
+      const { testAiostreamsConnection } = await import('../plugins/bundled/plurtasko/channels/aiostreams.js')
+      setAioTest(await testAiostreamsConnection({ instance: aioInstance, uuid: aioUuid, password: aioPass }))
+    } catch (e) {
+      setAioTest({ ok: false, error: e?.message || 'Error desconocido' })
+    }
   }
 
   // --- AllDebrid PIN flow ---
@@ -1389,6 +1400,24 @@ export default function Settings() {
               >
                 Guardar AIOStreams
               </button>
+              <button
+                onClick={handleAioTest}
+                disabled={aioTest?.loading}
+                className="w-full bg-dark-700 hover:bg-dark-600 text-white font-medium rounded-lg px-4 py-3 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {aioTest?.loading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                {aioTest?.loading ? 'Comprobando…' : 'Probar conexión'}
+              </button>
+              {aioTest && !aioTest.loading && (
+                <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 ${aioTest.ok ? 'text-green-400 bg-green-950/30' : 'text-red-400 bg-red-950/30'}`}>
+                  {aioTest.ok ? <Check size={16} className="flex-shrink-0 mt-0.5" /> : <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />}
+                  <span>
+                    {aioTest.ok
+                      ? `Conexión correcta — ${aioTest.results} fuente${aioTest.results === 1 ? '' : 's'} encontrada${aioTest.results === 1 ? '' : 's'}`
+                      : aioTest.error}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="mt-4 pt-4 border-t border-dark-700">
               <p className="text-dark-400 text-sm mb-2">¿Cómo configurarlo?</p>

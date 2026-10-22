@@ -1,274 +1,190 @@
-// Repelishd channel - ported from Plurtasko's repelishd.py
-// Provides movies and series in Spanish (Latino, Castellano, Vose)
+// RepelisHD channel — el sitio se trasladó a CineHDPlus (DLE,
+// cinehdplus.work). Estructura verificada en vivo:
+//   tarjetas : <div class="card"> … <a href="/peliculas/NNN-slug.html">
+//              <img data-src="…" alt="Título"> + <img class="idioma" alt="Castellano|Latino|Subtitulado">
+//   ficha    : var imdb = 'ttNNN';  player #movie_iframe | #serial_iframe
+//   player   : playlatinsrc.co/movie|serial/<imdb> → token:"<b64>.<sig>"
+//              POST /api/embed-links {type:'movie'|'tv', id, token} →
+//              movie: sources[{name,url,version:latino|castellano|subtitulado}]
+//              tv:    tv.seasons[].episodes[]{episode_number,title,sources[]}
 
 import { CONTENT_TYPES } from '../../../base.js'
-import { fetchHtml, decodeEntities } from '../http.js'
+import { fetchHtml, postJson, decodeEntities, absoluteUrl } from '../http.js'
 import { findSingleMatch, findMultipleMatches, normalizeServer, detectServerFromUrl } from '../scraper.js'
-import { detectLangFromText } from '../meta.js'
 
-const HOST = 'https://repelishd.pics/'
+const HOST = 'https://cinehdplus.work/'
+const PLAYER = 'https://playlatinsrc.co'
+
+const VERSION_LANG = { castellano: 'ESP', latino: 'LAT', subtitulado: 'VOSE' }
+
+function parseCards(html, typeFilter) {
+  const items = []
+  // Cada ficha enlaza /peliculas/NNN-slug.html dos veces (portada y título);
+  // la primera ocurrencia (card__cover) lleva el <img alt> con el nombre y el
+  // data-src del póster. Las banderas de idioma (card__langs) van tras el
+  // anchor — se capturan en la ventana posterior para informar la tarjeta.
+  for (const m of findMultipleMatches(html, '<a href="([^"]*peliculas/[^"]+\\.html)"[^>]*>([\\s\\S]*?)</a>([\\s\\S]{0,900})')) {
+    const itemUrl = absoluteUrl(m[1], HOST)
+    const inner = m[2]
+    const tail = m[3]
+    const title = decodeEntities(
+      findSingleMatch(inner, 'alt="([^"]+)"') || inner.replace(/<[^>]*>/g, '')).trim()
+    if (!itemUrl || !title) continue
+    const poster = findSingleMatch(inner, '(?:data-src|src)="([^"]+\\.(?:webp|jpe?g|png)[^"]*)"')
+    const langs = findMultipleMatches(tail, 'idioma"[^>]*alt="([^"]+)"').map(x => VERSION_LANG[(x[1] || '').toLowerCase()]).filter(Boolean)
+    items.push({
+      id: `repelishd:${itemUrl}`,
+      type: typeFilter || CONTENT_TYPES.MOVIE,
+      name: title,
+      title,
+      poster: poster ? absoluteUrl(poster, HOST) : null,
+      url: itemUrl,
+      cardLangs: [...new Set(langs)],
+      pluginId: 'plurtasko',
+    })
+  }
+  const seen = new Set()
+  return items.filter(it => (seen.has(it.url) ? false : seen.add(it.url)))
+}
+
+function pageIds(html) {
+  return {
+    imdb: findSingleMatch(html, "imdb\\s*=\\s*'(tt\\d+)'"),
+    isSerial: /id=["']serial_iframe["']/.test(html),
+    isMovie: /id=["']movie_iframe["']/.test(html),
+  }
+}
+
+async function playerApi(kind, imdb, signal) {
+  const page = await fetchHtml(`${PLAYER}/${kind === 'tv' ? 'serial' : 'movie'}/${imdb}`, signal)
+  const token = findSingleMatch(page, 'token:\\s*"([^"]+)"')
+  if (!token) return null
+  const data = await postJson(`${PLAYER}/api/embed-links`, { type: kind, id: imdb, token }, signal,
+    { Referer: `${PLAYER}/${kind === 'tv' ? 'serial' : 'movie'}/${imdb}` })
+  return data?.ok ? data : null
+}
+
+function sourcesToStreams(sources, lang, pluginName) {
+  const streams = []
+  const seen = new Set()
+  for (const s of sources || []) {
+    const url = String(s.url || '')
+    if (!/^https?:/i.test(url) || seen.has(url)) continue
+    seen.add(url)
+    const sLang = VERSION_LANG[(s.version || lang || '').toLowerCase()] || ''
+    const server = detectServerFromUrl(url) !== 'embed'
+      ? detectServerFromUrl(url)
+      : (s.name || 'embed').split('.')[0].toLowerCase()
+    streams.push({
+      name: `${server}${sLang ? ` (${sLang})` : ''}`,
+      lang: sLang,
+      url,
+      streamType: normalizeServer(server),
+      quality: '',
+      server,
+      pluginName,
+      pluginId: 'plurtasko',
+    })
+  }
+  return streams
+}
 
 export const repelishd = {
   id: 'repelishd',
-  name: 'RepelisHD',
-  defaultLang: 'Lat',
+  name: 'CineHDPlus',
+  defaultLang: 'Esp',
   types: [CONTENT_TYPES.MOVIE, CONTENT_TYPES.SERIES],
   host: HOST,
 
   catalogs: [
-    { id: 'repelishd-movies', name: 'RepelisHD: Películas', type: CONTENT_TYPES.MOVIE },
-    { id: 'repelishd-series', name: 'RepelisHD: Series', type: CONTENT_TYPES.SERIES },
+    { id: 'repelishd-movies', name: 'CineHDPlus: Películas', type: CONTENT_TYPES.MOVIE },
+    { id: 'repelishd-series', name: 'CineHDPlus: Series', type: CONTENT_TYPES.SERIES },
   ],
 
-  async getCatalog({ id, skip = 0, top = 50 }) {
-    let url
-    if (id === 'repelishd-movies') url = `${HOST}pelicula/`
-    else if (id === 'repelishd-series') url = `${HOST}series/`
-    else return []
-
-    const html = await fetchHtml(url)
-    const items = []
-    const bloque = findSingleMatch(html, 'Añadido recientemente<([\\s\\S]*?)>Películas Destacadas<')
-    const matches = findMultipleMatches(bloque, '<article([\\s\\S]*?)</article>')
-    for (const m of matches) {
-      const block = m[1]
-      const itemUrl = findSingleMatch(block, '<a href="(.*?)"')
-      let title = findSingleMatch(block, 'alt="(.*?)"')
-      if (!itemUrl || !title) continue
-      title = title.replace(/&#8217;/g, "'").replace(/&/g, '&').replace(/&#039;s/g, "'s")
-      const thumb = findSingleMatch(block, '<img src="(.*?)"')
-      const fullThumb = thumb && !thumb.includes('https') ? HOST.slice(0, -1) + thumb : thumb
-      const fullUrl = itemUrl.startsWith('http') ? itemUrl : HOST.slice(0, -1) + itemUrl
-      // /series/ catalog contains both; detect from source page and URL hints
-      const itemType = (id === 'repelishd-series' && !fullUrl.includes('/cine/') && !fullUrl.includes('/proximas-')) ||
-                        fullUrl.includes('/ver-serie/') ||
-                        fullUrl.includes('/series/')
-                        ? 'series' : 'movie'
-      items.push({
-        id: `repelishd:${fullUrl}`,
-        type: itemType === 'series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
-        name: decodeEntities(title),
-        title: decodeEntities(title),
-        poster: fullThumb || null,
-        url: fullUrl,
-        pluginId: 'plurtasko',
-      })
-    }
-    return items.slice(skip, skip + top)
+  async getCatalog({ id, skip = 0, top = 50, signal }) {
+    const path = id === 'repelishd-movies' ? 'cine/' : id === 'repelishd-series' ? 'series/' : null
+    if (!path) return []
+    const page = Math.floor(skip / 24) + 1
+    const html = await fetchHtml(`${HOST}${path}${page > 1 ? `page/${page}/` : ''}`, signal)
+    const type = id === 'repelishd-series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE
+    return parseCards(html, type).slice(page > 1 ? 0 : skip % 24, (page > 1 ? 0 : skip % 24) + top)
   },
 
-  async getMeta({ id }) {
-    const url = id.replace(/^repelishd:/, '')
-    const html = await fetchHtml(url)
-    let title = findSingleMatch(html, '<meta[^>]*property="og:title"[^>]*content="([^"]+)"')
-      || findSingleMatch(html, '<h1(?![^>]*class=["\']text["\'])[^>]*>(.*?)</h1>')
-      || findSingleMatch(html, '<title>(.*?)</title>')
-    title = decodeEntities(title).replace(/^Ver\s+/i, '').replace(/\s*\|.*$/, '').replace(/\s*online.*$/i, '').trim()
-    const poster = findSingleMatch(html, '<img[^>]*src="([^"]*)"[^>]*class="[^"]*poster[^"]*"')
-    const description = findSingleMatch(html, '<div[^>]*class="[^"]*description[^"]*"[^>]*>(.*?)</div>')
-    const year = findSingleMatch(html, /(\d{4})/)
+  async getMeta({ id, signal }) {
+    const url = id.replace(/^repelishd:/, '').split('?')[0]
+    const html = await fetchHtml(url, signal)
+    if (!html) return null
+    const { imdb, isSerial } = pageIds(html)
+    const title = decodeEntities(
+      findSingleMatch(html, '<meta[^>]*property="og:title"[^>]*content="([^"]+)"') ||
+      findSingleMatch(html, '<h1[^>]*>([\\s\\S]*?)</h1>') ||
+      findSingleMatch(html, '<title>([\\s\\S]*?)</title>')
+    ).replace(/\s*\|.*$/, '').replace(/\s*[-–]\s*CineHDPlus.*$/i, '').trim()
+    const poster = findSingleMatch(html, '<meta[^>]*property="og:image"[^>]*content="([^"]+)"') ||
+      findSingleMatch(html, '<img[^>]*(?:data-src|src)="([^"]+)"[^>]*class="[^"]*poster')
+    const description = decodeEntities(
+      findSingleMatch(html, '<meta[^>]*name="description"[^>]*content="([^"]+)"') || '')
+    const year = findSingleMatch(html, 'xfsearch/year/(\\d{4})') || findSingleMatch(html, '(\\d{4})')
 
     const meta = {
       id,
-      // Detect series by page content since URLs now use /ver-pelicula/ for everything
-      type: /vimeus|buildVimeusSelector|data\.seasons|seasons\.length/.test(html) ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
+      type: isSerial ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
       name: title,
       title,
-      poster: poster || null,
-      backdrop: poster || null,
-      description: decodeEntities(description) || '',
+      poster: poster ? absoluteUrl(poster, HOST) : null,
+      backdrop: null,
+      description,
       year: year ? parseInt(year, 10) : null,
       url,
       pluginId: 'plurtasko',
     }
 
-    if (meta.type === CONTENT_TYPES.SERIES) {
-      meta.episodes = await this._getEpisodes(url, html)
+    if (isSerial && imdb) {
+      const data = await playerApi('tv', imdb, signal)
+      const episodes = []
+      for (const season of data?.tv?.seasons || []) {
+        for (const ep of season.episodes || []) {
+          if (!(ep.sources || []).length) continue
+          episodes.push({
+            id: `repelishd:${url}?se=${season.season_number}&ep=${ep.episode_number}`,
+            name: ep.title || `Episodio ${ep.episode_number}`,
+            season: season.season_number,
+            episode: ep.episode_number,
+            url: `${url}?se=${season.season_number}&ep=${ep.episode_number}`,
+          })
+        }
+      }
+      meta.episodes = episodes
+      meta.lang = VERSION_LANG[(data?.tv?.version || '').toLowerCase()] || ''
     }
     return meta
   },
 
-  async _getEpisodes(url, html) {
-    const episodes = []
-
-    // Modern RepelisHD loads season/episode data via vimeus.com iframe.
-    // Try to fetch the vimeus JSON and list all episodes.
-    const tmdbRaw = findSingleMatch(html, "var tmdbRaw\\s*=\\s*'([^']+)'")
-    const imdb = findSingleMatch(html, "var imdb\\s*=\\s*'([^']+)'")
-    const pageTitle = findSingleMatch(html, '<h1[^>]*>(.*?)</h1>') || ''
-
-    if (tmdbRaw) {
-      const vimeusUrl = `https://vimeus.com/e/serie?tmdb=${encodeURIComponent(tmdbRaw)}&view_key=5yXx8bsITsFlRG-X-rDhcOHd0XuLsjlzliKpi5aGcHA&title=${encodeURIComponent(pageTitle)}&theme=minimal`
-      const vimeusHtml = await fetchHtml(vimeusUrl)
-      if (vimeusHtml) {
-        const dataMatch = vimeusHtml.match(/<script type="text\/json" id="data">\s*([\s\S]*?)\s*<\/script>/)
-        if (dataMatch) {
-          try {
-            const data = JSON.parse(dataMatch[1])
-            if (data.seasons) {
-              for (const season of data.seasons) {
-                for (const ep of season.episodes) {
-                  episodes.push({
-                    id: `repelishd:${url}?se=${season.season_number}&ep=${ep.episode}&tmdb=${tmdbRaw}&imdb=${imdb}`,
-                    name: `S${season.season_number}E${ep.episode}`,
-                    season: season.season_number,
-                    episode: ep.episode,
-                    url: `${url}?se=${season.season_number}&ep=${ep.episode}&tmdb=${tmdbRaw}&imdb=${imdb}`,
-                  })
-                }
-              }
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-
-    // Fallback: legacy pattern
-    if (episodes.length === 0) {
-      const matches = findMultipleMatches(html, 'href="(https?://[^"]*ver-serie[^"]*capitulo[^"]*)"')
-      let epNum = 0
-      for (const m of matches) {
-        const epUrl = m[1]
-        const seasonMatch = epUrl.match(/temporada\/(\d+)\/capitulo\/(\d+)/i) || epUrl.match(/(\d+)x(\d+)/i)
-        epNum++
-        episodes.push({
-          id: `repelishd:${epUrl}`,
-          name: `T${seasonMatch ? seasonMatch[1] : 1}E${seasonMatch ? seasonMatch[2] : epNum}`,
-          season: seasonMatch ? parseInt(seasonMatch[1], 10) : 1,
-          episode: seasonMatch ? parseInt(seasonMatch[2], 10) : epNum,
-          url: epUrl,
-        })
-      }
-    }
-    return episodes
-  },
-
-  async getStreams({ id }) {
-    let url = id.replace(/^repelishd:/, '')
-    const urlObj = new URL(url)
-    const se = urlObj.searchParams.get('se')
-    const ep = urlObj.searchParams.get('ep')
-    const tmdbRaw = urlObj.searchParams.get('tmdb') || ''
-    const imdb = urlObj.searchParams.get('imdb') || ''
-    const baseUrl = url.split('?')[0]
-
-    const html = await fetchHtml(baseUrl)
+  async getStreams({ id, signal }) {
+    const full = id.replace(/^repelishd:/, '')
+    const se = parseInt((full.match(/[?&]se=(\d+)/) || [])[1] || '0', 10)
+    const ep = parseInt((full.match(/[?&]ep=(\d+)/) || [])[1] || '0', 10)
+    const url = full.split('?')[0]
+    const html = await fetchHtml(url, signal)
     if (!html) return []
+    const { imdb, isSerial } = pageIds(html)
+    if (!imdb) return []
 
-    const streams = []
-
-    // Modern Vimeus/Verhdlink series player
-    if (se && ep && tmdbRaw) {
-      const title = findSingleMatch(html, '<h1[^>]*>(.*?)</h1>') || ''
-      const vimeusUrl = `https://vimeus.com/e/serie?tmdb=${encodeURIComponent(tmdbRaw)}&view_key=5yXx8bsITsFlRG-X-rDhcOHd0XuLsjlzliKpi5aGcHA&title=${encodeURIComponent(title)}&se=${se}&ep=${ep}&theme=minimal`
-      const vimeusHtml = await fetchHtml(vimeusUrl)
-      if (vimeusHtml) {
-        const iframeMatch = vimeusHtml.match(/<iframe[^>]*src="([^"]+)"/i)
-        if (iframeMatch) {
-          let iframeSrc = iframeMatch[1]
-          if (iframeSrc.startsWith('//')) iframeSrc = 'https:' + iframeSrc
-          const vimeusLang = detectLangFromText(title)
-          streams.push({
-            name: `Vimeus [RepelisHD]${vimeusLang ? ` (${vimeusLang})` : ''}`,
-            url: iframeSrc,
-            streamType: 'embed',
-            quality: '',
-            server: 'vimeus',
-            lang: vimeusLang,
-            pluginName: 'RepelisHD',
-            pluginId: 'plurtasko',
-          })
-        }
-      }
+    if (isSerial) {
+      const data = await playerApi('tv', imdb, signal)
+      const season = (data?.tv?.seasons || []).find(s => s.season_number === se)
+      const episode = (season?.episodes || []).find(e => e.episode_number === ep)
+      return sourcesToStreams(episode?.sources, data?.tv?.version, 'CineHDPlus')
     }
-
-    // Find iframe to verhdlink (handle newlines)
-    const iframeMatch = html.match(/<iframe[^>]*src="([^"]+)"/i)
-    const iframeSrc = iframeMatch ? iframeMatch[1] : ''
-    if (iframeSrc) {
-      const embedUrl = iframeSrc.startsWith('//') ? 'https:' + iframeSrc
-        : iframeSrc.startsWith('/') ? HOST.slice(0, -1) + iframeSrc
-        : iframeSrc
-      try {
-        const embedHtml = await fetchHtml(embedUrl)
-        // Find _player-mirrors sections (each has a language)
-        const mirrors = embedHtml.match(/<ul class="_player-mirrors ([^"]*)">([\s\S]*?)<\/ul>/g) || []
-        for (const mirror of mirrors) {
-          const clsMatch = mirror.match(/<ul class="_player-mirrors ([^"]*)"/)
-          const langClass = (clsMatch ? clsMatch[1] : '').toLowerCase()
-          let lang = ''
-          if (langClass.includes('castellano') || langClass.includes('español')) lang = 'ESP'
-          else if (langClass.includes('latino')) lang = 'LAT'
-          else if (langClass.includes('subtitulado')) lang = 'VOSE'
-          if (!lang) continue
-
-          // Find data-link URLs
-          const dataLinks = mirror.match(/data-link="([^"]+)"/g) || []
-          for (const dl of dataLinks) {
-            const link = dl.match(/data-link="([^"]+)"/)[1]
-            const linkUrl = link.startsWith('//') ? 'https:' + link : link.startsWith('/') ? HOST.slice(0, -1) + link : link
-            if (linkUrl.includes('/player/')) continue
-            if (linkUrl.includes('verhdlink')) continue
-            const server = detectServerFromUrl(linkUrl)
-            streams.push({
-              name: `${server} (${lang})`,
-              url: linkUrl,
-              streamType: normalizeServer(server),
-              quality: '',
-              server,
-              pluginName: 'RepelisHD',
-              pluginId: 'plurtasko',
-            })
-          }
-        }
-      } catch (e) {
-        // skip
-      }
-    }
-
-    return streams
+    const data = await playerApi('movie', imdb, signal)
+    return sourcesToStreams(data?.sources, '', 'CineHDPlus')
   },
 
-  async search({ query, type }) {
-    const url = `${HOST}?story=${encodeURIComponent(query)}&do=search&subaction=search`
-    const html = await fetchHtml(url)
-    const items = []
-
-    // Find articles with ver-pelicula/ver-serie links
-    const matches = findMultipleMatches(html, '<article([\\s\\S]*?)</article>')
-    for (const m of matches) {
-      const block = m[1]
-      const itemUrl = findSingleMatch(block, '<a href="(.*?)"')
-      let title = findSingleMatch(block, 'alt="(.*?)"')
-      if (!itemUrl || !title) continue
-      if (!itemUrl.includes('ver-pelicula') && !itemUrl.includes('ver-serie')) continue
-      title = title.replace(/&#8217;/g, "'").replace(/&/g, '&').replace(/&#039;s/g, "'s")
-      const fullUrl = itemUrl.startsWith('http') ? itemUrl : HOST.slice(0, -1) + itemUrl
-      const itemType = fullUrl.includes('/ver-serie/') ? 'series' : 'movie'
-
-      if (type === CONTENT_TYPES.MOVIE && itemType === 'series') continue
-      if (type === CONTENT_TYPES.SERIES && itemType === 'movie') continue
-
-      items.push({
-        id: `repelishd:${fullUrl}`,
-        type: itemType === 'series' ? CONTENT_TYPES.SERIES : CONTENT_TYPES.MOVIE,
-        name: decodeEntities(title),
-        title: decodeEntities(title),
-        poster: null,
-        url: fullUrl,
-        pluginId: 'plurtasko',
-      })
-    }
-
-    // Deduplicate
-    const seen = new Set()
-    return items.filter(item => {
-      if (seen.has(item.url)) return false
-      seen.add(item.url)
-      return true
-    })
+  async search({ query, type, signal }) {
+    const html = await fetchHtml(
+      `${HOST}?story=${encodeURIComponent(query)}&do=search&subaction=search`, signal)
+    // Las URLs /peliculas/ valen para ambos tipos — el tipo real lo fija
+    // getMeta por el player de la ficha; aquí solo filtramos lo obvio.
+    return parseCards(html, type === CONTENT_TYPES.SERIES ? CONTENT_TYPES.SERIES : null)
   },
 }
-
