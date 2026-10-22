@@ -1,18 +1,18 @@
 {
-  "versionCode": 2080,
-  "versionName": "2.08.0",
+  "versionCode": 2081,
+  "versionName": "2.08.1",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.0/octostream-2.08.0-arm64-v8a.apk",
-  "sha256": "ec2d7c7b9ef8c817aab2639e56eb947eb4efea3efbd8e166ceb86305f57070b8",
-  "notes": "Carpeta de descargas: el selector SAF se abre directo, sin pasar por ajustes de Android (corrige el bloqueo en GrapheneOS y dispositivos sin 'Acceso a todos los archivos').",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-arm64-v8a.apk",
+  "sha256": "502896dc9ec3d275a850cd126e04d315eae45d513cc833b3ceba397885968c93",
+  "notes": "Selector de carpeta de descargas movido al picker SAF del plugin de vídeo (el mismo que ya funcionaba para cargar archivos USB) — corrige el spinner infinito al elegir carpeta en GrapheneOS y otros dispositivos.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.0/octostream-2.08.0-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.0/octostream-2.08.0-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.0/octostream-2.08.0-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.08.1/octostream-2.08.1-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "ec2d7c7b9ef8c817aab2639e56eb947eb4efea3efbd8e166ceb86305f57070b8",
-    "armeabi-v7a": "fb2995236e573ff348d2bcabbff5de048e28859c193e5cedb07d2211f8150a3d",
-    "x86_64": "31e8c639bee36584ce23f68929b8306eaf4cb690052ee0f3e17baf91f014874e"
+    "arm64-v8a": "502896dc9ec3d275a850cd126e04d315eae45d513cc833b3ceba397885968c93",
+    "armeabi-v7a": "0a027dad8aaa24f2ba8327808e706e478299cbf346c7b97fff1bb664aa2116b8",
+    "x86_64": "43e326124e6ca55e92d9a15978cb7123eea32a7470c2d8429e761fe5fe2fced6"
   }
 }

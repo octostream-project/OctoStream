@@ -209,6 +209,12 @@ export interface ExoPlayerPlugin {
    * play({localFile:true}).
    */
   pickSubtitle(): Promise<PickVideoResult>
+  /**
+   * Picker SAF de CARPETA (OPEN_DOCUMENT_TREE) para elegir el destino de
+   * descargas — devuelve la URI del árbol con permiso persistible. El
+   * plugin torrent-engine la persiste con setDownloadDir.
+   */
+  pickFolder(): Promise<{ uri: string }>
   /** SAF "Guardar como": escribe `content` en el archivo elegido por el usuario */
   exportConfig(options: { filename?: string; content: string }): Promise<{ saved: boolean; uri?: string }>
   /** SAF "Abrir": lee un archivo JSON y devuelve su contenido (tope 4 MB) */

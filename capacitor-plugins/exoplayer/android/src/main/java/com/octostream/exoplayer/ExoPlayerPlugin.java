@@ -3531,6 +3531,43 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     /**
+     * Picker SAF de CARPETA (OPEN_DOCUMENT_TREE) para elegir el destino de
+     * descargas. Vive aquí porque el activity-result de este plugin está
+     * probado en dispositivos; torrent-engine solo persiste la URI elegida.
+     * Devuelve {uri: "content://.../tree/..."} con permiso persistible.
+     */
+    @PluginMethod
+    public void pickFolder(PluginCall call) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(call, intent, "pickFolderResult");
+        } catch (Exception e) {
+            call.reject("No hay selector de carpetas disponible: " + e.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    private void pickFolderResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        try {
+            Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
+            if (uri == null) { call.reject("cancelled"); return; }
+            try {
+                getContext().getContentResolver().takePersistableUriPermission(uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            JSObject ret = new JSObject();
+            ret.put("uri", uri.toString());
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.reject("No se pudo usar la carpeta: " + t.getMessage());
+        }
+    }
+
+    /**
      * Exportar configuración: diálogo "Guardar como" del sistema (SAF
      * CREATE_DOCUMENT) — el usuario elige dónde escribir el JSON (USB,
      * Descargas, Drive…). El contenido llega como string en "content".

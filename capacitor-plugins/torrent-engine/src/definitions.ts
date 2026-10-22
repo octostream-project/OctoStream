@@ -137,6 +137,13 @@ export interface TorrentEnginePlugin {
   getDownloadDir(): Promise<DownloadDirInfo>
   /** Selector de carpeta de descargas (SAF en Android, diálogo en Electron) */
   pickDownloadDir(): Promise<PickDownloadDirResult>
+
+  /**
+   * Persiste la carpeta elegida con un picker externo (el SAF tree picker
+   * está en @octostream/exo-player). Acepta treeUri content:// y decide
+   * modo ruta real (con all-files) o árbol SAF.
+   */
+  setDownloadDir(options: { treeUri: string }): Promise<PickDownloadDirResult>
   /** Vuelve a la carpeta por defecto */
   resetDownloadDir(): Promise<void>
   stop(): Promise<void>

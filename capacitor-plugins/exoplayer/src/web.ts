@@ -14,6 +14,10 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
     throw new Error('ExoPlayer is only available on Android native')
   }
 
+  async pickFolder(): Promise<{ uri: string }> {
+    throw new Error('ExoPlayer is only available on Android native')
+  }
+
   async switchChannel(_options: SwitchChannelOptions): Promise<{ status: string }> {
     throw new Error('ExoPlayer is only available on Android native')
   }

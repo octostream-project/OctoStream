@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
-import { playLocalFile } from '../utils/exoPlayer.js'
+import { playLocalFile, pickDownloadFolder } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { Play, Trash2, Download, FolderOpen, Loader2 } from 'lucide-react'
 
@@ -83,7 +83,15 @@ export default function DownloadsList() {
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
-      const r = await engine?.pickDownloadDir?.()
+      let r
+      if (isAndroidNative()) {
+        // El picker SAF vive en el plugin exoplayer (activity-result probado);
+        // torrent-engine solo persiste la URI elegida en sus prefs.
+        const picked = await pickDownloadFolder()
+        r = picked?.uri ? await engine?.setDownloadDir?.({ treeUri: picked.uri }) : null
+      } else {
+        r = await engine?.pickDownloadDir?.()
+      }
       if (r?.needsPermission) {
         setError('Si tu Android no muestra el ajuste de almacenamiento, pulsa "Carpeta" otra vez: podrás elegir carpeta igualmente.')
         return

@@ -401,36 +401,61 @@ public class TorrentEnginePlugin extends Plugin {
                 getContext().getContentResolver().takePersistableUriPermission(uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             } catch (Exception ignored) {}
-            String path = treeUriToPath(uri);
-            boolean rawAccess = Build.VERSION.SDK_INT >= 30
-                    ? Environment.isExternalStorageManager()
-                    : getPermissionState("storageWrite") == PermissionState.GRANTED;
-            android.content.SharedPreferences.Editor ed =
-                    getContext().getSharedPreferences(PREFS, 0).edit();
-            JSObject ret = new JSObject();
-            if (path != null && rawAccess) {
-                File dir = new File(path);
-                dir.mkdirs();
-                if (!dir.isDirectory() || !dir.canWrite()) {
-                    call.reject("Sin permiso de escritura en esa carpeta");
-                    return;
-                }
-                ed.putString("download_dir", path).remove("download_tree").apply();
-                ret.put("path", path);
-                ret.put("treeMode", false);
-            } else {
-                // Modo SAF: sin acceso a rutas reales — la URI persistida
-                // basta para leer/escribir vía ContentResolver.
-                ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
-                ret.put("path", uri.toString());
-                ret.put("treeMode", true);
-            }
-            ret.put("custom", true);
-            call.resolve(ret);
+            storeDownloadDir(uri, call);
         } catch (Throwable t) {
             // El callback nunca puede escapar sin resolver/rechazar.
             call.reject("No se pudo usar la carpeta: " + t.getMessage());
         }
+    }
+
+    /**
+     * Persiste la carpeta elegida con un picker externo (el SAF tree picker
+     * vive en el plugin exoplayer — su activity-result está probado en
+     * dispositivos donde el de este plugin no devuelve resultado). Acepta
+     * "treeUri" (content://.../tree/...): si hay acceso a rutas reales se
+     * guarda la ruta; si no, la URI SAF en modo árbol.
+     */
+    @PluginMethod
+    public void setDownloadDir(PluginCall call) {
+        String treeUri = call.getString("treeUri");
+        if (treeUri == null || !treeUri.startsWith("content://")) {
+            call.reject("treeUri inválida");
+            return;
+        }
+        try {
+            storeDownloadDir(Uri.parse(treeUri), call);
+        } catch (Throwable t) {
+            call.reject("No se pudo usar la carpeta: " + t.getMessage());
+        }
+    }
+
+    private void storeDownloadDir(Uri uri, PluginCall call) {
+        String path = treeUriToPath(uri);
+        boolean rawAccess = Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED;
+        android.content.SharedPreferences.Editor ed =
+                getContext().getSharedPreferences(PREFS, 0).edit();
+        JSObject ret = new JSObject();
+        if (path != null && rawAccess) {
+            File dir = new File(path);
+            dir.mkdirs();
+            if (!dir.isDirectory() || !dir.canWrite()) {
+                call.reject("Sin permiso de escritura en esa carpeta");
+                return;
+            }
+            ed.putString("download_dir", path).remove("download_tree").apply();
+            ret.put("path", path);
+            ret.put("treeMode", false);
+        } else {
+            // Modo SAF: sin acceso a rutas reales — la URI persistida basta
+            // para leer/escribir vía ContentResolver.
+            ed.putString("download_tree", uri.toString()).remove("download_dir").apply();
+            ret.put("path", uri.toString());
+            ret.put("treeMode", true);
+        }
+        ret.put("custom", true);
+        call.resolve(ret);
     }
 
     // content://…/tree/primary:Descargas/X → /storage/emulated/0/Descargas/X

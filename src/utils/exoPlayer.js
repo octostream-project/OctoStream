@@ -179,6 +179,16 @@ export async function pickLocalSubtitle() {
 }
 
 /**
+ * Picker SAF de carpeta (árbol). Devuelve {uri} — el motor de descargas la
+ * persiste con TorrentEngine.setDownloadDir (su activity-result propio no
+ * devuelve resultado en algunos dispositivos; este sí está probado).
+ */
+export async function pickDownloadFolder() {
+  if (!isAndroidNative()) throw new Error('Solo disponible en Android')
+  return ExoPlayer.pickFolder()
+}
+
+/**
  * Reproduce un archivo local (content:// o file://) en el ExoPlayer nativo.
  * Salta la sanitización http(s): la URI solo procede del SAF picker.
  * Reanudación automática: guarda la posición por URI (evento 'position',
