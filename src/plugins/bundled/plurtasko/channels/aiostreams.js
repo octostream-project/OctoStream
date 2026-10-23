@@ -245,20 +245,25 @@ function stremioToStream(s) {
     || undefined
   // "🚀 FHD" como server no dice nada; mejor el addon/indexador real.
   const serverLabel = [meta.indexer, meta.addon].filter(Boolean).join(' · ') || name
+  // Título del release real: behaviorHints.filename lleva el nombre del
+  // archivo/torrent ("Movie.Name.1080p.BluRay.x264-GRP"). Eso es lo que el
+  // usuario quiere ver como nombre del stream — el origen (PirateBay…)
+  // queda como info secundaria en `server`.
+  const release = String(s.behaviorHints?.filename || '').trim() || label
 
   const hash = (s.infoHash || '').toLowerCase()
   if (hash) {
     if (!/^[0-9a-f]{32,40}$/.test(hash)) return null
-    let magnet = `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(label || name)}`
+    let magnet = `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(release || name)}`
     for (const src of s.sources || []) {
       const tr = String(src).replace(/^tracker:/, '')
       if (/^https?:|^udp:/.test(tr)) magnet += `&tr=${encodeURIComponent(tr)}`
     }
     if (s.fileIdx != null) magnet += `&so=${s.fileIdx}`
-    const stream = makeTorrentStream(serverLabel, withDefaultTrackers(magnet), quality, label)
-    stream.name = `${serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
+    const stream = makeTorrentStream(serverLabel, withDefaultTrackers(magnet), quality, release)
+    stream.name = `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
     stream.lang = lang
-    stream.title = label
+    stream.title = release
     stream.headers = headers
     stream.cached = meta.cached
     stream.size = meta.size || undefined
@@ -270,13 +275,13 @@ function stremioToStream(s) {
   const url = String(s.url || s.externalUrl || '')
   if (!/^https?:/i.test(url)) return null
   return {
-    name: `${serverLabel}${lang ? ` (${lang})` : ''} ${quality}${label ? ` · ${label}` : ''}`,
+    name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
     url,
     streamType: inferStreamType(url, 'mp4'),
     quality,
     server: serverLabel,
     lang,
-    title: label,
+    title: release,
     headers,
     size: meta.size || undefined,
     cached: meta.cached ?? (Boolean(s.behaviorHints?.cached) || undefined),

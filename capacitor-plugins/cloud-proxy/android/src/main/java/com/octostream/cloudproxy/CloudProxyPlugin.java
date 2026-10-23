@@ -1005,6 +1005,20 @@ public class CloudProxyPlugin extends Plugin {
         // 64KB se llena y el hijo se congela escribiendo (zombie colgado).
         new Thread(() -> readAetherLogs(spawned), "aether-logs").start();
 
+        // Código de salida al morir: 137=SIGKILL (phantom killer de Android
+        // mata los hijos que queman CPU con la app en segundo plano),
+        // 143=SIGTERM (nuestro destroy), 0/otro = salió solo. El phantom
+        // kill es invisible en logcat si no — el proceso desaparece sin
+        // log y sin tombstone.
+        new Thread(() -> {
+            try {
+                int code = spawned.waitFor();
+                Log.w(TAG, "Aether process exited, code=" + code);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+        }, "aether-exit-watch").start();
+
         // Wait for the SOCKS5 proxy to come up. MASQUE va rápido cuando su
         // peer fijado valida (~5-10s); si en ~35s no hay proxies el protocolo
         // está filtrado y no merece quemar los 120s del scan — se corta y el
@@ -1096,9 +1110,13 @@ public class CloudProxyPlugin extends Plugin {
     private void onTunnelDied(Process process) {
         boolean ours;
         synchronized (PROCESS_LOCK) {
-            // Solo cuenta el proceso conectado actual: logs de un proceso
-            // ya sustituido o un connect() en vuelo no deben disparar nada.
-            ours = aetherProcess == process && connected && !connecting;
+            // Solo cuenta el proceso actual: logs de un proceso ya
+            // sustituido o un connect() en vuelo no deben disparar nada.
+            // NO exigir connected: la sonda de puertos marca
+            // markDisconnected() en cuanto el túnel se atraganta, y era
+            // justo ese el caso que debe escalar — si la marca bloquea la
+            // escalada, el estado queda "caído" con el túnel zombi.
+            ours = aetherProcess == process && !connecting;
         }
         if (!ours) return;
         long now = System.currentTimeMillis();
