@@ -319,7 +319,11 @@ public class CloudProxyPlugin extends Plugin {
         // finishing (the user explicitly closed the app). Android also
         // reaps app child processes if it kills the whole process.
         android.app.Activity activity = getActivity();
-        if (activity != null && activity.isFinishing()) {
+        // isFinishing() miente en relanzamientos de foldables/display: la
+        // instancia vieja "termina" pero la tarea sigue y la Activity se
+        // recrea (matábamos WARP al rotar/plegar). isChangingConfigurations()
+        // distingue el relaunch del cierre real.
+        if (activity != null && activity.isFinishing() && !activity.isChangingConfigurations()) {
             new Thread(() -> {
                 if (connected || aetherProcess != null) disconnect(false);
                 else clearAppProxy();
