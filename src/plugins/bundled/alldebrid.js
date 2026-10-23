@@ -282,6 +282,17 @@ export async function getMagnetStatus(magnetId) {
   }
 }
 
+// Todos los magnets de la cuenta (cola + listos) — permite emparejar por
+// infoHash los "descargando" que subió la instancia AIOStreams.
+export async function listMagnets() {
+  try {
+    const data = await apiFetch('/magnet/status', {}, true, 'GET', API_BASE_41)
+    return Array.isArray(data?.magnets) ? data.magnets : []
+  } catch {
+    return []
+  }
+}
+
 // Delete a magnet from AllDebrid
 export async function deleteMagnet(magnetId) {
   try {

@@ -293,6 +293,7 @@ function stremioToStream(s) {
       size: meta.size || undefined,
       _magnet: magnet || undefined,
       _triggerUrl: okUrl || undefined,
+      _infoHash: validHash ? hash : undefined,
       pluginName: 'AIOStreams',
       channelName: 'AIOStreams',
       pluginId: 'plurtasko',
@@ -368,6 +369,7 @@ function searchToStream(item) {
       _magnet: /^[0-9a-f]{32,40}$/.test(h)
         ? `magnet:?xt=urn:btih:${h}&dn=${encodeURIComponent(release || label)}`
         : undefined,
+      _infoHash: /^[0-9a-f]{32,40}$/.test(h) ? h : undefined,
       pluginName: 'AIOStreams',
       channelName: 'AIOStreams',
       pluginId: 'plurtasko',

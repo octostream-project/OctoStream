@@ -14,6 +14,7 @@ import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
+import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob } from '../utils/debridJobs.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { httpGetText } from '../utils/httpClient.js'
@@ -518,12 +519,15 @@ export default function Details() {
                 m.genres, null, null, m.originalName, m.originCountry, m.originalLanguage, m.seasonsList, m.englishName, m.year)
               if (cancelled || !all?.length) return
               setStreams(all)
-              if (all.some(st => st.processing)) refetchProcessing()
+              if (all.some(st => st.processing)) { adoptDebridMagnets(all); refetchProcessing() }
             } catch { /* reintento silencioso */ }
           }, 45000)
         }
         processingRefetchRef.current = refetchProcessing
-        if (s?.some(st => st.processing)) refetchProcessing()
+        if (s?.some(st => st.processing)) {
+          adoptDebridMagnets(s)
+          refetchProcessing()
+        }
         // El marcador "processing" no es reproducible — el autoplay elige
         // solo entre las fuentes reales.
         const playable = (s || []).filter(st => !st.processing)
@@ -616,12 +620,36 @@ export default function Details() {
     // instancia AIOStreams, que es lo que dispara el procesamiento allí.
     // No reproduce nada; la ficha re-pide y aparece lista cuando termine.
     if (stream?.processing) {
+      // Magnet ya listo en AllDebrid (job tracked) → resolver el enlace
+      // restringido a URL directa y reproducir sin esperar al re-poll.
+      const job = stream._infoHash ? getDebridJob(stream._infoHash) : null
+      if (job?.status === 'ready') {
+        try {
+          setResolvingStream(true)
+          const directUrl = await resolveDebridJob(job, { season: stream.season, episode: stream.episode })
+          setResolvingStream(false)
+          if (directUrl) {
+            stream = { ...stream, processing: undefined, url: directUrl, streamType: 'mp4', server: `${stream.server || 'AIOStreams'} (Debrid)`, viaDebrid: 'AllDebrid' }
+          } else {
+            toast.error('El magnet está listo pero no se pudo desbloquear el enlace')
+            return
+          }
+        } catch (e) {
+          setResolvingStream(false)
+          toast.error(`No se pudo desbloquear: ${e?.message || e}`)
+          return
+        }
+      } else {
       try {
         if (stream._magnet && isAlldebridEnabled()) {
           toast('Enviando el magnet a AllDebrid…')
           const id = await adUploadMagnet(stream._magnet)
-          if (id) toast('Añadido a AllDebrid — se está descargando y aparecerá al estar listo')
-          else toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
+          if (id) {
+            trackMagnet(id, btihOf(stream._magnet) || stream._infoHash, stream.releaseTitle || stream.name)
+            toast('Añadido a AllDebrid — verás el progreso aquí y aparecerá al estar listo')
+          } else {
+            toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
+          }
         } else if (stream._triggerUrl) {
           toast('Solicitando la descarga a AIOStreams…')
           httpGetText(stream._triggerUrl).catch(() => {})
@@ -635,6 +663,7 @@ export default function Details() {
       // Re-pedir la lista pronto para reflejar el estado de la cola.
       processingRefetchRef.current?.()
       return
+      }
     }
     // Torrent multi-archivo (pack de temporada): listar los vídeos y dejar
     // elegir antes de reproducir. listFiles solo trae metadatos — el plugin
@@ -1053,7 +1082,7 @@ export default function Details() {
               meta.genres, ep.season, ep.episode, meta.originalName, meta.originCountry, meta.originalLanguage, meta.seasonsList, meta.englishName, meta.year)
             if (stale() || !all?.length) return
             setEpisodeStreams(all)
-            if (all.some(st => st.processing)) refetchProcessing()
+            if (all.some(st => st.processing)) { adoptDebridMagnets(all); refetchProcessing() }
           } catch { /* reintento silencioso */ }
         }, 45000)
       }
@@ -1064,6 +1093,7 @@ export default function Details() {
       if (epStreams?.some(st => st.processing)) {
         setEpisodeStreams(epStreams)
         setEpisodeLoading(false)
+        adoptDebridMagnets(epStreams)
         refetchProcessing()
       }
       if (playableEp.length > 0) {
