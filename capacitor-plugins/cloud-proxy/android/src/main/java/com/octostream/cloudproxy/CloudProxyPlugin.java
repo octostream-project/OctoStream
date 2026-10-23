@@ -46,6 +46,16 @@ public class CloudProxyPlugin extends Plugin {
     // siguiente conexión. "masque" es preferido (se disfraza de HTTPS/443);
     // en redes que filtran el data-plane QUIC cae a "wg" automáticamente.
     private static volatile String preferredProtocol = "masque";
+    // Protocolo que corre el proceso aether actual — MASQUE a veces no
+    // sostiene el túnel bajo carga ("tunnel ended: Operation not
+    // permitted" en bucle cada ~2s) mientras sus puertos locales siguen
+    // aceptando: la escalada a wg del arranque nunca se disparaba porque
+    // startAether ya había "tenido éxito". Tras varias muertes seguidas
+    // se reinicia con el otro protocolo.
+    private volatile String currentProtocol = null;
+    private volatile int tunnelFailStreak = 0;
+    private volatile long lastTunnelFailAt = 0;
+    private volatile boolean protocolSwitching = false;
     private static volatile String lastError = null;
     private static long connectionGeneration = 0;
     private static final Object PROCESS_LOCK = new Object();
@@ -951,6 +961,8 @@ public class CloudProxyPlugin extends Plugin {
         // Route sniff: read SNI from first bytes for smarter routing
         env.put("AETHER_ROUTE_SNIFF", "1");
 
+        currentProtocol = protocol;
+        tunnelFailStreak = 0;
         final Process spawned = builder.start();
         Log.i(TAG, "Aether process started");
 
@@ -1040,10 +1052,74 @@ public class CloudProxyPlugin extends Plugin {
                     // Connection state is owned by connect()/disconnect(); log output
                     // must not resurrect a stopped session asynchronously.
                 }
+                // Túnel muerto a mitad de sesión: los puertos del proxy
+                // siguen aceptando aunque el data-plane esté caído — es el
+                // caso que corrompía los streams "directos" y el que nunca
+                // disparaba la escalada de protocolo.
+                if (line.contains("tunnel ended") || line.contains("tunnel failed")) {
+                    onTunnelDied(process);
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Aether log reader error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Escalada de protocolo a mitad de sesión: si el túnel MASQUE se muere
+     * repetidamente (racha de "tunnel ended/failed"), los proxies locales
+     * quedan como listeners zombis — aceptan CONNECTs que nunca llegan al
+     * upstream. El fallback masque→wg del arranque no cubre este caso, así
+     * que aquí se reinicia aether con el otro protocolo. Solo se escala
+     * DESDE masque hacia wg — si wg también tormenta, no se hace ping-pong.
+     */
+    private void onTunnelDied(Process process) {
+        boolean ours;
+        synchronized (PROCESS_LOCK) {
+            // Solo cuenta el proceso conectado actual: logs de un proceso
+            // ya sustituido o un connect() en vuelo no deben disparar nada.
+            ours = aetherProcess == process && connected && !connecting;
+        }
+        if (!ours) return;
+        long now = System.currentTimeMillis();
+        if (now - lastTunnelFailAt > 60000) tunnelFailStreak = 0;
+        lastTunnelFailAt = now;
+        tunnelFailStreak++;
+        // ~5 muertes en MASQUE (~10s de túnel inválido) bastan para rendirse.
+        if (tunnelFailStreak < 5 || protocolSwitching
+                || !"masque".equals(currentProtocol)) return;
+        protocolSwitching = true;
+        preferredProtocol = "wg";
+        Log.w(TAG, "MASQUE tunnel can't hold (" + tunnelFailStreak
+                + " deaths) — restarting aether with wg");
+        new Thread(() -> {
+            try {
+                synchronized (PROCESS_LOCK) {
+                    // startAether aborta si connecting=false (connect
+                    // cancelado); mantenerlo true durante el swap y que
+                    // getStatus informe "connecting", no "down".
+                    connecting = true;
+                }
+                stopAether();
+                startAether("wg");
+                synchronized (PROCESS_LOCK) {
+                    connected = aetherProcess != null && aetherProcess.isAlive();
+                    connecting = false;
+                }
+                if (connected) {
+                    Log.i(TAG, "Aether restarted with wg after MASQUE storm");
+                } else {
+                    markDisconnected();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Protocol switch to wg failed: " + e.getMessage());
+                synchronized (PROCESS_LOCK) { connecting = false; }
+                markDisconnected();
+            } finally {
+                protocolSwitching = false;
+                tunnelFailStreak = 0;
+            }
+        }, "aether-protocol-switch").start();
     }
 
     /**
