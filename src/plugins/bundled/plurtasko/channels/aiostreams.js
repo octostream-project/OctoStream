@@ -227,7 +227,8 @@ function parseAioDescription(desc) {
   const addon = (t.match(/🔍\s*([^\n]+)/)?.[1] || '').trim()
   const indexer = (t.match(/📡\s*([^\n]+)/)?.[1] || '').trim()
   const size = (t.match(/📦\s*([\d.,]+\s*[GMTK]i?B)/i)?.[1] || '').trim()
-  return { cached, addon, indexer, size }
+  const seeds = Number(t.match(/👤\s*(\d+)/)?.[1] || t.match(/(\d+)\s*seeds?\b/i)?.[1] || 0)
+  return { cached, addon, indexer, size, seeds }
 }
 
 // Idioma del archivo real: primero el filename de behaviorHints (lleva los
@@ -291,6 +292,7 @@ function stremioToStream(s) {
       title: release,
       releaseTitle: release || undefined,
       size: meta.size || undefined,
+      seeds: meta.seeds || undefined,
       _magnet: magnet || undefined,
       _triggerUrl: okUrl || undefined,
       _infoHash: validHash ? hash : undefined,
@@ -310,6 +312,7 @@ function stremioToStream(s) {
     stream.headers = headers
     stream.cached = meta.cached
     stream.size = meta.size || undefined
+    stream.seeds = meta.seeds || undefined
     stream.pluginName = 'AIOStreams'
     stream.channelName = 'AIOStreams'
     return stream
@@ -327,6 +330,7 @@ function stremioToStream(s) {
     releaseTitle: release || undefined,
     headers,
     size: meta.size || undefined,
+    seeds: meta.seeds || undefined,
     cached: meta.cached ?? (Boolean(s.behaviorHints?.cached) || undefined),
     pluginName: 'AIOStreams',
     channelName: 'AIOStreams',
@@ -366,6 +370,7 @@ function searchToStream(item) {
       title: release,
       releaseTitle: release || undefined,
       size: sizeLabel || undefined,
+      seeds: seeders || undefined,
       _magnet: /^[0-9a-f]{32,40}$/.test(h)
         ? `magnet:?xt=urn:btih:${h}&dn=${encodeURIComponent(release || label)}`
         : undefined,
@@ -408,6 +413,7 @@ function searchToStream(item) {
     lang,
     title: release,
     releaseTitle: release || undefined,
+    seeds: seeders || undefined,
     headers: item.type === 'http' && item.requestHeaders ? item.requestHeaders : undefined,
     viaDebrid: service !== 'direct',
     cached: Boolean(item.cached) || undefined,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Server, Play, Download, Zap, Hourglass } from 'lucide-react'
+import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
 
@@ -49,6 +49,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
         {s.quality && (
           <span className={`text-xs ${qualityColorClass(s.quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{s.quality}</span>
         )}
+        {s.seeds > 0 && (
+          <span className="flex items-center gap-0.5 text-xs text-emerald-400/90 flex-shrink-0" title="Semillas compartiendo el torrent">
+            <Users size={12} />{s.seeds}
+          </span>
+        )}
       </div>
       <span className="text-white text-xs font-medium truncate">{s.name || s.releaseTitle || ''}</span>
       <div className={`flex items-center gap-1 text-xs ${st.cls}`}>
@@ -96,6 +101,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
                 )}
                 {quality && (
                   <span className={`text-xs ${qualityColorClass(quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{quality}</span>
+                )}
+                {stream.seeds > 0 && (
+                  <span className="flex items-center gap-0.5 text-xs text-emerald-400/90 flex-shrink-0" title="Semillas compartiendo el torrent">
+                    <Users size={12} />{stream.seeds}
+                  </span>
                 )}
                 {!quality && !lang && (
                   <span className="text-sm text-dark-400 font-medium">HD</span>
@@ -148,6 +158,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             )}
             {quality && (
               <span className={`text-xs ${qualityColorClass(quality)} text-white px-2 py-1 rounded font-bold flex-shrink-0`}>{quality}</span>
+            )}
+            {stream.seeds > 0 && (
+              <span className="flex items-center gap-1 text-xs text-emerald-400/90 px-1.5 py-1 rounded flex-shrink-0" title="Semillas compartiendo el torrent">
+                <Users size={14} />{stream.seeds}
+              </span>
             )}
             {!quality && !lang && (
               <span className="text-sm text-dark-400 font-medium w-12 text-center flex-shrink-0">HD</span>
