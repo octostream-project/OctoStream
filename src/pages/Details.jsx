@@ -13,9 +13,10 @@ import StreamList from '../components/StreamList.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
-import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
+import { isAlldebridEnabled, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
+import { httpGetText } from '../utils/httpClient.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
@@ -259,6 +260,9 @@ export default function Details() {
   const castAbortRef = useRef(null)
   const streamAbortRef = useRef(null)
   const episodeStreamAbortRef = useRef(null)
+  // Apunta al refetchProcessing del efecto activo (película o episodio) —
+  // handlePlay lo usa tras mandar una fuente "descargando" al debrid.
+  const processingRefetchRef = useRef(null)
   // Token para descartar resultados de carga de episodios anteriores
   const episodeLoadIdRef = useRef(0)
   const [trailerStream, setTrailerStream] = useState(null)
@@ -518,6 +522,7 @@ export default function Details() {
             } catch { /* reintento silencioso */ }
           }, 45000)
         }
+        processingRefetchRef.current = refetchProcessing
         if (s?.some(st => st.processing)) refetchProcessing()
         // El marcador "processing" no es reproducible — el autoplay elige
         // solo entre las fuentes reales.
@@ -606,6 +611,31 @@ export default function Details() {
   const handlePlay = async (stream, skipResume = false, candidatesPool = null) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
+    // Fuente "descargando" (debrid aún procesa el magnet): pulsarla la pone
+    // a bajar — subimos el magnet a AllDebrid, o pedimos la URL de la
+    // instancia AIOStreams, que es lo que dispara el procesamiento allí.
+    // No reproduce nada; la ficha re-pide y aparece lista cuando termine.
+    if (stream?.processing) {
+      try {
+        if (stream._magnet && isAlldebridEnabled()) {
+          toast('Enviando el magnet a AllDebrid…')
+          const id = await adUploadMagnet(stream._magnet)
+          if (id) toast('Añadido a AllDebrid — se está descargando y aparecerá al estar listo')
+          else toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
+        } else if (stream._triggerUrl) {
+          toast('Solicitando la descarga a AIOStreams…')
+          httpGetText(stream._triggerUrl).catch(() => {})
+          toast('Descarga solicitada — la ficha se actualiza sola')
+        } else {
+          toast('Esta fuente ya está en cola del debrid — aparecerá al estar lista')
+        }
+      } catch (e) {
+        toast.error(`No se pudo iniciar la descarga: ${e?.message || e}`)
+      }
+      // Re-pedir la lista pronto para reflejar el estado de la cola.
+      processingRefetchRef.current?.()
+      return
+    }
     // Torrent multi-archivo (pack de temporada): listar los vídeos y dejar
     // elegir antes de reproducir. listFiles solo trae metadatos — el plugin
     // cachea el TorrentInfo y start() lo reutiliza, así que no cuesta el
@@ -1027,6 +1057,7 @@ export default function Details() {
           } catch { /* reintento silencioso */ }
         }, 45000)
       }
+      processingRefetchRef.current = refetchProcessing
       // El marcador "processing" no es reproducible — solo cuenta para el
       // aviso y el auto-refresh; el autoplay usa las fuentes reales.
       const playableEp = (epStreams || []).filter(st => !st.processing)

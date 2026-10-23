@@ -259,8 +259,27 @@ function stremioToStream(s) {
   // usuario quiere ver como nombre del stream — el origen (PirateBay…)
   // queda como info secundaria en `server`.
   const release = String(s.behaviorHints?.filename || '').trim() || label
+
+  // Magnet/URL calculados antes del check de caché: la entrada
+  // "descargando" también los necesita — pulsarla lanza la descarga.
+  const hash = (s.infoHash || '').toLowerCase()
+  const validHash = /^[0-9a-f]{32,40}$/.test(hash)
+  let magnet = ''
+  if (hash && validHash) {
+    magnet = `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(release || name)}`
+    for (const src of s.sources || []) {
+      const tr = String(src).replace(/^tracker:/, '')
+      if (/^https?:|^udp:/.test(tr)) magnet += `&tr=${encodeURIComponent(tr)}`
+    }
+    if (s.fileIdx != null) magnet += `&so=${s.fileIdx}`
+  }
+  const pageUrl = String(s.url || s.externalUrl || '')
+  const okUrl = /^https?:/i.test(pageUrl) ? pageUrl : ''
+
   // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
-  // es reproducible pero se muestra atenuado con su título; cuando el
+  // es reproducible pero se muestra atenuado con su título, y pulsarlo
+  // envía el magnet a AllDebrid (o pide la URL de la instancia, que es lo
+  // que dispara el procesamiento) para "ponerlo a descargar". Cuando el
   // debrid termine reaparece ya cacheado en el siguiente re-poll.
   if (meta.cached === false) {
     return {
@@ -272,21 +291,16 @@ function stremioToStream(s) {
       title: release,
       releaseTitle: release || undefined,
       size: meta.size || undefined,
+      _magnet: magnet || undefined,
+      _triggerUrl: okUrl || undefined,
       pluginName: 'AIOStreams',
       channelName: 'AIOStreams',
       pluginId: 'plurtasko',
     }
   }
 
-  const hash = (s.infoHash || '').toLowerCase()
   if (hash) {
-    if (!/^[0-9a-f]{32,40}$/.test(hash)) return null
-    let magnet = `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(release || name)}`
-    for (const src of s.sources || []) {
-      const tr = String(src).replace(/^tracker:/, '')
-      if (/^https?:|^udp:/.test(tr)) magnet += `&tr=${encodeURIComponent(tr)}`
-    }
-    if (s.fileIdx != null) magnet += `&so=${s.fileIdx}`
+    if (!validHash) return null
     const stream = makeTorrentStream(serverLabel, withDefaultTrackers(magnet), quality, release)
     stream.name = `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
     stream.lang = lang
@@ -300,12 +314,11 @@ function stremioToStream(s) {
     return stream
   }
 
-  const url = String(s.url || s.externalUrl || '')
-  if (!/^https?:/i.test(url)) return null
+  if (!okUrl) return null
   return {
     name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
-    url,
-    streamType: inferStreamType(url, 'mp4'),
+    url: okUrl,
+    streamType: inferStreamType(okUrl, 'mp4'),
     quality,
     server: serverLabel,
     lang,
@@ -339,8 +352,10 @@ function searchToStream(item) {
     `${(parsed.languages || []).join(' ')} ${release}`
   )
   // Igual que en stremioToStream: "not ready" se muestra atenuado con su
-  // título hasta que el debrid termine de descargarlo.
+  // título hasta que el debrid termine — pulsarla sube el magnet a
+  // AllDebrid para ponerla a descargar.
   if (item.cached === false) {
+    const h = (item.infoHash || '').toLowerCase()
     return {
       processing: true,
       name: `${release || label}${lang ? ` (${lang})` : ''} ${quality}${sizeLabel ? ` ${sizeLabel}` : ''}`,
@@ -350,6 +365,9 @@ function searchToStream(item) {
       title: release,
       releaseTitle: release || undefined,
       size: sizeLabel || undefined,
+      _magnet: /^[0-9a-f]{32,40}$/.test(h)
+        ? `magnet:?xt=urn:btih:${h}&dn=${encodeURIComponent(release || label)}`
+        : undefined,
       pluginName: 'AIOStreams',
       channelName: 'AIOStreams',
       pluginId: 'plurtasko',
