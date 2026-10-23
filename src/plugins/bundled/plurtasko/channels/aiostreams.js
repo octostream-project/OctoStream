@@ -248,6 +248,14 @@ function stremioToStream(s) {
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
+  // El 👤/seeders puede venir en title o name según el formatter de la
+  // instancia — se busca ahí también. Solo seeds: cached/addon/indexer
+  // quedan en description (un título "Ready.Player.One" daría falsos
+  // positivos de caché).
+  if (!meta.seeds) {
+    const extra = `${s.title || ''}\n${s.name || ''}`
+    meta.seeds = Number(extra.match(/👤\s*(\d+)/)?.[1] || extra.match(/(\d+)\s*seeders?\b/i)?.[1] || 0)
+  }
   const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
   const headers = s.behaviorHints?.proxyHeaders?.request

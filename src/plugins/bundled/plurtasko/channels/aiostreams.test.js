@@ -63,6 +63,14 @@ describe('aiostreams (manifest stremio)', () => {
     expect(aioProcessingCount()).toBe(2)
   })
 
+  it('lee seeders aunque vengan en title en vez de description', async () => {
+    safeFetchJson.mockResolvedValue({
+      streams: [STREMIO({ title: 'Movie.Name.1080p\n👤 42 💾 2.10 GB' })],
+    })
+    const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
+    expect(s[0].seeds).toBe(42)
+  })
+
   it('series usa el sufijo s:e en la URL', async () => {
     safeFetchJson.mockResolvedValue({ streams: [] })
     await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'series', season: 2, episode: 5 })
