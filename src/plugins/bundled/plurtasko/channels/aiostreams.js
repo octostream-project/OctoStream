@@ -190,6 +190,12 @@ export const aiostreams = {
       }
       if (!data) console.warn(`[aiostreams] stream fetch failed or truncated for ${id}`)
       const list = Array.isArray(data?.streams) ? data.streams : []
+      // Diagnóstico del formatter real de la instancia (seeders/cached):
+      // release no pasa console.log a logcat — solo en dev.
+      if (import.meta.env?.DEV && list[0]) {
+        const s = list[0]
+        console.log('[aiostreams] sample:', String(s.description || s.title || s.name || '').slice(0, 300))
+      }
       const mapped = list.map(stremioToStream)
       _processingCount = mapped.filter(s => s && s.processing).length
       return mapped.filter(Boolean)
