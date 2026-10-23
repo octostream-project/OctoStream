@@ -23,6 +23,8 @@ export async function promptStorageAccessOnce({ getVersion, getEngine, storage }
   const { granted } = await bounded(engine.getStorageAccess(), 4000)
   if (granted) return 'granted'
   storage.setItem(PROMPT_KEY, String(versionCode))
-  const result = await bounded(engine.requestStorageAccess(), 8000)
+  // El diálogo runtime + la pantalla all-files pueden tardar lo que tarde
+  // el usuario en responder; el timeout solo cubre una llamada que no vuelva.
+  const result = await bounded(engine.requestStorageAccess(), 120000)
   return result?.opened ? 'opened' : result?.granted ? 'granted' : 'unavailable'
 }

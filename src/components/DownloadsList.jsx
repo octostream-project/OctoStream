@@ -182,9 +182,10 @@ export default function DownloadsList() {
     setPickingDir(true)
     try {
       const engine = await getTorrentEngine()
-      // El nativo resuelve al abrir los ajustes (sin esperar resultado); el
-      // timeout cubre el diálogo runtime de Android <=10 por si no vuelve.
-      const r = await withTimeout(engine?.requestStorageAccess?.(), 8000)
+      // El nativo muestra el diálogo runtime y luego abre los ajustes —
+      // puede tardar lo que tarde el usuario en responder; el timeout solo
+      // cubre una llamada que nunca vuelva.
+      const r = await withTimeout(engine?.requestStorageAccess?.(), 120000)
       if (r?.granted) {
         await recheckStorageAccess()
         toast.success('Acceso al almacenamiento concedido')

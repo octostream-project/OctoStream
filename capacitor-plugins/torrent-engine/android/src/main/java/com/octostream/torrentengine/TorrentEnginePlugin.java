@@ -379,45 +379,24 @@ public class TorrentEnginePlugin extends Plugin {
     @PluginMethod
     public void requestStorageAccess(PluginCall call) {
         if (Build.VERSION.SDK_INT >= 30) {
-            // Cadena de intents: pantalla all-files específica de la app →
-            // listado general all-files → ficha de la app (siempre existe;
-            // en GrapheneOS/Storage Scopes el acceso se concede desde ahí).
-            android.content.pm.PackageManager pm = getContext().getPackageManager();
-            Intent app = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-            app.setData(Uri.parse("package:" + getContext().getPackageName()));
-            Intent generic = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-            Intent details = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            details.setData(Uri.parse("package:" + getContext().getPackageName()));
-            Intent chosen = null;
-            for (Intent i : new Intent[] { app, generic, details }) {
-                try {
-                    if (i.resolveActivity(pm) != null) { chosen = i; break; }
-                } catch (Throwable ignored) {}
-            }
-            if (chosen == null) {
-                call.reject("Este dispositivo no tiene pantalla de permisos de almacenamiento");
+            // Flujo de Kodi: primero el diálogo runtime del sistema
+            // (WRITE_EXTERNAL_STORAGE sin maxSdk — "Archivos y multimedia"
+            // en API 30-32, fotos/vídeos/audio en API 33+), después la
+            // pantalla "Acceso a todos los archivos" si el acceso total
+            // sigue sin concederse. En API 33+ WRITE_EXTERNAL_STORAGE queda
+            // siempre denegado (solo concede media), así que la pantalla
+            // se abre desde el callback igualmente.
+            if (getPermissionState("storageWrite") != PermissionState.GRANTED) {
+                requestPermissionForAlias("storageWrite", call, "storageAccessPermCallback");
                 return;
             }
-            // startActivity normal, SIN activity-result: el canal de resultados
-            // de este plugin no devuelve nada en algunas ROMs (por eso el
-            // picker SAF vive en exoplayer) y la promesa quedaba colgada para
-            // siempre con la UI girando. Se resuelve al abrir los ajustes y JS
-            // re-comprueba el permiso con getDownloadDir al volver a la app.
-            try {
-                android.app.Activity act = getActivity();
-                if (act != null) {
-                    act.startActivity(chosen);
-                } else {
-                    chosen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(chosen);
-                }
+            if (Environment.isExternalStorageManager()) {
                 JSObject ret = new JSObject();
-                ret.put("opened", true);
-                ret.put("granted", Environment.isExternalStorageManager());
+                ret.put("granted", true);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("No se pudo abrir la pantalla de permisos: " + e.getMessage());
+                return;
             }
+            openAllFilesSettings(call);
             return;
         }
         if (getPermissionState("storageWrite") == PermissionState.GRANTED) {
@@ -429,11 +408,61 @@ public class TorrentEnginePlugin extends Plugin {
         requestPermissionForAlias("storageWrite", call, "storageAccessPermCallback");
     }
 
+    // Cadena de intents: pantalla all-files específica de la app →
+    // listado general all-files → ficha de la app (siempre existe;
+    // en GrapheneOS/Storage Scopes el acceso se concede desde ahí).
+    private void openAllFilesSettings(PluginCall call) {
+        android.content.pm.PackageManager pm = getContext().getPackageManager();
+        Intent app = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+        app.setData(Uri.parse("package:" + getContext().getPackageName()));
+        Intent generic = new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+        Intent details = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        details.setData(Uri.parse("package:" + getContext().getPackageName()));
+        Intent chosen = null;
+        for (Intent i : new Intent[] { app, generic, details }) {
+            try {
+                if (i.resolveActivity(pm) != null) { chosen = i; break; }
+            } catch (Throwable ignored) {}
+        }
+        if (chosen == null) {
+            call.reject("Este dispositivo no tiene pantalla de permisos de almacenamiento");
+            return;
+        }
+        // startActivity normal, SIN activity-result: el canal de resultados
+        // de este plugin no devuelve nada en algunas ROMs (por eso el
+        // picker SAF vive en exoplayer) y la promesa quedaba colgada para
+        // siempre con la UI girando. Se resuelve al abrir los ajustes y JS
+        // re-comprueba el permiso con getDownloadDir al volver a la app.
+        try {
+            android.app.Activity act = getActivity();
+            if (act != null) {
+                act.startActivity(chosen);
+            } else {
+                chosen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(chosen);
+            }
+            JSObject ret = new JSObject();
+            ret.put("opened", true);
+            ret.put("granted", Environment.isExternalStorageManager());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("No se pudo abrir la pantalla de permisos: " + e.getMessage());
+        }
+    }
+
     @PermissionCallback
     private void storageAccessPermCallback(PluginCall call) {
         if (call == null) return;
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            // El diálogo runtime ya se mostró; el acceso total falta → abrir
+            // la pantalla de ajustes (segundo paso del flujo de Kodi).
+            openAllFilesSettings(call);
+            return;
+        }
         JSObject ret = new JSObject();
-        ret.put("granted", getPermissionState("storageWrite") == PermissionState.GRANTED);
+        ret.put("granted", Build.VERSION.SDK_INT >= 30
+                ? Environment.isExternalStorageManager()
+                : getPermissionState("storageWrite") == PermissionState.GRANTED);
         call.resolve(ret);
     }
 
