@@ -26,9 +26,9 @@ export function saveSubStyle(style) {
 export function pushSubStyle() {
   const s = getSubStyle()
   if (isAndroidNative()) {
-    ExoPlayer.setSubtitleStyle({
+    ExoPlayer.setSubtitleStyle?.({
       scale: s.scale, color: s.color, bg: s.bg, bottom: s.bottom,
-    }).catch(() => {})
+    })?.catch(() => {})
     return
   }
   // Electron/mpv: sub-scale (0-100), sub-color/#AARRGGBB, sub-back-color,

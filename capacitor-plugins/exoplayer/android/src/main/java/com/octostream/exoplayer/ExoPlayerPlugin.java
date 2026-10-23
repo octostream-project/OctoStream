@@ -7502,6 +7502,36 @@ public class ExoPlayerPlugin extends Plugin {
     private List<long[]> extCueTimes = null;
     private List<String> extCueTexts = null;
     private int extCueShown = -2;
+    // Vista de subtítulos externa (OpenSubtitles/IA): un TextView propio sobre
+    // el vídeo. El SubtitleView interno de PlayerView no sirve para cues
+    // manuales: el TextOutput de Media3 emite onCues(EMPTY) tras desactivar
+    // las pistas de texto y borra lo que pintamos con setCues, y el ticker
+    // solo repinta cuando cambia el índice → los subs quedaban invisibles.
+    private TextView extSubView = null;
+
+    private void ensureExtSubView() {
+        if (extSubView != null || rootLayoutRef == null) return;
+        extSubView = new TextView(getContext());
+        extSubView.setGravity(Gravity.CENTER);
+        extSubView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        // Sombra para legibilidad con fondo transparente.
+        extSubView.setShadowLayer(6f, 0f, 0f, Color.BLACK);
+        extSubView.setMaxWidth(getContext().getResources().getDisplayMetrics().widthPixels - dpInt(48));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        // Antes de los controles para que la barra de progreso quede encima.
+        int idx = controlsOverlay != null ? rootLayoutRef.indexOfChild(controlsOverlay) : -1;
+        if (idx >= 0) rootLayoutRef.addView(extSubView, idx, lp);
+        else rootLayoutRef.addView(extSubView, lp);
+        extSubView.setVisibility(View.GONE);
+        applySubtitleStyle();
+    }
+
+    private int dpInt(float v) {
+        return Math.round(v * getContext().getResources().getDisplayMetrics().density);
+    }
+
     private final Runnable extSubTicker = new Runnable() {
         @Override public void run() {
             if (player == null || extCueTimes == null) return;
@@ -7515,14 +7545,14 @@ public class ExoPlayerPlugin extends Plugin {
             }
             if (idx != extCueShown) {
                 extCueShown = idx;
-                androidx.media3.ui.SubtitleView sv = playerView != null ? playerView.getSubtitleView() : null;
-                if (sv != null) {
-                    List<androidx.media3.common.text.Cue> cues = new ArrayList<>();
+                ensureExtSubView();
+                if (extSubView != null) {
                     if (idx >= 0) {
-                        cues.add(new androidx.media3.common.text.Cue.Builder()
-                                .setText(extCueTexts.get(idx)).build());
+                        extSubView.setText(extCueTexts.get(idx));
+                        extSubView.setVisibility(View.VISIBLE);
+                    } else {
+                        extSubView.setVisibility(View.GONE);
                     }
-                    sv.setCues(cues);
                 }
             }
             mainHandler.postDelayed(this, 200);
@@ -7741,16 +7771,36 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     private void applySubtitleStyle() {
-        if (playerView == null) return;
-        androidx.media3.ui.SubtitleView sv = playerView.getSubtitleView();
-        if (sv == null) return;
-        // 0.0533 es la fracción por defecto de Media3.
-        sv.setFractionalTextSize(0.0533f * subStyleScale);
-        sv.setStyle(new androidx.media3.ui.CaptionStyleCompat(
-                subStyleColor, subStyleBg, Color.TRANSPARENT,
-                androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                Color.BLACK, null));
-        sv.setBottomPaddingFraction(subStyleBottom);
+        if (playerView != null) {
+            androidx.media3.ui.SubtitleView sv = playerView.getSubtitleView();
+            if (sv != null) {
+                // 0.0533 es la fracción por defecto de Media3.
+                sv.setFractionalTextSize(0.0533f * subStyleScale);
+                sv.setStyle(new androidx.media3.ui.CaptionStyleCompat(
+                        subStyleColor, subStyleBg, Color.TRANSPARENT,
+                        androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                        Color.BLACK, null));
+                sv.setBottomPaddingFraction(subStyleBottom);
+            }
+        }
+        // El TextView propio de los cues externos lleva el mismo estilo.
+        if (extSubView != null) {
+            int screenH = getContext().getResources().getDisplayMetrics().heightPixels;
+            extSubView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                    screenH * 0.045f * subStyleScale);
+            extSubView.setTextColor(subStyleColor);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(subStyleBg);
+            bg.setCornerRadius(dpInt(6));
+            extSubView.setBackground(bg);
+            int hp = dpInt(12), vp = dpInt(4);
+            extSubView.setPadding(hp, vp, hp, vp);
+            ViewGroup.LayoutParams lp = extSubView.getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams) {
+                ((FrameLayout.LayoutParams) lp).bottomMargin = (int) (screenH * subStyleBottom);
+                extSubView.setLayoutParams(lp);
+            }
+        }
     }
 
     @PluginMethod
@@ -7918,12 +7968,12 @@ public class ExoPlayerPlugin extends Plugin {
 
     private void clearExternalCues() {
         mainHandler.removeCallbacks(extSubTicker);
-        boolean had = extCueTimes != null;
         extCueTimes = null;
         extCueTexts = null;
         extCueShown = -2;
-        if (had && playerView != null && playerView.getSubtitleView() != null) {
-            playerView.getSubtitleView().setCues(new ArrayList<>());
+        if (extSubView != null) {
+            extSubView.setVisibility(View.GONE);
+            extSubView.setText("");
         }
     }
 
@@ -9758,6 +9808,7 @@ public class ExoPlayerPlugin extends Plugin {
         mainHandler.removeCallbacks(hideControlsRunnable);
         mainHandler.removeCallbacks(controlsTickRunnable);
         clearExternalCues();
+        extSubView = null;
         volumeSeek = null;
         volumePopup = null;
         speedLabel = null;

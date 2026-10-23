@@ -10,6 +10,7 @@ vi.mock('@octostream/exo-player', () => ({
     stop: vi.fn(),
     seekTo: vi.fn(),
     setPlaybackRate: vi.fn(),
+    setSubtitleStyle: vi.fn(() => Promise.resolve()),
     playEmbed: vi.fn(),
     resolveEmbed: vi.fn(),
   },
