@@ -191,11 +191,8 @@ export const aiostreams = {
       if (!data) console.warn(`[aiostreams] stream fetch failed or truncated for ${id}`)
       const list = Array.isArray(data?.streams) ? data.streams : []
       const mapped = list.map(stremioToStream)
-      // Marcadores "processing": no son reproducibles (debrid aún los
-      // descarga) pero Details los usa para re-pedir la lista cuando
-      // terminen — se cuentan y se filtran aquí.
       _processingCount = mapped.filter(s => s && s.processing).length
-      return mapped.filter(s => s && !s.processing)
+      return mapped.filter(Boolean)
     }
 
     const url = `${cfg.instance}/api/v1/search?type=${stremioType}&id=${encodeURIComponent(id)}&requiredFields=parsedFile`
@@ -208,12 +205,12 @@ export const aiostreams = {
     const list = Array.isArray(data?.data?.results) ? data.data.results : []
     const mapped = list.map(searchToStream)
     _processingCount = mapped.filter(s => s && s.processing).length
-    return mapped.filter(s => s && !s.processing)
+    return mapped.filter(Boolean)
   },
 }
 
-// Nº de streams descartados por estar "procesándose" en el último fetch —
-// index.js lo convierte en un marcador visible para la UI.
+// Nº de fuentes aún procesándose en el último fetch — index.js lo usa
+// para saber si la ficha debe re-pedir la lista aunque esté vacía.
 let _processingCount = 0
 export function aioProcessingCount() { return _processingCount }
 
@@ -250,10 +247,6 @@ function stremioToStream(s) {
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
-  // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
-  // es reproducible ahora. Devuelve un marcador para que la ficha sepa
-  // que hay fuentes en cola y las re-pida cuando terminen.
-  if (meta.cached === false) return { processing: true }
   const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
   const headers = s.behaviorHints?.proxyHeaders?.request
@@ -266,6 +259,24 @@ function stremioToStream(s) {
   // usuario quiere ver como nombre del stream — el origen (PirateBay…)
   // queda como info secundaria en `server`.
   const release = String(s.behaviorHints?.filename || '').trim() || label
+  // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
+  // es reproducible pero se muestra atenuado con su título; cuando el
+  // debrid termine reaparece ya cacheado en el siguiente re-poll.
+  if (meta.cached === false) {
+    return {
+      processing: true,
+      name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
+      server: serverLabel,
+      lang,
+      quality,
+      title: release,
+      releaseTitle: release || undefined,
+      size: meta.size || undefined,
+      pluginName: 'AIOStreams',
+      channelName: 'AIOStreams',
+      pluginId: 'plurtasko',
+    }
+  }
 
   const hash = (s.infoHash || '').toLowerCase()
   if (hash) {
@@ -311,8 +322,6 @@ function stremioToStream(s) {
 
 // ── Respuesta Search API (self-hosted) ─────────────────────────────────────
 function searchToStream(item) {
-  // Igual que en stremioToStream: los "not ready" devuelven marcador.
-  if (item.cached === false) return { processing: true }
   const parsed = item.parsedFile || {}
   const release = item.filename || item.folderName || ''
   const service = (item.service || 'direct').toLowerCase()
@@ -329,6 +338,23 @@ function searchToStream(item) {
   const lang = detectLangFromText(
     `${(parsed.languages || []).join(' ')} ${release}`
   )
+  // Igual que en stremioToStream: "not ready" se muestra atenuado con su
+  // título hasta que el debrid termine de descargarlo.
+  if (item.cached === false) {
+    return {
+      processing: true,
+      name: `${release || label}${lang ? ` (${lang})` : ''} ${quality}${sizeLabel ? ` ${sizeLabel}` : ''}`,
+      server: label,
+      lang,
+      quality,
+      title: release,
+      releaseTitle: release || undefined,
+      size: sizeLabel || undefined,
+      pluginName: 'AIOStreams',
+      channelName: 'AIOStreams',
+      pluginId: 'plurtasko',
+    }
+  }
 
   // P2P: OctoStream sí reproduce torrents locales (POV los descartaba porque
   // Kodi solo juega debrid) — magnet por infoHash con trackers por defecto.

@@ -6,16 +6,26 @@ import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass,
 // más de 6 enlaces, lista completa si no.
 export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
   if (!streams?.length) return null
-  // Marcadores "processing" (debrid descargando el magnet): se muestran
-  // como aviso no clicable, no como fuente reproducible.
+  // Entradas "processing" (debrid descargando el magnet): se muestran
+  // atenuadas con su título — no clicables — y pasan a reproducibles
+  // cuando el debrid termina (Details re-pide la lista periódicamente).
   const playable = streams.filter(s => !s.processing)
   const processing = streams.filter(s => s.processing)
-  const processingNote = processing.length ? (
-    <div className="flex items-center gap-2 text-amber-400/80 text-xs px-2 py-1.5">
-      <Hourglass size={13} className="flex-shrink-0" />
-      <span>{processing[0].name} — aparecerán al estar listas</span>
+  const processingCell = (s, i) => (
+    <div key={`p${i}`} className="flex flex-col gap-1.5 bg-dark-800/50 rounded-lg p-3 opacity-60 cursor-default">
+      <div className="flex items-center gap-2">
+        <span className="text-amber-400 flex-shrink-0" title="Descargando en debrid"><Hourglass size={14} /></span>
+        {s.quality && (
+          <span className={`text-xs ${qualityColorClass(s.quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{s.quality}</span>
+        )}
+      </div>
+      <span className="text-white text-xs font-medium truncate">{s.name || s.releaseTitle || ''}</span>
+      <div className="flex items-center gap-1 text-xs text-dark-400">
+        <Server size={12} className="flex-shrink-0" />
+        <span className="truncate">Descargando en debrid…</span>
+      </div>
     </div>
-  ) : null
+  )
   const dim = disabled ? 'opacity-50 pointer-events-none' : ''
   const keyHandler = (e, stream) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(stream) }
@@ -62,7 +72,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             </button>
           )
         })}
-        {processingNote}
+        {processing.map(processingCell)}
       </div>
     )
   }
@@ -124,7 +134,15 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
           </div>
         )
       })}
-      {processingNote}
+      {processing.map((s, i) => (
+        <div key={`p${i}`} className="flex items-center gap-3 bg-dark-800/50 rounded-lg p-4 opacity-60 cursor-default">
+          <span className="text-amber-400 flex-shrink-0" title="Descargando en debrid"><Hourglass size={18} /></span>
+          <div className="flex-1 min-w-0">
+            <p className="text-white text-sm font-medium truncate">{s.name || s.releaseTitle}</p>
+            <p className="text-xs text-dark-400 truncate">{s.channelName || s.server || 'AIOStreams'} · descargando en debrid — aparecerá al estar lista</p>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -44,17 +44,22 @@ describe('aiostreams (manifest stremio)', () => {
     expect(String(s[0].url)).toContain('dn=Movie.Name.1080p.BluRay.x264-GRP')
   })
 
-  it('los "Not Ready" se ocultan y se cuentan como processing', async () => {
+  it('los "Not Ready" aparecen como processing con su título hasta estar listos', async () => {
     safeFetchJson.mockResolvedValue({
       streams: [
         STREMIO(),
-        STREMIO({ description: '🔍 Comet\n📡 PirateBay\n⏳ Not Ready (AD)', infoHash: 'b'.repeat(40) }),
+        STREMIO({ description: '🔍 Comet\n📡 PirateBay\n⏳ Not Ready (AD)', infoHash: 'b'.repeat(40), behaviorHints: { filename: 'Other.Film.720p.WEB-DL.mkv' } }),
         STREMIO({ description: '🔍 Comet\n📡 PirateBay\nDownloading', infoHash: 'c'.repeat(40) }),
       ],
     })
     const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
-    expect(s).toHaveLength(1)
-    expect(s[0].processing).toBeUndefined()
+    expect(s).toHaveLength(3)
+    const proc = s.filter(x => x.processing)
+    expect(proc).toHaveLength(2)
+    // Atenuados y no reproducibles, pero con el título del release visible.
+    expect(proc[0].name).toContain('Other.Film.720p.WEB-DL')
+    expect(proc[0].url).toBeUndefined()
+    expect(proc[0].releaseTitle).toBe('Other.Film.720p.WEB-DL.mkv')
     expect(aioProcessingCount()).toBe(2)
   })
 

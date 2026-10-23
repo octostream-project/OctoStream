@@ -1508,20 +1508,16 @@ export const plurtaskoFactory = (config) => {
             if (imdbId === null) imdbId = await imdbIdPromise
             if (!imdbId) return
             const rawStreams = await aiostreams.getStreamsByImdb({ imdbId, type, season, episode })
-            // Marcador "procesándose": magnets que el debrid aún está
-            // descargando — StreamList los muestra como aviso (no
+            // Entradas "processing": magnets que el debrid aún está
+            // descargando — se muestran atenuadas con su título (no
             // clicable) y Details re-pide la lista cuando terminen.
-            // Va aunque rawStreams esté vacío (todos en cola).
-            const aioProcessing = aiostreams.aioProcessingCount?.() || 0
-            const processingMarker = aioProcessing > 0 ? [{
-              name: `${aioProcessing} fuente${aioProcessing > 1 ? 's' : ''} procesándose en debrid`,
-              server: 'AIOStreams', channelName: 'AIOStreams',
-              pluginName: 'AIOStreams', processing: true,
-            }] : []
-            if (!rawStreams.length) {
-              if (processingMarker.length) {
+            // Sin url: no pasan por resolveStreams.
+            const aioProcessing = rawStreams.filter(s => s.processing)
+            const aioPlayable = rawStreams.filter(s => !s.processing)
+            if (!aioPlayable.length) {
+              if (aioProcessing.length) {
                 allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
-                allStreams = allStreams.concat(processingMarker.map(s => ({ ...s, _channelId: 'aiostreams' })))
+                allStreams = allStreams.concat(aioProcessing.map(s => ({ ...s, _channelId: 'aiostreams' })))
                 if (onBatch) onBatch(sortHdfull(allStreams))
               }
               return
@@ -1529,12 +1525,12 @@ export const plurtaskoFactory = (config) => {
             const tagAio = (s) => ({ ...s, _channelId: 'aiostreams' })
             const aioOnBatch = onBatch ? (batch) => {
               allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
-              allStreams = allStreams.concat(batch.map(tagAio))
+              allStreams = allStreams.concat(batch.map(tagAio), aioProcessing.map(tagAio))
               allStreams = dedupeTorrentStreams(allStreams)
               onBatch(sortHdfull(allStreams))
             } : null
-            const resolved = await resolveStreams(rawStreams, aioOnBatch, { season, episode })
-            resolved.push(...processingMarker)
+            const resolved = await resolveStreams(aioPlayable, aioOnBatch, { season, episode })
+            resolved.push(...aioProcessing)
             if (resolved && resolved.length > 0) {
               allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
               allStreams = allStreams.concat(resolved.map(tagAio))
