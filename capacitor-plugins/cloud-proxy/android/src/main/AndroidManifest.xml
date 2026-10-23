@@ -31,5 +31,16 @@
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
+        <!-- Guardián de aether: mantiene el proceso de la app en estado
+             foreground para que el phantom process killer no liquide al
+             hijo libaether.so cuando la app está en segundo plano. -->
+        <service
+            android:name=".AetherGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Túnel WARP de usuario (proxy local aether)" />
+        </service>
     </application>
 </manifest>

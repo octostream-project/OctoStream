@@ -394,6 +394,11 @@ public class CloudProxyPlugin extends Plugin {
             generation = ++connectionGeneration;
         }
 
+        // Guardián foreground: el proceso de la app pasa a estado
+        // foreground ANTES del scan de gateways — es ahí donde aether
+        // quema CPU y el phantom killer lo liquidaba (~2s tras arrancar).
+        startAetherGuard();
+
         new Thread(() -> {
             try {
                 // Parar el proceso viejo fuera del lock y del hilo del bridge:
@@ -489,6 +494,7 @@ public class CloudProxyPlugin extends Plugin {
                 if (own) {
                     stopAether();
                     clearAppProxy();
+                    stopAetherGuard();
                 }
                 call.reject("Failed to start WARP proxy: " + e.getMessage());
             }
@@ -561,6 +567,7 @@ public class CloudProxyPlugin extends Plugin {
             connecting = false;
         }
         stopAether();
+        stopAetherGuard();
         connected = false;
         if (!keepProxy) {
             // User explicitly disconnected → clear proxy (allow direct traffic)
@@ -644,6 +651,12 @@ public class CloudProxyPlugin extends Plugin {
         result.put("socks", isConnected ? SOCKS_ADDR : "");
         result.put("http", isConnected ? HTTP_PROXY_ADDR : "");
         result.put("error", lastError != null ? lastError : "");
+        // Para el indicador UI: transporte activo (masque/masque-h2/wg),
+        // si el guardián foreground está arriba y racha de muertes del
+        // túnel (0 = estable; crece mientras se decide la escalada).
+        result.put("protocol", currentProtocol != null ? currentProtocol : "");
+        result.put("guard", AetherGuardService.isRunning());
+        result.put("tunnelFails", tunnelFailStreak);
         call.resolve(result);
     }
 
@@ -1040,6 +1053,53 @@ public class CloudProxyPlugin extends Plugin {
             throw new RuntimeException("Aether proxy not responding (SOCKS " + SOCKS_ADDR + " or HTTP " + HTTP_PROXY_ADDR + ") after " + (attempts * 0.5) + "s");
         }
         Log.i(TAG, "Aether proxies up: SOCKS " + SOCKS_ADDR + ", HTTP " + HTTP_PROXY_ADDR);
+    }
+
+    /** Sube el guardián foreground — inmune a phantom-kill de aether. */
+    private void startAetherGuard() {
+        try {
+            android.content.Context ctx = getContext();
+            android.content.Intent i = new android.content.Intent(ctx, AetherGuardService.class);
+            if (android.os.Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i);
+            else ctx.startService(i);
+        } catch (Exception e) {
+            // Sin el guardián aether funciona igual — solo vuelve a ser
+            // vulnerable al phantom killer en segundo plano. No es fatal.
+            Log.w(TAG, "aether guard no pudo arrancar: " + e.getMessage());
+        }
+    }
+
+    private void stopAetherGuard() {
+        try {
+            android.content.Context ctx = getContext();
+            android.content.Intent i = new android.content.Intent(ctx, AetherGuardService.class);
+            i.setAction(AetherGuardService.ACTION_STOP);
+            ctx.startService(i);
+        } catch (Exception ignored) {}
+    }
+
+    /** Mata al proceso aether desde fuera del plugin (AetherGuardService
+     * onTaskRemoved: el usuario cerró la app de recents). */
+    public static void killAetherProcess() {
+        Process p;
+        synchronized (PROCESS_LOCK) {
+            p = aetherProcess;
+            aetherProcess = null;
+            connected = false;
+            connecting = false;
+            statusMisses = 0;
+        }
+        if (p != null) {
+            p.destroy();
+            try {
+                if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) && p.isAlive()) {
+                    p.destroyForcibly();
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                p.destroyForcibly();
+            }
+        }
     }
 
     /**

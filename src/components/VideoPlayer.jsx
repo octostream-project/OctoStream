@@ -21,6 +21,7 @@ import { X, ExternalLink, Captions } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
 import CastMenu from './CastMenu.jsx'
 import { sendStop } from '../utils/remotePlay.js'
+import { isWarpConnected, waitForWarp } from '../utils/warpStatus.js'
 import LogoLoader from './LogoLoader.jsx'
 
 // Log solo host — las URLs de stream llevan tokens firmados.
@@ -73,6 +74,11 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   // Reintento único de re-resolución cuando la URL firmada caduca en mitad
   // de la reproducción (CDN devuelve 4xx al refrescar el manifest HLS).
   const reResolveRef = useRef(false)
+  // Watchdog WARP: si el enlace salía por el túnel y este cayó a mitad de
+  // reproducción, se espera la auto-reconexión y se reintenta una vez —
+  // sin él, cualquier parpadeo del túnel mataba el stream con error de red.
+  const warpBoundRef = useRef(false)
+  const warpRetryRef = useRef(false)
   const [showCastMenu, setShowCastMenu] = useState(false)
   // Selector OpenSubtitles (addon Stremio, sin API key) para mpv de escritorio.
   // En Android el menú nativo de ExoPlayer ya trae la misma búsqueda.
@@ -290,6 +296,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     if (streamChanged) {
       lastStreamRef.current = stream
       reResolveRef.current = false
+      warpRetryRef.current = false
       setLoading(true)
       setError(null)
       setWebEmbed(false)
@@ -835,6 +842,11 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           }
         },
       }
+      // ¿Salía este enlace por el túnel? playStream lo decide con
+      // isWarpConnected() internamente — se duplica aquí para el watchdog.
+      // direct/bypassVpn nunca van por WARP aunque esté activo.
+      warpBoundRef.current = isWarpConnected()
+        && playArgs.direct !== true && playArgs.bypassVpn !== true
       const onPlaybackState = (state) => {
         // El watchdog de 0-peers solo actúa cuando el player espera datos.
         // 'position' llega cada 5s incluso durante un stall — no tocarlo.
@@ -852,6 +864,41 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             || state.errorCode === 2003 // ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
             || state.errorCode === 2004 // ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
             || state.errorCode === -1 // buffering timeout agotado
+          // Watchdog WARP: el enlace salía por el túnel y este cayó a mitad
+          // de reproducción — el error de red es consecuencia de la caída,
+          // no del enlace. Esperar la auto-reconexión (waitForWarp la lanza)
+          // y reintentar UNA vez en la posición actual. Va antes del
+          // re-resolve: re-resolver con el túnel caído generaría una URL
+          // ligada a la IP física → nuevo mismatch de IP.
+          const isNetErr = isHttpError || /network|connection|timeout|source error|io error|failed to connect/i.test(msg)
+          if (!warpRetryRef.current && warpBoundRef.current && !isWarpConnected() && isNetErr) {
+            warpRetryRef.current = true
+            console.log('[Player] stream ligado a WARP falló con el túnel caído — esperando reconexión')
+            setError(null)
+            setLoadingText('Reconectando WARP…').catch(() => {})
+            waitForWarp(25000).then(up => {
+              if (cancelled || closedRef.current) return
+              setLoadingText('').catch(() => {})
+              if (up) {
+                if (currentTimeRef.current > 0) playArgs.startTime = currentTimeRef.current
+                playStream(playArgs, onPlaybackState).catch(e => {
+                  console.warn('[Player] retry tras reconexión WARP falló:', e?.message)
+                  if (!cancelled && !closedRef.current) {
+                    restoreAppDom()
+                    setPlayerOpen(false)
+                    setError(`No se pudo reproducir tras reconectar WARP: ${e?.message || 'error desconocido'}`)
+                    stopPlayback().catch(() => {})
+                  }
+                })
+              } else {
+                restoreAppDom()
+                setPlayerOpen(false)
+                setError('WARP no pudo reconectar — prueba con otro enlace')
+                stopPlayback().catch(() => {})
+              }
+            })
+            return
+          }
           if (isHttpError && (stream.originalUrl || stream._fctvItem || stream._refreshUrl || stream.originalDebridUrl) && !reResolveRef.current) {
             // URL firmada caducada (los CDN devuelven 4xx al refrescar el
             // manifest tras minutos de reproducción): re-resolver y

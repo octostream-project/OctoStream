@@ -190,7 +190,12 @@ export const aiostreams = {
       }
       if (!data) console.warn(`[aiostreams] stream fetch failed or truncated for ${id}`)
       const list = Array.isArray(data?.streams) ? data.streams : []
-      return list.map(stremioToStream).filter(Boolean)
+      const mapped = list.map(stremioToStream)
+      // Marcadores "processing": no son reproducibles (debrid aún los
+      // descarga) pero Details los usa para re-pedir la lista cuando
+      // terminen — se cuentan y se filtran aquí.
+      _processingCount = mapped.filter(s => s && s.processing).length
+      return mapped.filter(s => s && !s.processing)
     }
 
     const url = `${cfg.instance}/api/v1/search?type=${stremioType}&id=${encodeURIComponent(id)}&requiredFields=parsedFile`
@@ -201,9 +206,16 @@ export const aiostreams = {
       'aiostreams timeout'
     )
     const list = Array.isArray(data?.data?.results) ? data.data.results : []
-    return list.map(searchToStream).filter(Boolean)
+    const mapped = list.map(searchToStream)
+    _processingCount = mapped.filter(s => s && s.processing).length
+    return mapped.filter(s => s && !s.processing)
   },
 }
+
+// Nº de streams descartados por estar "procesándose" en el último fetch —
+// index.js lo convierte en un marcador visible para la UI.
+let _processingCount = 0
+export function aioProcessingCount() { return _processingCount }
 
 // ── Respuesta protocolo Stremio ────────────────────────────────────────────
 // streams[]: {name, title|description, url?, infoHash?, fileIdx?,
@@ -239,9 +251,9 @@ function stremioToStream(s) {
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
   // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
-  // es reproducible ahora, así que se oculta. Cuando el usuario reabra la
-  // ficha y ya esté en caché aparecerá solo.
-  if (meta.cached === false) return null
+  // es reproducible ahora. Devuelve un marcador para que la ficha sepa
+  // que hay fuentes en cola y las re-pida cuando terminen.
+  if (meta.cached === false) return { processing: true }
   const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
   const headers = s.behaviorHints?.proxyHeaders?.request
@@ -299,9 +311,8 @@ function stremioToStream(s) {
 
 // ── Respuesta Search API (self-hosted) ─────────────────────────────────────
 function searchToStream(item) {
-  // Igual que en stremioToStream: los "not ready" se ocultan hasta que el
-  // debrid termine de cachearlos.
-  if (item.cached === false) return null
+  // Igual que en stremioToStream: los "not ready" devuelven marcador.
+  if (item.cached === false) return { processing: true }
   const parsed = item.parsedFile || {}
   const release = item.filename || item.folderName || ''
   const service = (item.service || 'direct').toLowerCase()
@@ -343,7 +354,7 @@ function searchToStream(item) {
   const url = String(item.url || '')
   if (!/^https?:/i.test(url)) return null
   return {
-    name: `${label}${lang ? ` (${lang})` : ''} ${quality}${sizeLabel ? ` ${sizeLabel}` : ''}`,
+    name: `${release || label}${lang ? ` (${lang})` : ''} ${quality}${sizeLabel ? ` ${sizeLabel}` : ''}`,
     url,
     streamType: inferStreamType(url, 'mp4'),
     quality,

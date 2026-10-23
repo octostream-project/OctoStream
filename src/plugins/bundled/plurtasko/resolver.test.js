@@ -4,6 +4,7 @@ vi.mock('./http.js', () => ({
   fetchHtml: vi.fn().mockResolvedValue(''),
   postHtml: vi.fn().mockResolvedValue(''),
   postJson: vi.fn().mockResolvedValue(null),
+  hostOf: (u) => { try { return new URL(u).host } catch { return '' } },
 }))
 
 const { fetchHtml, postJson } = await import('./http.js')

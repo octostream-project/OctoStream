@@ -1513,7 +1513,7 @@ addResolver('vidmoly', ['vidmoly.me', 'vidmoly.to', 'vidmoly.net', 'vidmoly.biz'
     clearTimeout(timeout2)
     const result2 = await extractFromHtml(html2, url)
     if (result2) {
-      console.log('[Vidmoly] Resolved via embed URL:', url.substring(0, 80))
+      console.log('[Vidmoly] Resolved via embed URL:', hostOf(url))
       return result2
     }
   } catch (e) {
@@ -1957,7 +1957,7 @@ addResolver('vidara', [
     const data = await postPageJson(`${apiBase}/api/stream`, { filecode, device: 'web' }, controller.signal, headers)
     clearTimeout(timeout)
     if (data?.streaming_url) {
-      console.log('[Vidara] Resolved:', String(data.streaming_url).substring(0, 80))
+      console.log('[Vidara] Resolved:', hostOf(data.streaming_url))
       return data.streaming_url
     }
   } catch (e) {

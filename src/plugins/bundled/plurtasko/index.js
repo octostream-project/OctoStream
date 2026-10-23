@@ -889,11 +889,11 @@ async function resolveStreams(streams, onBatch, context = {}) {
           directUrl = res.url
           embedMeta = res.meta || {}
           if (directUrl === DEAD_LINK) {
-            console.log(`[Plurtasko] Dead link dropped: ${s.url}`)
+            console.log(`[Plurtasko] Dead link dropped: ${hostOf(s.url)}`)
             return []
           }
           if (directUrl === s.url) directUrl = null
-          console.log(`[Plurtasko] resolveEmbed ${s.server}: ${directUrl ? directUrl.substring(0, 80) : 'FAILED'}`)
+          console.log(`[Plurtasko] resolveEmbed ${s.server}: ${directUrl ? hostOf(directUrl) : 'FAILED'}`)
         } catch (e) {
           logWarn(`[Plurtasko] Failed to resolve ${hostOf(s.url)}`, String(e?.message || e))
         }
@@ -902,14 +902,14 @@ async function resolveStreams(streams, onBatch, context = {}) {
       // Try debrid services if JS resolver failed (or if it's a premium host)
       let viaDebrid = null
       if (!directUrl) {
-        console.log(`[Plurtasko] Trying debrid for: ${s.url}`)
+        console.log(`[Plurtasko] Trying debrid for: ${hostOf(s.url)}`)
         const debrid = await debridUnlock(s.url)
         if (debrid?.link) {
           directUrl = debrid.link
           viaDebrid = debrid.via
-          console.log(`[Plurtasko] Debrid unlocked: ${s.url} → ${directUrl.substring(0, 80)}`)
+          console.log(`[Plurtasko] Debrid unlocked: ${hostOf(s.url)} → ${hostOf(directUrl)}`)
         } else {
-          console.log(`[Plurtasko] Debrid failed for: ${s.url}`)
+          console.log(`[Plurtasko] Debrid failed for: ${hostOf(s.url)}`)
         }
       }
 
@@ -1508,7 +1508,24 @@ export const plurtaskoFactory = (config) => {
             if (imdbId === null) imdbId = await imdbIdPromise
             if (!imdbId) return
             const rawStreams = await aiostreams.getStreamsByImdb({ imdbId, type, season, episode })
-            if (!rawStreams.length) return
+            // Marcador "procesándose": magnets que el debrid aún está
+            // descargando — StreamList los muestra como aviso (no
+            // clicable) y Details re-pide la lista cuando terminen.
+            // Va aunque rawStreams esté vacío (todos en cola).
+            const aioProcessing = aiostreams.aioProcessingCount?.() || 0
+            const processingMarker = aioProcessing > 0 ? [{
+              name: `${aioProcessing} fuente${aioProcessing > 1 ? 's' : ''} procesándose en debrid`,
+              server: 'AIOStreams', channelName: 'AIOStreams',
+              pluginName: 'AIOStreams', processing: true,
+            }] : []
+            if (!rawStreams.length) {
+              if (processingMarker.length) {
+                allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
+                allStreams = allStreams.concat(processingMarker.map(s => ({ ...s, _channelId: 'aiostreams' })))
+                if (onBatch) onBatch(sortHdfull(allStreams))
+              }
+              return
+            }
             const tagAio = (s) => ({ ...s, _channelId: 'aiostreams' })
             const aioOnBatch = onBatch ? (batch) => {
               allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
@@ -1517,6 +1534,7 @@ export const plurtaskoFactory = (config) => {
               onBatch(sortHdfull(allStreams))
             } : null
             const resolved = await resolveStreams(rawStreams, aioOnBatch, { season, episode })
+            resolved.push(...processingMarker)
             if (resolved && resolved.length > 0) {
               allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')
               allStreams = allStreams.concat(resolved.map(tagAio))

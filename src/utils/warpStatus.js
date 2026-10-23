@@ -180,3 +180,27 @@ export function subscribeWarpStatus(listener) {
 export async function refreshWarpStatus() {
   return refresh()
 }
+
+// Detalle del túnel para el indicador de Ajustes: transporte activo
+// (masque / masque-h2 / wg), guardián foreground y racha de muertes.
+// En Electron el bridge devuelve el estado del proceso aether del main.
+export async function getWarpDetails() {
+  try {
+    if (!isAndroidNative()) {
+      const bridge = window.octostream?.cloudProxy
+      const st = bridge ? await bridge.getStatus().catch(() => ({})) : {}
+      return { connected: !!st.connected, connecting: !!st.connecting, protocol: st.protocol || '', guard: false, tunnelFails: 0 }
+    }
+    const st = await CloudProxy.getStatus()
+    return {
+      connected: !!st?.connected,
+      connecting: !!st?.connecting,
+      protocol: st?.protocol || '',
+      guard: !!st?.guard,
+      tunnelFails: st?.tunnelFails || 0,
+      error: st?.error || '',
+    }
+  } catch {
+    return null
+  }
+}

@@ -6,15 +6,25 @@ import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass,
 // más de 6 enlaces, lista completa si no.
 export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
   if (!streams?.length) return null
+  // Marcadores "processing" (debrid descargando el magnet): se muestran
+  // como aviso no clicable, no como fuente reproducible.
+  const playable = streams.filter(s => !s.processing)
+  const processing = streams.filter(s => s.processing)
+  const processingNote = processing.length ? (
+    <div className="flex items-center gap-2 text-amber-400/80 text-xs px-2 py-1.5">
+      <Hourglass size={13} className="flex-shrink-0" />
+      <span>{processing[0].name} — aparecerán al estar listas</span>
+    </div>
+  ) : null
   const dim = disabled ? 'opacity-50 pointer-events-none' : ''
   const keyHandler = (e, stream) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(stream) }
   }
 
-  if (streams.length > 6) {
+  if (playable.length > 6) {
     return (
       <div data-tv-list className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-        {streams.map((stream, i) => {
+        {playable.map((stream, i) => {
           const quality = parseStreamQuality(stream)
           const lang = parseStreamLang(stream)
           return (
@@ -44,7 +54,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
                   <span className="text-sm text-dark-400 font-medium">HD</span>
                 )}
               </div>
-              <span className="text-xs text-cyan-400 font-medium truncate">{stream.channelName || ''}</span>
+              <span className="text-white text-xs font-medium truncate">{stream.name || ''}</span>
               <div className="flex items-center gap-1 text-xs text-dark-400">
                 <Server size={12} className="flex-shrink-0" />
                 <span className="truncate">{stream.server || stream.pluginName}</span>
@@ -52,13 +62,14 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             </button>
           )
         })}
+        {processingNote}
       </div>
     )
   }
 
   return (
     <div data-tv-list className="space-y-2">
-      {streams.map((stream, i) => {
+      {playable.map((stream, i) => {
         const quality = parseStreamQuality(stream)
         const lang = parseStreamLang(stream)
         return (
@@ -113,6 +124,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
           </div>
         )
       })}
+      {processingNote}
     </div>
   )
 }

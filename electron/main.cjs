@@ -56,7 +56,7 @@ function isAetherBypassHost(host) {
 const LAN_HOST = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|192\.168\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i
 function isLanHost(host) { return LAN_HOST.test(host || '') }
 
-const aetherState = { proc: null, connected: false, connecting: false, error: '', protocol: '' }
+const aetherState = { proc: null, connected: false, connecting: false, error: '', protocol: '', tunnelFails: 0, lastTunnelFailAt: 0, switching: false }
 let mainWindow = null
 
 function probePort(port) {
@@ -166,7 +166,29 @@ async function configureAetherProxy() {
   }
 }
 
-async function aetherConnect() {
+// Escalada a mitad de sesión (paridad con Android): una racha de
+// "tunnel ended/failed" reinicia aether con el siguiente transporte —
+// masque → masque-h2 → wg. En wg no hay más escalones.
+function aetherTunnelDied(proc) {
+  if (aetherState.proc !== proc || aetherState.connecting || aetherState.switching) return
+  const now = Date.now()
+  if (now - aetherState.lastTunnelFailAt > 60000) aetherState.tunnelFails = 0
+  aetherState.lastTunnelFailAt = now
+  aetherState.tunnelFails++
+  if (aetherState.tunnelFails < 5) return
+  const chain = ['masque', 'masque-h2', 'wg']
+  const idx = chain.indexOf(aetherState.protocol)
+  const next = idx >= 0 && idx < chain.length - 1 ? chain[idx + 1] : null
+  if (!next) return
+  aetherState.switching = true
+  aetherState.tunnelFails = 0
+  console.warn(`[Aether] ${aetherState.protocol || '?'} tunnel can't hold — restarting with ${next}`)
+  aetherConnect(next)
+    .catch(e => console.warn('[Aether] switch to ' + next + ' failed:', e?.message))
+    .finally(() => { aetherState.switching = false })
+}
+
+async function aetherConnect(preferred) {
   // Validar el túnel real, no solo los puertos — un aether zombie escucha
   // en :1819 con el data-plane muerto y devolver "connected" le diría a la
   // UI que todo va bien mientras cada request muere contra un proxy roto.
@@ -225,6 +247,13 @@ async function aetherConnect() {
         // en WG los endpoints son otros puertos (908…) y hay que escanear.
         env.AETHER_PEER = '162.159.198.1:443'
         env.AETHER_QUIC_V2 = '1'
+      } else if (protocol === 'masque-h2') {
+        // MASQUE sobre HTTP/2 (TCP 443): parece HTTPS normal y sobrevive a
+        // redes que bloquean o ahogan UDP/QUIC. El binario sigue en
+        // protocolo "masque" — el h2 es el transporte.
+        env.AETHER_PROTOCOL = 'masque'
+        env.AETHER_MASQUE_HTTP2 = '1'
+        env.AETHER_MASQUE_H2_PEER = '162.159.198.1:443'
       }
       const proc = spawn(exe, [], { cwd: workDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
       aetherState.proc = proc
@@ -243,6 +272,10 @@ async function aetherConnect() {
         stderrTail = (stderrTail + s).slice(-4096)
         for (const line of s.split('\n')) {
           if (/error|warn|listening|expos/i.test(line)) console.log('[Aether]', line.trim())
+          // Túnel muerto a mitad de sesión: los puertos siguen aceptando
+          // con el data-plane caído (zombie) — igual que en Android, una
+          // racha de muertes escala al siguiente transporte.
+          if (/tunnel ended|tunnel failed/i.test(line)) aetherTunnelDied(proc)
         }
       }
       proc.stdout.on('data', onLog)
@@ -264,15 +297,24 @@ async function aetherConnect() {
     }
 
     // MASQUE va rápido cuando su peer fijado valida (~5-10s); si en 35s no
-    // hay proxies el protocolo está filtrado — se corta y se prueba WG.
-    const first = aetherState.protocol || 'masque'
-    const second = first === 'masque' ? 'wg' : 'masque'
-    const r1 = await spawnAndWait(first, first === 'masque' ? 35000 : 60000)
-    if (r1.status === 'connected') return r1
-    console.warn(`[Aether] ${first} falló — probando ${second}`)
-    const r2 = await spawnAndWait(second, second === 'masque' ? 35000 : 60000)
-    if (r2.status === 'connected') return r2
-    throw new Error(r2.error || r1.error)
+    // hay proxies el protocolo está filtrado — se corta y se prueba el
+    // siguiente. Cadena: masque (QUIC/UDP) → masque-h2 (TCP, parece HTTPS)
+    // → wg, empezando por el último que funcionó.
+    const chain = ['masque', 'masque-h2', 'wg']
+    let startIdx = 0
+    const pref = preferred || aetherState.protocol || 'masque'
+    for (let i = 0; i < chain.length; i++) {
+      if (chain[i] === pref) { startIdx = i; break }
+    }
+    let lastErr = null
+    for (let i = 0; i < chain.length; i++) {
+      const proto = chain[(startIdx + i) % chain.length]
+      const r = await spawnAndWait(proto, proto === 'wg' ? 60000 : 35000)
+      if (r.status === 'connected') return r
+      lastErr = r
+      console.warn(`[Aether] ${proto} falló — probando siguiente`)
+    }
+    throw new Error(lastErr?.error || 'no aether protocol worked')
   } catch (e) {
     aetherState.error = e.message
     if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
@@ -1149,6 +1191,8 @@ ipcMain.handle('cloud:status', async () => {
     socks: up ? `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}` : '',
     http: up ? `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` : '',
     error: aetherState.error,
+    protocol: aetherState.protocol || '',
+    tunnelFails: aetherState.tunnelFails || 0,
   }
 })
 

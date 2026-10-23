@@ -498,14 +498,38 @@ export default function Details() {
         if (cancelled) return
         setStreams(s)
         setLoading(false)
-        if (location.state?.autoplay && s.length > 0) {
+        // Fuentes "procesándose" (debrid bajando el magnet): re-petición
+        // silenciosa cada ~45s hasta que aparezcan cacheadas (máx 3).
+        let procAttempts = 0
+        const refetchProcessing = () => {
+          if (cancelled || ++procAttempts > 3) return
+          setTimeout(async () => {
+            if (cancelled) return
+            const ctrl2 = new AbortController()
+            streamAbortRef.current = ctrl2
+            try {
+              const all = await pluginManager.getStreamsProgressive(
+                type, id, m.name, ctrl2.signal,
+                (batch) => { if (!cancelled) setStreams(batch) },
+                m.genres, null, null, m.originalName, m.originCountry, m.originalLanguage, m.seasonsList, m.englishName, m.year)
+              if (cancelled || !all?.length) return
+              setStreams(all)
+              if (all.some(st => st.processing)) refetchProcessing()
+            } catch { /* reintento silencioso */ }
+          }, 45000)
+        }
+        if (s?.some(st => st.processing)) refetchProcessing()
+        // El marcador "processing" no es reproducible — el autoplay elige
+        // solo entre las fuentes reales.
+        const playable = (s || []).filter(st => !st.processing)
+        if (location.state?.autoplay && playable.length > 0) {
           const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
           // If there's saved progress (not completed) and autoplay is enabled,
           // play directly from the saved position without showing the resume dialog
           if (autoplayEnabled && savedProgress > 0.05 && savedProgress < 0.95 && savedTime > 0) {
             const savedServer = historyItem?.server || ''
-            const savedStream = savedServer ? s.find(st => (st.server || st.pluginName) === savedServer) : null
-            const chosen = savedStream || sortByLangPriority(s)[0]
+            const savedStream = savedServer ? playable.find(st => (st.server || st.pluginName) === savedServer) : null
+            const chosen = savedStream || sortByLangPriority(playable)[0]
             scheduleAutoplay(() => {
               if (cancelled) return
               setResumeTime(savedTime)
@@ -519,8 +543,8 @@ export default function Details() {
           } else if (autoplayEnabled) {
             // No saved progress: play from start
             const savedServer = historyItem?.server || ''
-            const savedStream = savedServer ? s.find(st => (st.server || st.pluginName) === savedServer) : null
-            const chosen = savedStream || sortByLangPriority(s)[0]
+            const savedStream = savedServer ? playable.find(st => (st.server || st.pluginName) === savedServer) : null
+            const chosen = savedStream || sortByLangPriority(playable)[0]
             scheduleAutoplay(() => {
               if (cancelled) return
               setResumeTime(0)
@@ -983,7 +1007,35 @@ export default function Details() {
         })
       })
       if (stale()) return
-      if (epStreams && epStreams.length > 0) {
+      // Mismo auto-refresh que en películas: fuentes procesándose en
+      // debrid → re-petición silenciosa hasta que estén cacheadas.
+      let procAttempts = 0
+      const refetchProcessing = () => {
+        if (stale() || ++procAttempts > 3) return
+        setTimeout(async () => {
+          if (stale()) return
+          const ctrl2 = new AbortController()
+          streamAbortRef.current = ctrl2
+          try {
+            const all = await pluginManager.getStreamsProgressive(
+              type, id, meta.name, ctrl2.signal,
+              (batch) => { if (!stale()) setEpisodeStreams(batch) },
+              meta.genres, ep.season, ep.episode, meta.originalName, meta.originCountry, meta.originalLanguage, meta.seasonsList, meta.englishName, meta.year)
+            if (stale() || !all?.length) return
+            setEpisodeStreams(all)
+            if (all.some(st => st.processing)) refetchProcessing()
+          } catch { /* reintento silencioso */ }
+        }, 45000)
+      }
+      // El marcador "processing" no es reproducible — solo cuenta para el
+      // aviso y el auto-refresh; el autoplay usa las fuentes reales.
+      const playableEp = (epStreams || []).filter(st => !st.processing)
+      if (epStreams?.some(st => st.processing)) {
+        setEpisodeStreams(epStreams)
+        setEpisodeLoading(false)
+        refetchProcessing()
+      }
+      if (playableEp.length > 0) {
         setEpisodeStreams(epStreams)
         setEpisodeLoading(false)
         // Autoplay: if enabled, auto-select best stream by language and play after 60s delay.
@@ -994,8 +1046,8 @@ export default function Details() {
         if (autoplayEnabled || forcePlay) {
           // Try to use the same server that was used before
           const savedServer = historyItem?.server || ''
-          const savedStream = savedServer ? epStreams.find(s => (s.server || s.pluginName) === savedServer) : null
-          const bestStream = savedStream || sortByLangPriority(epStreams)[0]
+          const savedStream = savedServer ? playableEp.find(s => (s.server || s.pluginName) === savedServer) : null
+          const bestStream = savedStream || sortByLangPriority(playableEp)[0]
           console.log(`[Details] Autoplay (60s): will play "${bestStream?.server || bestStream?.pluginName}" (${parseStreamLang(bestStream) || 'no lang'}) for "${meta.name} S${ep.season}E${ep.episode}"`)
           if (fromAutoplay || forcePlay) {
             // El usuario ya ha pulsado "Continuar" en el popup nativo/web:
@@ -1020,6 +1072,9 @@ export default function Details() {
           // Autoplay disabled - show episode view with links (view already set to 'episode' at start)
           console.log(`[Details] Autoplay disabled, showing ${epStreams.length} streams for user selection`)
         }
+      } else if (epStreams?.some(st => st.processing)) {
+        // Solo marcadores "procesándose": el aviso ya está visible y el
+        // refetch en marcha — no es un error, no mostrar "sin enlaces".
       } else {
         // No streams found for this episode
         console.warn(`[Details] No streams found for ${meta.name} S${ep.season}E${ep.episode}`)

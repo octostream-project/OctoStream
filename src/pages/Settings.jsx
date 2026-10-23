@@ -10,7 +10,7 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
-import { refreshWarpStatus, subscribeWarpStatus } from '../utils/warpStatus.js'
+import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
 import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
@@ -414,6 +414,22 @@ export default function Settings() {
       setVpnStatus(prev => connected ? 'connected' : prev === 'connecting' ? prev : 'disconnected')
     })
   }, [])
+
+  // Detalle del túnel para el indicador (transporte, guardián, caídas).
+  // Poll cada 10s mientras WARP está activo — es info de diagnóstico,
+  // no necesita ser instantáneo.
+  const [warpDetails, setWarpDetails] = useState(null)
+  useEffect(() => {
+    if (vpnStatus === 'disconnected') return // el render ya oculta datos viejos
+    let alive = true
+    const poll = async () => {
+      const d = await getWarpDetails()
+      if (alive && d) setWarpDetails(d)
+    }
+    poll()
+    const t = setInterval(poll, 10000)
+    return () => { alive = false; clearInterval(t) }
+  }, [vpnStatus])
 
   const toggleVpn = async () => {
     if (vpnStatus === 'connecting') return
@@ -1638,6 +1654,15 @@ export default function Settings() {
               </label>
               {vpnError && (
                 <p className="text-red-400 text-sm">{vpnError}</p>
+              )}
+              {vpnStatus !== 'disconnected' && warpDetails && (
+                <p className="text-dark-400 text-xs">
+                  {warpDetails.protocol
+                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : 'MASQUE (QUIC)'}`
+                    : 'Transporte: —'}
+                  {warpDetails.guard ? ' · guardián activo' : ''}
+                  {warpDetails.tunnelFails > 0 ? ` · inestable (${warpDetails.tunnelFails} caídas)` : ''}
+                </p>
               )}
               <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">
                 <span className="text-sm text-dark-300">
