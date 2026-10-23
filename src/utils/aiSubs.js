@@ -207,7 +207,7 @@ async function translateCues(cues, signal, onProgress) {
     const tr = await translateLines(batch, signal)
     for (let k = 0; k < tr.length; k++) out[i + k] = tr[k]
     done += batch.length
-    onProgress?.(done, cues.texts.length)
+    onProgress?.(done, cues.texts.length, out)
   }
   return out
 }
@@ -245,9 +245,18 @@ async function tryExistingSubtitle(meta) {
   }
 
   osdNow(`Subs IA: traduciendo ${cues.texts.length} líneas (${lang.toUpperCase()}→ES)…`)
-  const translated = await translateCues(cues, active?.abort?.signal, (done, total) => {
+  // Aplicación progresiva: se pinta el original al instante y cada lote
+  // traducido lo sustituye en pantalla — antes esperaba a las ~50 llamadas
+  // del final y parecía que nunca llegaban los subtítulos.
+  await ExoPlayer.setExternalCues(cues)
+  const translated = await translateCues(cues, active?.abort?.signal, async (done, total, out) => {
     if (done % (TRANSLATE_BATCH_CUES * 4) === 0 || done === total) {
       osd(`Subs IA: traducidas ${done}/${total}`)
+      if (active?.abort?.signal.aborted) return
+      const mixed = cues.texts.map((orig, i) => out[i] ?? orig)
+      try {
+        await ExoPlayer.setExternalCues({ times: cues.times, texts: mixed })
+      } catch { /* el siguiente lote lo reintenta */ }
     }
   })
   await ExoPlayer.setExternalCues({ times: cues.times, texts: translated })
