@@ -109,12 +109,12 @@ export default function ContinueWatching() {
                 )}
                 {/* Live badge for TV channels */}
                 {isLive && !hasProgress && (
-                  <div className="absolute top-2 left-2 bg-red-600 rounded px-1.5 py-0.5 text-[10px] text-white font-bold">
+                  <div className="absolute top-2 left-2 bg-red-600 rounded px-1.5 py-0.5 text-xs text-white font-bold">
                     LIVE
                   </div>
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300" />
+                <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300">
                   <div className="flex items-center justify-center bg-primary-600/90 backdrop-blur-sm rounded-lg py-2 text-sm font-medium shadow-lg">
                     <Play size={16} className="mr-1" /> {isDone ? 'Ver de nuevo' : isLive && !hasProgress ? 'Ver' : 'Continuar'}
                   </div>
@@ -130,7 +130,7 @@ export default function ContinueWatching() {
                         style={{ width: `${Math.min(100, Math.round((item.progress || 0) * 100))}%` }}
                       />
                     </div>
-                    <p className="text-[10px] text-dark-400 mt-0.5">
+                    <p className="text-xs text-dark-400 mt-0.5">
                       {isDone ? (
                         <span className="text-green-400 flex items-center gap-1">
                           <CheckCircle2 size={10} /> Completado
@@ -141,7 +141,7 @@ export default function ContinueWatching() {
                     </p>
                   </div>
                 ) : (
-                  <p className="text-[10px] text-dark-500 mt-0.5">
+                  <p className="text-xs text-dark-500 mt-0.5">
                     {isLive ? 'TV en directo' : 'Visto recientemente'}
                   </p>
                 )}

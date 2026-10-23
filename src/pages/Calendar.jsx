@@ -4,6 +4,7 @@ import { Calendar as CalendarIcon, Tv, AlertCircle, ChevronLeft, ChevronRight } 
 import { useStore } from '../store/useStore.js'
 import { getSeriesUpcoming } from '../plugins/builtIn/tmdb.js'
 import OctoLoader from '../components/OctoLoader.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -161,20 +162,16 @@ export default function Calendar() {
       </div>
 
       {seriesList.length === 0 ? (
-        <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
-          <Tv className="text-dark-600" size={64} />
-          <p className="text-dark-400 text-lg">No tienes series en favoritos ni en historial</p>
-          <p className="text-dark-500 text-sm">Marca series con el corazón o empieza a verlas para ver aquí los próximos estrenos</p>
-        </div>
+        <EmptyState icon={Tv} minH="min-h-[50vh]">
+          No tienes series en favoritos ni en historial
+          <span className="text-dark-500 text-sm">Marca series con el corazón o empieza a verlas para ver aquí los próximos estrenos</span>
+        </EmptyState>
       ) : loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
           <OctoLoader size={48} />
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-          <AlertCircle className="text-dark-600" size={48} />
-          <p className="text-dark-400">No hay episodios programados</p>
-        </div>
+        <EmptyState icon={AlertCircle}>No hay episodios programados</EmptyState>
       ) : (
         <>
           {/* Upcoming episodes */}

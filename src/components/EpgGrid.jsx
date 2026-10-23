@@ -197,9 +197,9 @@ export default function EpgGrid({ channels, programs, onPlayChannel, selectedDat
           <h3 className="text-white font-bold">{t('epg.guide_title')}</h3>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={prevDay} className="btn-ghost p-1.5"><ChevronLeft size={18} /></button>
+          <button onClick={prevDay} aria-label={t('epg.prev_day', 'Día anterior')} className="btn-ghost p-1.5"><ChevronLeft size={18} /></button>
           <span className="text-white text-sm font-medium min-w-[120px] text-center capitalize">{dateLabel}</span>
-          <button onClick={nextDay} className="btn-ghost p-1.5"><ChevronRight size={18} /></button>
+          <button onClick={nextDay} aria-label={t('epg.next_day', 'Día siguiente')} className="btn-ghost p-1.5"><ChevronRight size={18} /></button>
         </div>
       </div>
 
@@ -222,7 +222,7 @@ export default function EpgGrid({ channels, programs, onPlayChannel, selectedDat
             className="absolute top-0 bottom-0 w-px bg-primary-500 z-20"
             style={{ left: 160 + timeToMinutes(now, dayStart) * MINUTE_WIDTH }}
           >
-            <div className="bg-primary-500 text-white text-[10px] px-1.5 py-0.5 rounded -translate-x-1/2 -mt-6 whitespace-nowrap">
+            <div className="bg-primary-500 text-white text-xs px-1.5 py-0.5 rounded -translate-x-1/2 -mt-6 whitespace-nowrap">
               Ahora
             </div>
           </div>
@@ -281,7 +281,7 @@ export default function EpgGrid({ channels, programs, onPlayChannel, selectedDat
                         title={program.description}
                       >
                         <p className="font-medium truncate">{program.title}</p>
-                        <p className="text-[10px] opacity-70">{formatTime(start)} - {formatTime(end)}</p>
+                        <p className="text-xs opacity-70">{formatTime(start)} - {formatTime(end)}</p>
                       </button>
                     )
                   })}

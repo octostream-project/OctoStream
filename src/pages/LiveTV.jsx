@@ -9,6 +9,7 @@ import VideoPlayer from '../components/VideoPlayer.jsx'
 import { useTranslation } from '../i18n/index.js'
 import { isAndroidTv, isAndroidNative } from '../utils/platform.js'
 import { Tv, Play, AlertCircle, LayoutGrid, Calendar, Clock, ArrowLeft } from 'lucide-react'
+import EmptyState from '../components/ui/EmptyState.jsx'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
 
@@ -440,11 +441,10 @@ export default function LiveTV() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-4">
-        <Tv className="text-dark-600" size={64} />
-        <p className="text-dark-400 text-lg font-medium">{error}</p>
+      <EmptyState icon={Tv} minH="min-h-[60vh]">
+        <p className="text-lg font-medium">{error}</p>
         {tvPlugins.length > 0 && (
-          <div className="bg-dark-800/80 rounded-lg p-4 border border-dark-700/50 max-w-md">
+          <div className="bg-dark-800/80 rounded-lg p-4 border border-dark-700/50 max-w-md mx-auto mt-3 text-left">
             <p className="text-dark-300 text-sm font-medium mb-2">Plugins de TV instalados:</p>
             <ul className="text-dark-400 text-sm space-y-1">
               {tvPlugins.map(p => (
@@ -456,17 +456,16 @@ export default function LiveTV() {
             </ul>
           </div>
         )}
-      </div>
+      </EmptyState>
     )
   }
 
   if (channels.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-4">
-        <Tv className="text-dark-600" size={64} />
-        <p className="text-dark-400 text-lg font-medium">{t('live.no_channels')}</p>
-        <p className="text-dark-500 text-sm">{t('live.install_tv_plugin')}</p>
-      </div>
+      <EmptyState icon={Tv} minH="min-h-[60vh]">
+        <p className="text-lg font-medium">{t('live.no_channels')}</p>
+        <p className="text-dark-500 text-sm mt-1">{t('live.install_tv_plugin')}</p>
+      </EmptyState>
     )
   }
 
@@ -719,9 +718,7 @@ export default function LiveTV() {
                   <LogoLoader size={80} />
                 </div>
               ) : u7dItems.length === 0 ? (
-                <div className="flex items-center justify-center min-h-[40vh]">
-                  <p className="text-dark-400">No hay contenido disponible para este día</p>
-                </div>
+                <EmptyState icon={Calendar}>No hay contenido disponible para este día</EmptyState>
               ) : (
                 <div data-tv-grid className="media-card-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                   {u7dItems.map(item => {
@@ -751,9 +748,9 @@ export default function LiveTV() {
                         <div>
                           <div className="flex items-center gap-1.5 mb-0.5">
                             {timeStr && <span className="text-dark-500 text-xs">{timeStr}</span>}
-                            {hasVod && isFree && <span className="text-[10px] bg-green-600/30 text-green-400 px-1 rounded">GRATIS</span>}
-                            {hasVod && !isFree && <span className="text-[10px] bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
-                            {!hasVod && <span className="text-[10px] bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
+                            {hasVod && isFree && <span className="text-xs bg-green-600/30 text-green-400 px-1 rounded">GRATIS</span>}
+                            {hasVod && !isFree && <span className="text-xs bg-orange-600/30 text-orange-400 px-1 rounded">PAGO</span>}
+                            {!hasVod && <span className="text-xs bg-dark-600 text-dark-400 px-1 rounded">SIN VOD</span>}
                           </div>
                           <p className="text-white font-medium text-sm line-clamp-2">{item.title}</p>
                           {item.description && (

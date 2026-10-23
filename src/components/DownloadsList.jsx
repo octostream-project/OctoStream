@@ -4,7 +4,8 @@ import { playLocalFile, pickDownloadFolder } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { toast } from './ui/Toast.jsx'
 import Modal from './ui/Modal.jsx'
-import { Play, Trash2, Download, FolderOpen, Loader2, HardDrive, Usb, FolderSearch } from 'lucide-react'
+import OctoLoader from './OctoLoader.jsx'
+import { Play, Trash2, Download, FolderOpen, HardDrive, Usb, FolderSearch } from 'lucide-react'
 
 // Una llamada nativa que nunca resuelve no puede dejar la UI girando.
 const withTimeout = (p, ms) => Promise.race([
@@ -23,6 +24,7 @@ export default function DownloadsList() {
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
   const [dirPickerMessage, setDirPickerMessage] = useState('')
   const [volumes, setVolumes] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const listenerRef = useRef(null)
   const canDownload = isAndroidNative() || isElectron()
 
@@ -31,6 +33,7 @@ export default function DownloadsList() {
     try {
       const engine = await getTorrentEngine()
       const res = await engine?.listDownloads?.()
+      if (res?.error) toast(res.error, 5000)
       setDownloads(res?.files || [])
       const st = await engine?.status?.()
       if (st?.state === 'downloading' && st.fileName) {
@@ -284,7 +287,7 @@ export default function DownloadsList() {
             </button>
           )}
           <button onClick={handlePickDir} disabled={pickingDir} className="btn-secondary flex items-center gap-1.5 text-sm">
-            {pickingDir ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
+            {pickingDir ? <OctoLoader size={15} className="text-primary-400" /> : <FolderOpen size={15} />}
             Carpeta
           </button>
         </div>
@@ -293,7 +296,7 @@ export default function DownloadsList() {
       {active && (
         <div className="bg-dark-700/50 rounded-lg p-3 mb-3">
           <div className="flex items-center gap-2 text-sm text-white">
-            <Loader2 size={15} className="animate-spin text-primary-400 flex-shrink-0" />
+            <OctoLoader size={15} className="text-primary-400 flex-shrink-0" />
             <span className="truncate flex-1">{active.name}</span>
             <span className="text-primary-400 text-xs flex-shrink-0">{Math.round((active.progress || 0) * 100)}%</span>
           </div>
@@ -317,15 +320,35 @@ export default function DownloadsList() {
                   {f.size >= 1e9 ? `${(f.size / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(f.size / 1e6))} MB`}
                 </p>
               </div>
-              <button onClick={() => handlePlay(f)} className="btn-ghost p-2" title="Reproducir">
+              <button onClick={() => handlePlay(f)} className="btn-ghost p-2" title="Reproducir" aria-label={`Reproducir ${f.name}`}>
                 <Play size={18} />
               </button>
-              <button onClick={() => handleDelete(f)} className="btn-ghost p-2 text-red-400" title="Borrar">
+              <button onClick={() => setConfirmDelete(f)} className="btn-ghost p-2 text-red-400" title="Borrar" aria-label={`Borrar ${f.name}`}>
                 <Trash2 size={18} />
               </button>
             </div>
           ))}
         </div>
+      )}
+
+      {confirmDelete && (
+        <Modal onClose={() => setConfirmDelete(null)} labelledBy="dl-del-title">
+          <h3 id="dl-del-title" className="text-white font-semibold mb-2">Borrar descarga</h3>
+          <p className="text-dark-400 text-sm mb-5 break-all">
+            Se eliminará «{confirmDelete.name}» del dispositivo. Esta acción no se puede deshacer.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setConfirmDelete(null)} className="btn-ghost text-sm">
+              Cancelar
+            </button>
+            <button
+              onClick={() => { const f = confirmDelete; setConfirmDelete(null); handleDelete(f) }}
+              className="btn-primary text-sm bg-red-600 hover:bg-red-500"
+            >
+              Borrar
+            </button>
+          </div>
+        </Modal>
       )}
 
       {dirPickerOpen && (
@@ -336,7 +359,7 @@ export default function DownloadsList() {
           </p>
           {volumes === null ? (
             <div className="flex items-center gap-2 text-dark-500 text-sm py-4">
-              <Loader2 size={15} className="animate-spin" /> Buscando almacenamiento…
+              <OctoLoader size={15} className="text-primary-400" /> Buscando almacenamiento…
             </div>
           ) : (
             <div className="space-y-2 mb-4">
@@ -382,7 +405,7 @@ export default function DownloadsList() {
             </button>
           )}
           <button onClick={handleSafPick} disabled={pickingDir} className="btn-secondary w-full flex items-center justify-center gap-2 text-sm">
-            {pickingDir ? <Loader2 size={15} className="animate-spin" /> : <FolderSearch size={15} />}
+            {pickingDir ? <OctoLoader size={15} className="text-primary-400" /> : <FolderSearch size={15} />}
             Otra carpeta (selector del sistema)
           </button>
         </Modal>

@@ -107,7 +107,7 @@ export default function CastMenu({
           <CastIcon size={18} className="text-primary-400" />
           Enviar a
         </h3>
-        <button onClick={onClose} className="text-dark-400 hover:text-white focus:text-white focus:outline-none p-1 rounded-lg">
+        <button onClick={onClose} aria-label="Cerrar" className="text-dark-400 hover:text-white focus:text-white focus:outline-none p-1 rounded-lg">
           <X size={18} />
         </button>
       </div>

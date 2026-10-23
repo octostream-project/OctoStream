@@ -450,7 +450,28 @@ public class AppUpdaterPlugin extends Plugin {
                     ctx, sessionId, statusIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
             mPendingInstalls.put(sessionId, call);
-            session.commit(pending.getIntentSender());
+            try {
+                session.commit(pending.getIntentSender());
+            } catch (Throwable t) {
+                // Si commit() lanza tras registrar el call, la entrada quedaba
+                // huérfana y la llamada JS pendiente para siempre.
+                mPendingInstalls.remove(sessionId);
+                throw t;
+            }
+            // Watchdog: si el sistema nunca emite el broadcast (sesión
+            // abandonada, instalador matado), el PluginCall no debe quedar
+            // pendiente indefinidamente — rechazar y abandonar la sesión.
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                PluginCall stuck = mPendingInstalls.get(sessionId);
+                if (stuck == null) return;
+                mPendingInstalls.remove(sessionId);
+                try {
+                    PackageInstaller.Session s = installer.openSession(sessionId);
+                    s.abandon();
+                    s.close();
+                } catch (Exception ignored) {}
+                stuck.reject("install failed: session timed out");
+            }, 10L * 60 * 1000);
         } finally {
             session.close();
         }

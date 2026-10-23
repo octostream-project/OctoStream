@@ -564,7 +564,10 @@ public class ExoPlayerPlugin extends Plugin {
                         return;
                     }
                     Log.d(TAG, "Native resolve failed, falling back to WebView");
-                } catch (Exception e) {
+                } catch (Throwable e) {
+                    // Throwable, no Exception: un StackOverflowError de un
+                    // resolver recursivo también debe caer al WebView — si el
+                    // hilo muere sin captura, la PluginCall queda colgada.
                     Log.e(TAG, "Native resolve error: " + e.getMessage());
                 }
                 // Fall back to WebView — use last working mirror, not dead voe.sx
@@ -1486,6 +1489,14 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     private String resolveVoeUrl(String embedUrl) {
+        return resolveVoeUrl(embedUrl, 0, new java.util.HashSet<String>());
+    }
+
+    private String resolveVoeUrl(String embedUrl, int depth, java.util.Set<String> visited) {
+        // Redirects/iframes circulares: sin tope esto recursa hasta
+        // StackOverflowError (un Error — el catch(Exception) no lo captura y la
+        // PluginCall quedaba colgada para siempre).
+        if (depth >= 4 || embedUrl == null || !visited.add(embedUrl)) return null;
         try {
             java.net.URL url = new java.net.URL(embedUrl);
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
@@ -1539,7 +1550,7 @@ public class ExoPlayerPlugin extends Plugin {
                     }
                     if (!redirect.equals(embedUrl) && !redirect.equals(finalUrl)) {
                         Log.d(TAG, "Voe native following redirect: " + hostOf(redirect));
-                        return resolveVoeUrl(redirect);
+                        return resolveVoeUrl(redirect, depth + 1, visited);
                     }
                 }
             }
@@ -1563,11 +1574,11 @@ public class ExoPlayerPlugin extends Plugin {
                     ifrSrc = new java.net.URL(baseUrl, ifrSrc).toString();
                 }
                 Log.d(TAG, "Voe native following iframe: " + hostOf(ifrSrc));
-                return resolveVoeUrl(ifrSrc);
+                return resolveVoeUrl(ifrSrc, depth + 1, visited);
             }
 
             return null;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Log.e(TAG, "Voe native resolve error: " + e.getMessage());
             return null;
         }
@@ -2641,6 +2652,11 @@ public class ExoPlayerPlugin extends Plugin {
         if (relayKeepAlive) return;
         relayReady = false;
         relayToken = null;
+        // Cerrar los streams, no solo limpiar el mapa: un clear() sin close
+        // deja los sockets de ExoPlayer colgados hasta su timeout y fuga fd.
+        for (java.io.OutputStream out : relaySinks.values()) {
+            try { out.close(); } catch (Exception ignored) {}
+        }
         relaySinks.clear();
         relayBegun.clear();
         if (relayServer != null) {
@@ -2855,16 +2871,34 @@ public class ExoPlayerPlugin extends Plugin {
             relaySinks.put(reqId, sock.getOutputStream());
             final String reqIdF = reqId;
             final String targetF = target;
+            // Reaper: si el fetch inyectado nunca llama relayEnd/relayFail
+            // (provider colgado), la entrada y el socket quedarían abiertos
+            // para siempre. Cerrar el OutputStream también cierra el socket.
+            mainHandler.postDelayed(() -> {
+                java.io.OutputStream stuck = relaySinks.remove(reqIdF);
+                relayBegun.remove(reqIdF);
+                if (stuck != null) {
+                    Log.w(TAG, "relay req sin respuesta — cerrando sink");
+                    try { stuck.close(); } catch (Exception ignored) {}
+                }
+            }, 90000L);
             mainHandler.post(() -> {
                 WebView wv = relayWebView;
-                if (wv == null) { relaySinks.remove(reqIdF); return; }
+                if (wv == null) {
+                    java.io.OutputStream out0 = relaySinks.remove(reqIdF);
+                    relayBegun.remove(reqIdF);
+                    try { if (out0 != null) out0.close(); } catch (Exception ignored) {}
+                    try { sock.close(); } catch (Exception ignored) {}
+                    return;
+                }
                 // fetch dentro del origen del embed. Si la respuesta parece un
                 // playlist se reescriben las URIs a este relay; si viene en
                 // base64 (algunos CDN ofuscan el playlist) se decodifica.
                 String js = "(function(){var T=" + org.json.JSONObject.quote(targetF)
                         + ",P=" + relayPort + ",K=" + org.json.JSONObject.quote(relayToken != null ? relayToken : "")
                         + ",R='" + reqIdF + "';"
-                        + "fetch(T).then(function(r){var ct=r.headers.get('content-type')||'';"
+                        + "var sig=(typeof AbortSignal!=='undefined'&&AbortSignal.timeout)?AbortSignal.timeout(45000):undefined;"
+                        + "fetch(T,{signal:sig}).then(function(r){var ct=r.headers.get('content-type')||'';"
                         + "var isList=/mpegurl|m3u8/i.test(ct)||/\\.m3u8(\\?|$)/i.test(T);"
                         + "if(isList){return r.text().then(function(t){"
                         + "if(t.indexOf('#EXT')<0){try{t=atob(t.replace(/\\s/g,''))}catch(e){}}"
@@ -4886,7 +4920,14 @@ public class ExoPlayerPlugin extends Plugin {
         timeoutEvent.put("message", "Timeout: el canal no responde");
         timeoutEvent.put("errorCode", -1);
         notifyListeners("playbackState", timeoutEvent);
-        closePlayer();
+        // Suprimir el "closed": si viaja justo después del "error", JS desmonta
+        // el VideoPlayer y el mensaje nunca se ve (ni la ruta de re-resolve).
+        suppressClosedEvent = true;
+        try {
+            closePlayer();
+        } finally {
+            suppressClosedEvent = false;
+        }
     }
 
     private boolean isTdtSpainDomain(String url) {

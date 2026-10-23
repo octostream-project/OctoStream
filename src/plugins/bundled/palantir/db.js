@@ -3,7 +3,7 @@
 // @octostream/palantir Capacitor plugin — never loaded into JS memory.
 import { Capacitor } from '@capacitor/core'
 import Palantir from '@octostream/palantir'
-import { fetchJson, withTimeout } from '../../utils.js'
+import { fetchJson, safeFetchText, withTimeout } from '../../utils.js'
 import { getJsonSync, setJsonSync } from '../../../utils/storage.js'
 
 const REPO_API = 'https://api.github.com/repos/Maniac2017/Mipal2025'
@@ -120,9 +120,11 @@ export async function maybeUpdate() {
     }
     pending.sort((a, b) => (a.date < b.date ? -1 : 1))
     for (const up of pending) {
-      const res = await fetch(up.url)
-      if (!res.ok) continue
-      const sql = p3b64decodeToUtf8(await res.text())
+      // httpClient: fetch() crudo no tenía timeout ni gate VPN — una
+      // descarga colgada bloqueaba maybeUpdate para siempre.
+      const text = await safeFetchText(up.url)
+      if (!text) continue
+      const sql = p3b64decodeToUtf8(text)
       if (sql.length > 10) {
         await Palantir.execScript({ sql })
         await Palantir.setLastUpdate({ date: up.date })

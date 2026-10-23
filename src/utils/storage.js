@@ -1,10 +1,7 @@
-// Cross-platform storage abstraction.
-// On Electron, mirrors localStorage to the Electron main process via IPC.
-// On web/Android, uses localStorage directly.
+// Cross-platform storage abstraction over localStorage.
+// En Electron el localStorage del renderer ya persiste en userData;
+// no hace falta espejo por IPC.
 // All functions are safe to call at module load time (no top-level access).
-
-const isElectron = () =>
-  typeof window !== 'undefined' && window.octostream?.platform === 'electron'
 
 // Migración única: renombra claves antiguas (optopus_*/octo_*) a octostream_*.
 // Copia el valor a la clave nueva (sin pisarla si ya existe) y borra la vieja.
@@ -28,67 +25,7 @@ try {
   // ignore
 }
 
-// Keys that are mirrored between Electron persistent storage and localStorage.
-const SYNCED_KEYS = [
-  'octostream_installed_plugins',
-  'octostream_custom_plugins',
-  'octostream_language',
-  'octostream_favorites',
-  'octostream_watchlist',
-  'octostream_history',
-  'octostream_search_history',
-  'octostream_tmdb_key',
-  'octostream_opensubs_apikey',
-  'octostream_mdblist_key',
-  'octostream_trakt_key',
-  'octostream_trakt_secret',
-  'octostream_trakt_token',
-  'octostream_trakt_refresh',
-  'octostream_trakt_token_exp',
-  'octostream_trakt_user',
-  'octostream_trakt_lists',
-  'octostream_screensaver_enabled',
-  'octostream_screensaver_timeout',
-  'octostream_sub_lang',
-  'octostream_auto_subs',
-  'octostream_player_engine',
-  'octostream_default_quality',
-  'octostream_hw_accel',
-  'octostream_seek_secs',
-  'octostream_buffer_size',
-  'octostream_default_speed',
-  'octostream_show_player_clock',
-  'octostream_image_quality',
-  'octostream_home_items_limit',
-  'octostream_dark_mode',
-  'octostream_audio_lang',
-  'octostream_auto_skip_intro',
-  'octostream_auto_skip_recap',
-  'octostream_confirm_exit_player',
-  'octostream_auto_next_episode',
-  'octostream_external_plugins',
-  'octostream_recent_searches',
-  'octostream_tdspain_cache',
-  'octostream_youtube_search_history',
-  'octostream_alldebrid_key',
-  'octostream_aiostreams_instance',
-  'octostream_aiostreams_uuid',
-  'octostream_aiostreams_password',
-  'octostream_aiostreams_manifest',
-  'octostream_warp_autoconnect',
-  'octostream_riseup_autoconnect',
-  'octostream_torrent_search',
-]
-
 export async function getItem(key) {
-  if (isElectron()) {
-    try {
-      const value = await window.octostream.getData(key)
-      if (value !== null && value !== undefined) return value
-    } catch (e) {
-      console.warn('[Storage] electron get failed', e)
-    }
-  }
   try {
     return localStorage.getItem(key)
   } catch {
@@ -97,13 +34,6 @@ export async function getItem(key) {
 }
 
 export async function setItem(key, value) {
-  if (isElectron()) {
-    try {
-      await window.octostream.setData(key, value)
-    } catch (e) {
-      console.warn('[Storage] electron set failed', e)
-    }
-  }
   try {
     localStorage.setItem(key, value)
   } catch {
@@ -112,13 +42,6 @@ export async function setItem(key, value) {
 }
 
 export async function removeItem(key) {
-  if (isElectron()) {
-    try {
-      await window.octostream.removeData(key)
-    } catch (e) {
-      console.warn('[Storage] electron remove failed', e)
-    }
-  }
   try {
     localStorage.removeItem(key)
   } catch {
@@ -140,9 +63,6 @@ export function setItemSync(key, value) {
   } catch {
     // ignore
   }
-  if (isElectron()) {
-    window.octostream.setData(key, value).catch(() => {})
-  }
 }
 
 export function removeItemSync(key) {
@@ -150,9 +70,6 @@ export function removeItemSync(key) {
     localStorage.removeItem(key)
   } catch {
     // ignore
-  }
-  if (isElectron()) {
-    window.octostream.removeData(key).catch(() => {})
   }
 }
 
@@ -203,23 +120,3 @@ export function setJsonSync(key, value) {
     // ignore
   }
 }
-
-/**
- * Mirror all known keys from Electron persistent storage into localStorage.
- * Called once at app startup on Electron.
- */
-export async function syncFromElectron() {
-  if (!isElectron()) return
-  try {
-    for (const key of SYNCED_KEYS) {
-      const value = await window.octostream.getData(key)
-      if (value !== null && value !== undefined) {
-        localStorage.setItem(key, value)
-      }
-    }
-  } catch (e) {
-    console.warn('[Storage] sync from electron failed', e)
-  }
-}
-
-export { SYNCED_KEYS }

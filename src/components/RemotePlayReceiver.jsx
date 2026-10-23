@@ -1,6 +1,7 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { getSyncServer } from '../utils/remotePlay.js'
+import Modal from './ui/Modal.jsx'
 import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
 import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
 
@@ -133,9 +134,8 @@ export default function RemotePlayReceiver() {
   return (
     <>
       {pairReq && (
-        <div data-tv-modal className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4">
-          <div className="bg-dark-800 border border-dark-600 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-            <h2 className="text-lg font-semibold text-white mb-2">Solicitud de dispositivo</h2>
+        <Modal onClose={() => answerPair(false)} labelledBy="pair-title" closeOnBackdrop={false} z="z-[90]">
+            <h2 id="pair-title" className="text-lg font-semibold text-white mb-2">Solicitud de dispositivo</h2>
             <p className="text-dark-300 text-sm mb-1">
               <span className="font-medium text-primary-300">{pairReq.alias || pairReq.ip}</span>{' '}
               {pairReq.endpoint === 'play' ? 'quiere reproducir contenido aquí'
@@ -170,8 +170,7 @@ export default function RemotePlayReceiver() {
                 Aceptar
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
       {request && (
         <Suspense fallback={null}>

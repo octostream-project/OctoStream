@@ -83,6 +83,11 @@ export function langColorClass(lang) {
 // Get language priority from settings (default: ESP, LAT, SUB, ENG).
 // Cacheada: antes leía localStorage + JSON.parse en cada llamada a sort.
 let langPriorityCache = null
+// Settings cambia 'octostream_lang_priority' sin recargar — sin invalidar,
+// el orden nuevo no se aplicaba hasta reiniciar la app.
+export function invalidateLangPriority() {
+  langPriorityCache = null
+}
 function getLangPriority() {
   if (langPriorityCache) return langPriorityCache
   try {

@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore.js'
 import { Clock, Play, Trash2, X, CheckCircle2 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { formatDuration } from '../utils/format.js'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 export default function History() {
   const watchHistory = useStore(s => s.watchHistory)
@@ -56,14 +57,9 @@ export default function History() {
       </div>
 
       {watchHistory.length === 0 ? (
-        <div
-          tabIndex={0}
-          data-tv-card
-          className="flex flex-col items-center justify-center min-h-[50vh] gap-4"
-        >
-          <Clock className="text-dark-600" size={64} />
-          <p className="text-dark-400 text-lg">No has reproducido nada todavía</p>
-        </div>
+        <EmptyState icon={Clock} minH="min-h-[50vh]" tabIndex={0} data-tv-card>
+          No has reproducido nada todavía
+        </EmptyState>
       ) : (
         <div className="space-y-2">
           {watchHistory.map(item => {
@@ -113,7 +109,7 @@ export default function History() {
                           style={{ width: `${Math.min(100, Math.round(progress * 100))}%` }}
                         />
                       </div>
-                      <p className="text-[10px] text-dark-500 mt-0.5">
+                      <p className="text-xs text-dark-500 mt-0.5">
                         {isCompleted ? (
                           <span className="text-green-400 flex items-center gap-1">
                             <CheckCircle2 size={10} /> Completado

@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { Wifi, ArrowLeft } from 'lucide-react'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import SyncDevices from '../components/SyncDevices.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 // Página /sync: envoltorio del panel SyncDevices (también embebido en el tab
 // "Sincronizar" de Ajustes — mismo componente, mismos dispositivos).
@@ -17,11 +18,10 @@ export default function Sync() {
           </button>
           <h1 className="text-2xl font-bold text-white">Sincronizar</h1>
         </div>
-        <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
-          <Wifi className="text-dark-600" size={64} />
-          <p className="text-dark-400 text-lg">Sincronización disponible en la app de Android y de escritorio</p>
-          <p className="text-dark-500 text-sm">Instala la app en Android o en tu PC para sincronizar entre dispositivos</p>
-        </div>
+        <EmptyState icon={Wifi} minH="min-h-[50vh]">
+          Sincronización disponible en la app de Android y de escritorio
+          <div className="text-dark-500 text-sm mt-1">Instala la app en Android o en tu PC para sincronizar entre dispositivos</div>
+        </EmptyState>
       </div>
     )
   }

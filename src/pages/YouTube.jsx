@@ -8,6 +8,7 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { useStore } from '../store/useStore.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 function formatDuration(seconds) {
   if (!seconds || seconds < 0) return 'LIVE'
@@ -343,13 +344,12 @@ export default function YouTube() {
   // misma API que el plugin Android. Solo la web pura no tiene extractor.
   if (!isAndroidNative() && !isElectron()) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8 text-center">
-        <Youtube size={48} className="text-red-500" />
-        <h2 className="text-xl font-bold text-white">YouTube</h2>
-        <p className="text-dark-400 text-sm max-w-md">
+      <EmptyState icon={Youtube} minH="min-h-[60vh]">
+        <p className="text-xl font-bold text-white">YouTube</p>
+        <p className="text-dark-400 text-sm max-w-md mt-1">
           La búsqueda y reproducción de YouTube está disponible en la app (Android y escritorio).
         </p>
-      </div>
+      </EmptyState>
     )
   }
 
@@ -482,7 +482,7 @@ export default function YouTube() {
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-white font-medium truncate">{channel.name}</p>
-                <p className="text-[10px] text-dark-500">Canal de YouTube</p>
+                <p className="text-xs text-dark-500">Canal de YouTube</p>
               </div>
               {(() => {
                 const favId = `ytchannel:${channel.url}`
@@ -571,12 +571,12 @@ export default function YouTube() {
                         )
                       })()}
                       {item.duration > 0 && (
-                        <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded">
+                        <span className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
                           {formatDuration(item.duration)}
                         </span>
                       )}
                       {item.isLive && (
-                        <span className="absolute top-1 left-1 bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                        <span className="absolute top-1 left-1 bg-red-600 text-white text-xs px-1.5 py-0.5 rounded font-bold">
                           EN VIVO
                         </span>
                       )}
@@ -601,14 +601,14 @@ export default function YouTube() {
                           title={`Abrir canal de ${item.uploader}`}
                           onClick={e => { e.stopPropagation(); loadChannel({ name: item.uploader, url: item.uploaderUrl }) }}
                           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); loadChannel({ name: item.uploader, url: item.uploaderUrl }) } }}
-                          className="text-[10px] text-dark-400 truncate hover:text-primary-400 transition-colors text-left max-w-full"
+                          className="text-xs text-dark-400 truncate hover:text-primary-400 transition-colors text-left max-w-full"
                         >
                           {item.uploader}
                         </button>
                       ) : (
-                        <p className="text-[10px] text-dark-400 truncate">{item.uploader}</p>
+                        <p className="text-xs text-dark-400 truncate">{item.uploader}</p>
                       )}
-                      <div className="flex items-center gap-2 mt-0.5 text-[10px] text-dark-500">
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-dark-500">
                         {item.views > 0 && (
                           <span className="flex items-center gap-1">
                             <Eye size={10} />
@@ -683,10 +683,7 @@ export default function YouTube() {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-16 text-dark-500">
-                  <Youtube size={48} className="mb-4" />
-                  <p className="text-sm">Busca vídeos en YouTube</p>
-                </div>
+                <EmptyState icon={Youtube} minH="min-h-[30vh]">Busca vídeos en YouTube</EmptyState>
               )}
             </div>
           )}

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, memo } from 'react'
 import { pluginManager } from '../plugins/manager.js'
 import VideoPlayer from '../components/VideoPlayer.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
+import OctoLoader from '../components/OctoLoader.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
+import Modal from '../components/ui/Modal.jsx'
 import { useTranslation } from '../i18n/index.js'
 import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
 import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
@@ -1186,10 +1189,7 @@ export default function Sports() {
       )}
 
       {!error && items.length === 0 && !loading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Trophy size={56} className="text-dark-600" />
-          <p className="text-dark-400">{t('sports.empty')}</p>
-        </div>
+        <EmptyState icon={Trophy} minH="min-h-[30vh]">{t('sports.empty')}</EmptyState>
       )}
 
       {activeLeague ? (
@@ -1303,16 +1303,19 @@ export default function Sports() {
 
       {/* Nivel 3: enlaces/streams del partido */}
       {streamPicker && (
-        <div data-tv-modal className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => { pickerClosedAtRef.current = Date.now(); setStreamPicker(null) }}>
-          <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 max-w-md w-full space-y-3 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-white leading-tight">
+        <Modal
+          onClose={() => { pickerClosedAtRef.current = Date.now(); setStreamPicker(null) }}
+          labelledBy="stream-picker-title"
+          className="max-h-[80vh] overflow-y-auto space-y-3"
+        >
+            <h3 id="stream-picker-title" className="text-base font-semibold text-white leading-tight">
               {streamPicker.item.title || streamPicker.item.name}
             </h3>
             <p className="text-xs text-dark-400">{streamPicker.item.description}</p>
             <div data-tv-list className="space-y-2">
               {streamPicker.loading && streamPicker.streams.length === 0 && (
                 <div className="flex items-center justify-center gap-2 py-4 text-sm text-dark-400">
-                  <span className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                  <OctoLoader size={18} className="text-primary-400" />
                   Buscando enlaces…
                 </div>
               )}
@@ -1338,7 +1341,7 @@ export default function Sports() {
               ))}
               {streamPicker.loading && streamPicker.streams.length > 0 && (
                 <div className="flex items-center justify-center gap-2 py-1 text-xs text-dark-500">
-                  <span className="w-3 h-3 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                  <OctoLoader size={14} className="text-primary-400" />
                   Más enlaces…
                 </div>
               )}
@@ -1352,8 +1355,7 @@ export default function Sports() {
             >
               {t('common.cancel')}
             </button>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

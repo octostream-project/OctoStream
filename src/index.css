@@ -21,7 +21,7 @@ body {
 /* Indicador de foco por teclado fuera del modo TV (a11y). En .tv-mode ya
    existe el estilo propio de foco con escala+halo, que gana por !important. */
 :is(button, a[href], [tabindex], .card):focus-visible {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid #6366f1;
   outline-offset: 2px;
   border-radius: 10px;
 }
@@ -136,9 +136,9 @@ body {
   border-radius: 14px;
   transform: scale(1.04) !important;
   box-shadow:
-    0 0 0 3px #60a5fa,
+    0 0 0 3px #818cf8,
     0 0 0 5px #0f172a,
-    0 0 30px rgba(96, 165, 250, 0.7),
+    0 0 30px rgba(129, 140, 248, 0.7),
     0 10px 35px rgba(0, 0, 0, 0.5) !important;
   z-index: 50;
   position: relative;
@@ -148,18 +148,18 @@ body {
 .tv-mode [data-tv-card]:focus {
   transform: scale(1.05) !important;
   box-shadow:
-    0 0 0 3px #60a5fa,
+    0 0 0 3px #818cf8,
     0 0 0 5px #0f172a,
-    0 0 35px rgba(96, 165, 250, 0.8),
+    0 0 35px rgba(129, 140, 248, 0.8),
     0 14px 45px rgba(0, 0, 0, 0.6) !important;
 }
 
 /* Sidebar items: subtler pop */
 .tv-mode .sidebar-item:focus {
-  background: #2563eb !important;
+  background: #4f46e5 !important;
   color: white !important;
   transform: scale(1.05) !important;
-  box-shadow: 0 0 20px rgba(37, 99, 235, 0.6), 0 6px 20px rgba(0,0,0,0.4) !important;
+  box-shadow: 0 0 20px rgba(79, 70, 229, 0.6), 0 6px 20px rgba(0,0,0,0.4) !important;
 }
 
 /* Neighbors recede slightly (JS adds .tv-neighbor class) */

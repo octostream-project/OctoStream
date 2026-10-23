@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp, Loader2 } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
+import Toggle from '../components/ui/Toggle.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
@@ -14,6 +15,7 @@ import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
 import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
 import { setItemSync, removeItemSync } from '../utils/storage.js'
+import { invalidateLangPriority } from '../utils/streamMeta.js'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -617,18 +619,14 @@ export default function Settings() {
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer">
                 <span className="text-sm text-dark-300">Activar autoplay de episodios</span>
-                <button
-                  onClick={() => {
-                    const newVal = !autoplayEnabled
+                <Toggle
+                  checked={autoplayEnabled}
+                  label="Activar autoplay de episodios"
+                  onChange={newVal => {
                     setAutoplayEnabled(newVal)
                     localStorage.setItem('octostream_autoplay', newVal ? 'true' : 'false')
                   }}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${autoplayEnabled ? 'bg-primary-600' : 'bg-dark-700'}`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${autoplayEnabled ? 'translate-x-6' : ''}`}
-                  />
-                </button>
+                />
               </label>
 
               <label className="flex items-center justify-between cursor-pointer pt-3 border-t border-dark-700/50">
@@ -636,18 +634,14 @@ export default function Settings() {
                   <span className="text-sm text-dark-300 block">Cambio automático de capítulo</span>
                   <span className="text-xs text-dark-500">Al terminar un episodio, reproduce el siguiente automáticamente</span>
                 </div>
-                <button
-                  onClick={() => {
-                    const newVal = !autoNextEp
+                <Toggle
+                  checked={autoNextEp}
+                  label="Cambio automático de capítulo"
+                  onChange={newVal => {
                     setAutoNextEp(newVal)
                     localStorage.setItem('octostream_auto_next_ep', newVal ? 'true' : 'false')
                   }}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${autoNextEp ? 'bg-primary-600' : 'bg-dark-700'}`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${autoNextEp ? 'translate-x-6' : ''}`}
-                  />
-                </button>
+                />
               </label>
             </div>
           </div>
@@ -679,6 +673,7 @@ export default function Settings() {
                         ;[newArr[idx - 1], newArr[idx]] = [newArr[idx], newArr[idx - 1]]
                         setLangPriority(newArr)
                         localStorage.setItem('octostream_lang_priority', JSON.stringify(newArr))
+                        invalidateLangPriority()
                       }}
                       disabled={idx === 0}
                       className={`p-1.5 rounded ${idx === 0 ? 'text-dark-600 cursor-not-allowed' : 'text-dark-300 hover:bg-dark-600 hover:text-white'}`}
@@ -693,6 +688,7 @@ export default function Settings() {
                         ;[newArr[idx + 1], newArr[idx]] = [newArr[idx], newArr[idx + 1]]
                         setLangPriority(newArr)
                         localStorage.setItem('octostream_lang_priority', JSON.stringify(newArr))
+                        invalidateLangPriority()
                       }}
                       disabled={idx === langPriority.length - 1}
                       className={`p-1.5 rounded ${idx === langPriority.length - 1 ? 'text-dark-600 cursor-not-allowed' : 'text-dark-300 hover:bg-dark-600 hover:text-white'}`}
@@ -1423,7 +1419,7 @@ export default function Settings() {
                 disabled={aioTest?.loading}
                 className="w-full bg-dark-700 hover:bg-dark-600 text-white font-medium rounded-lg px-4 py-3 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                {aioTest?.loading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                {aioTest?.loading ? <OctoLoader size={16} className="text-primary-300" /> : <Check size={16} />}
                 {aioTest?.loading ? 'Comprobando…' : 'Probar conexión'}
               </button>
               {aioTest && !aioTest.loading && (
@@ -1498,13 +1494,12 @@ export default function Settings() {
                   Túnel OpenVPN integrado — todo el tráfico sale por Francia cuando está activo
                 </p>
               </div>
-              <button
-                onClick={toggleRiseup}
+              <Toggle
+                checked={riseupState !== 'disconnected'}
+                onChange={toggleRiseup}
                 disabled={riseupBusy}
-                className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${riseupState !== 'disconnected' ? 'bg-primary-600' : 'bg-dark-700'} ${riseupBusy ? 'opacity-50' : ''}`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${riseupState !== 'disconnected' ? 'translate-x-6' : ''}`} />
-              </button>
+                label="RiseupVPN"
+              />
             </div>
             {riseupState === 'connecting' && <p className="text-amber-300 text-sm">Conectando…</p>}
             {riseupState === 'connected' && <p className="text-green-400 text-sm">Conectado — tráfico por el túnel</p>}
@@ -1531,21 +1526,13 @@ export default function Settings() {
                 <span className="text-sm text-dark-300">
                   {vpnStatus === 'connecting' ? 'Conectando...' : vpnStatus === 'connected' ? 'Conectado' : 'Desconectado'}
                 </span>
-                <button
-                  onClick={toggleVpn}
+                <Toggle
+                  checked={vpnStatus === 'connected' || vpnStatus === 'connecting'}
+                  onChange={toggleVpn}
                   disabled={vpnStatus === 'connecting'}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    vpnStatus === 'connected' ? 'bg-green-600' :
-                    vpnStatus === 'connecting' ? 'bg-yellow-600' :
-                    'bg-dark-700'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                      vpnStatus === 'connected' || vpnStatus === 'connecting' ? 'translate-x-6' : ''
-                    }`}
-                  />
-                </button>
+                  label="Cloudflare WARP"
+                  color={vpnStatus === 'connecting' ? 'yellow' : 'green'}
+                />
               </label>
               {vpnError && (
                 <p className="text-red-400 text-sm">{vpnError}</p>
@@ -1554,18 +1541,12 @@ export default function Settings() {
                 <span className="text-sm text-dark-300">
                   Auto-conectar al iniciar
                 </span>
-                <button
-                  onClick={toggleVpnAutoConnect}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    vpnAutoConnect ? 'bg-green-600' : 'bg-dark-700'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                      vpnAutoConnect ? 'translate-x-6' : ''
-                    }`}
-                  />
-                </button>
+                <Toggle
+                  checked={vpnAutoConnect}
+                  onChange={toggleVpnAutoConnect}
+                  label="Auto-conectar WARP al iniciar"
+                  color="green"
+                />
               </label>
             </div>
           </div>
@@ -1787,20 +1768,14 @@ export default function Settings() {
                 <span className="text-sm text-dark-300 block">Buscar enlaces torrent</span>
                 <span className="text-xs text-dark-500">Si se apaga, los sitios torrent no se consultan ni aparecen sus enlaces</span>
               </div>
-              <button
-                data-tv-card
-                tabIndex={0}
-                onClick={() => {
-                  const newVal = !torrentSearch
+              <Toggle
+                checked={torrentSearch}
+                label="Buscar enlaces torrent"
+                onChange={newVal => {
                   setTorrentSearch(newVal)
                   localStorage.setItem('octostream_torrent_search', newVal ? 'true' : 'false')
                 }}
-                className={`relative w-12 h-6 rounded-full transition-colors ${torrentSearch ? 'bg-primary-600' : 'bg-dark-700'}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${torrentSearch ? 'translate-x-6' : ''}`}
-                />
-              </button>
+              />
             </label>
 
             </div>
@@ -1822,14 +1797,11 @@ export default function Settings() {
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer">
                 <span className="text-sm text-dark-300">Activar salvapantallas automático</span>
-                <button
-                  onClick={() => setSsEnabled(!ssEnabled)}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${ssEnabled ? 'bg-primary-600' : 'bg-dark-700'}`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${ssEnabled ? 'translate-x-6' : ''}`}
-                  />
-                </button>
+                <Toggle
+                  checked={ssEnabled}
+                  onChange={setSsEnabled}
+                  label="Activar salvapantallas automático"
+                />
               </label>
 
               {ssEnabled && (

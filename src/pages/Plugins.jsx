@@ -236,9 +236,16 @@ export default function Plugins() {
         >
           Repositorio
         </button>
-        <span className="px-4 py-2 text-sm text-dark-500">
-          Solo plugins incluidos en la aplicación
-        </span>
+        <button
+          onClick={() => setActiveTab('external')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'external'
+              ? 'text-primary-400 border-primary-500'
+              : 'text-dark-400 border-transparent hover:text-white'
+          }`}
+        >
+          Externos
+        </button>
       </div>
 
       {activeTab === 'repository' && (

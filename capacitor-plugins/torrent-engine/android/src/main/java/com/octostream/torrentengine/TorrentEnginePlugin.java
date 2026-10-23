@@ -844,13 +844,23 @@ public class TorrentEnginePlugin extends Plugin {
                 // al árbol elegido por el usuario y se borra el original.
                 final Uri tree = downloadTree();
                 final File src = mediaFile;
+                // Capturar el handle AHORA: leer el campo `th` dentro del hilo
+                // observaría el torrent de una descarga posterior y el archivo
+                // nunca se copiaría al árbol SAF.
+                final TorrentHandle handle = th;
                 if (tree != null) {
                     new Thread(() -> {
                         try {
+                            // Deadline global: un torrent estancado al 99% no
+                            // debe mantener el hilo vivo para siempre.
+                            long deadline = System.currentTimeMillis() + 2L * 60 * 60 * 1000;
                             for (;;) {
-                                TorrentHandle h = th;
-                                if (h == null || !h.isValid() || httpDlCancel) return;
-                                if (h.status().progress() >= 1.0f) break;
+                                if (handle == null || !handle.isValid() || httpDlCancel) return;
+                                if (handle.status().progress() >= 1.0f) break;
+                                if (System.currentTimeMillis() > deadline) {
+                                    Log.w(TAG, "copia SAF: espera agotada (torrent estancado)");
+                                    return;
+                                }
                                 Thread.sleep(2000);
                             }
                             android.content.ContentResolver cr = getContext().getContentResolver();
@@ -884,11 +894,31 @@ public class TorrentEnginePlugin extends Plugin {
     @PluginMethod
     public void listDownloads(PluginCall call) {
         JSArray files = new JSArray();
+        String error = null;
         try {
             collectVideoFiles(downloadsDir(), downloadsDir(), files);
-            collectTreeVideos(files);
-        } catch (Throwable ignored) {}
-        call.resolve(new JSObject().put("files", files));
+            // La query del árbol SAF va al DocumentsProvider: un montaje
+            // stale (SD/USB zombi) bloquea cr.query para siempre — hilo con
+            // timeout como en downloadVolumes.
+            java.util.concurrent.ExecutorService ex =
+                    java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                ex.submit(() -> collectTreeVideos(files))
+                        .get(4, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException te) {
+                Log.w(TAG, "listDownloads: query SAF no responde (montaje stale)");
+                error = "La carpeta elegida no responde (almacenamiento inaccesible)";
+            } catch (Exception e) {
+                error = e.getMessage();
+            } finally {
+                ex.shutdownNow();
+            }
+        } catch (Throwable t) {
+            error = t.getMessage();
+        }
+        JSObject ret = new JSObject().put("files", files);
+        if (error != null) ret.put("error", error);
+        call.resolve(ret);
     }
 
     // Vídeos dentro del árbol SAF elegido (modo sin all-files): se listan
@@ -1154,6 +1184,7 @@ public class TorrentEnginePlugin extends Plugin {
                     fos.flush();
                 } finally {
                     try { fos.close(); } catch (Throwable ignored) {}
+                    try { in.close(); } catch (Throwable ignored) {}
                     conn.disconnect();
                 }
                 if (total > 0 && doneBytes < total) throw new Exception("descarga incompleta: " + doneBytes + " de " + total);
@@ -1354,14 +1385,15 @@ public class TorrentEnginePlugin extends Plugin {
             conn.setRequestProperty("Accept", "application/x-bittorrent,application/octet-stream,*/*");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 400) throw new Exception("HTTP " + code + " descargando el .torrent");
-            InputStream in = conn.getInputStream();
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             byte[] buf = new byte[16384];
             int total = 0, r;
-            while ((r = in.read(buf)) >= 0) {
-                total += r;
-                if (total > MAX_TORRENT_BYTES) throw new Exception(".torrent demasiado grande");
-                bos.write(buf, 0, r);
+            try (InputStream in = conn.getInputStream()) {
+                while ((r = in.read(buf)) >= 0) {
+                    total += r;
+                    if (total > MAX_TORRENT_BYTES) throw new Exception(".torrent demasiado grande");
+                    bos.write(buf, 0, r);
+                }
             }
             byte[] data = bos.toByteArray();
             if (data.length < 20 || data[0] != 'd') throw new Exception("El archivo descargado no es un .torrent válido");

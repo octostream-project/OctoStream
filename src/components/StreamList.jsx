@@ -1,4 +1,4 @@
-import { Server, Play, Download } from 'lucide-react'
+import { Server, Play, Download, Zap, Hourglass } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, isDownloadableDirect } from '../utils/streamMeta.js'
 
 // Lista de fuentes de un contenido/episodio. Estaba duplicada dos veces en
@@ -32,10 +32,10 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
                   <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{lang}</span>
                 )}
                 {stream.cached === true && (
-                  <span className="text-xs text-emerald-400 flex-shrink-0" title="Cacheado en debrid">⚡</span>
+                  <span className="text-emerald-400 flex-shrink-0" title="Cacheado en debrid"><Zap size={14} /></span>
                 )}
                 {stream.cached === false && (
-                  <span className="text-xs text-amber-400 flex-shrink-0" title="No cacheado — el debrid lo descarga al reproducir">⏳</span>
+                  <span className="text-amber-400 flex-shrink-0" title="No cacheado — el debrid lo descarga al reproducir"><Hourglass size={14} /></span>
                 )}
                 {quality && (
                   <span className={`text-xs ${qualityColorClass(quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{quality}</span>
@@ -83,10 +83,10 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
               <span className="text-xs bg-amber-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">P2P</span>
             ) : null}
             {stream.cached === true && (
-              <span className="text-xs bg-emerald-700 text-white px-2 py-1 rounded font-bold flex-shrink-0" title="Cacheado en debrid — reproduce al instante">⚡</span>
+              <span className="bg-emerald-700 text-white px-1.5 py-1 rounded flex-shrink-0" title="Cacheado en debrid — reproduce al instante"><Zap size={14} /></span>
             )}
             {stream.cached === false && (
-              <span className="text-xs bg-amber-700 text-white px-2 py-1 rounded font-bold flex-shrink-0" title="No cacheado — el debrid empieza a descargarlo al reproducir">⏳</span>
+              <span className="bg-amber-700 text-white px-1.5 py-1 rounded flex-shrink-0" title="No cacheado — el debrid empieza a descargarlo al reproducir"><Hourglass size={14} /></span>
             )}
             {quality && (
               <span className={`text-xs ${qualityColorClass(quality)} text-white px-2 py-1 rounded font-bold flex-shrink-0`}>{quality}</span>

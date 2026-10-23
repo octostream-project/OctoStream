@@ -81,31 +81,54 @@ public class CloudProxyPlugin extends Plugin {
         }
     };
 
+    // Serializa el bind a la API remota: dos riseupConnect paralelos creaban
+    // dos bindService y el segundo sobrescribía mOvpnConn sin unbind del
+    // primero — fuga de ServiceConnection. Los callers que llegan con un bind
+    // en curso se encolan y se sirven todos en onServiceConnected.
+    private final Object mOvpnLock = new Object();
+    private final java.util.List<Runnable> mOvpnReadyQueue = new java.util.ArrayList<>();
+
     private void bindOvpnApi(Runnable onReady) {
-        if (mOvpnApi != null) { onReady.run(); return; }
-        android.content.Context ctx = getContext();
-        final android.content.Context appCtx = ctx.getApplicationContext();
-        mOvpnConn = new android.content.ServiceConnection() {
-            @Override public void onServiceConnected(android.content.ComponentName n, android.os.IBinder b) {
-                mOvpnApi = IOpenVPNAPIService.Stub.asInterface(b);
-                try { mOvpnApi.registerStatusCallback(mOvpnStatusCb); } catch (Exception ignored) {}
-                onReady.run();
-            }
-            @Override public void onServiceDisconnected(android.content.ComponentName n) {
+        synchronized (mOvpnLock) {
+            if (mOvpnApi != null) { onReady.run(); return; }
+            mOvpnReadyQueue.add(onReady);
+            if (mOvpnConn != null) return; // bind en curso
+            android.content.Context ctx = getContext();
+            final android.content.Context appCtx = ctx.getApplicationContext();
+            mOvpnConn = new android.content.ServiceConnection() {
+                @Override public void onServiceConnected(android.content.ComponentName n, android.os.IBinder b) {
+                    mOvpnApi = IOpenVPNAPIService.Stub.asInterface(b);
+                    try { mOvpnApi.registerStatusCallback(mOvpnStatusCb); } catch (Exception ignored) {}
+                    java.util.List<Runnable> q;
+                    synchronized (mOvpnLock) {
+                        q = new java.util.ArrayList<>(mOvpnReadyQueue);
+                        mOvpnReadyQueue.clear();
+                    }
+                    for (Runnable r : q) r.run();
+                }
+                @Override public void onServiceDisconnected(android.content.ComponentName n) {
+                    mOvpnApi = null;
+                }
+            };
+            try {
+                android.content.Intent intent = new android.content.Intent(IOpenVPNAPIService.class.getName());
+                intent.setPackage(OVPN_PKG);
+                if (!appCtx.bindService(intent, mOvpnConn, android.content.Context.BIND_AUTO_CREATE)) {
+                    mOvpnApi = null;
+                    mOvpnConn = null;
+                    throw new IllegalStateException("bind rechazado");
+                }
+            } catch (Exception e) {
                 mOvpnApi = null;
+                try { appCtx.unbindService(mOvpnConn); } catch (Exception ignored) {}
+                mOvpnConn = null;
+                // Los callers encolados reciben su onReady con api nula — su
+                // propio try/catch rechaza la llamada en vez de colgarla.
+                java.util.List<Runnable> q = new java.util.ArrayList<>(mOvpnReadyQueue);
+                mOvpnReadyQueue.clear();
+                for (Runnable r : q) { try { r.run(); } catch (Exception ignored) {} }
+                throw e;
             }
-        };
-        try {
-            android.content.Intent intent = new android.content.Intent(IOpenVPNAPIService.class.getName());
-            intent.setPackage(OVPN_PKG);
-            if (!appCtx.bindService(intent, mOvpnConn, android.content.Context.BIND_AUTO_CREATE)) {
-                mOvpnApi = null;
-                throw new IllegalStateException("bind rechazado");
-            }
-        } catch (Exception e) {
-            mOvpnApi = null;
-            try { appCtx.unbindService(mOvpnConn); } catch (Exception ignored) {}
-            throw e;
         }
     }
 
@@ -1075,7 +1098,17 @@ public class CloudProxyPlugin extends Plugin {
                 int code = c.getResponseCode();
                 java.io.InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                if (in != null) { byte[] buf = new byte[16384]; int n; while ((n = in.read(buf)) > 0) bos.write(buf, 0, n); }
+                try {
+                    if (in != null) {
+                        byte[] buf = new byte[16384]; int n;
+                        // Tope de 8 MB: una respuesta gigante inflaba el
+                        // buffer sin límite (OOM) y `in` nunca se cerraba.
+                        while ((n = in.read(buf)) > 0 && bos.size() < 8 * 1024 * 1024)
+                            bos.write(buf, 0, n);
+                    }
+                } finally {
+                    try { if (in != null) in.close(); } catch (Exception ignored) {}
+                }
                 byte[] raw = bos.toByteArray();
                 JSObject ret = new JSObject();
                 ret.put("status", code);

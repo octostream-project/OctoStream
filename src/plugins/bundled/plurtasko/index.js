@@ -8,7 +8,7 @@
 
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../../base.js'
 import { logWarn } from '../../../utils/logger.js'
-import { withCancelTimeout } from '../../utils.js'
+import { withCancelTimeout, safeFetchJson } from '../../utils.js'
 
 // Solo host para logs: las URLs de embed/debrid llevan tokens en el query.
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
@@ -99,11 +99,9 @@ async function fetchImdbId(tmdbId, isMovie) {
     const apiKey = getTmdbApiKey()
     const endpoint = isMovie ? `/movie/${tmdbId}/external_ids` : `/tv/${tmdbId}/external_ids`
     const url = `https://api.themoviedb.org/3${endpoint}?api_key=${apiKey}`
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
-    })
-    if (!res.ok) { imdbIdCache.set(cacheKey, { value: null, ts: Date.now() }); return null }
-    const data = await res.json()
+    // httpClient: timeout por defecto + gate VPN/WARP en nativo.
+    const data = await safeFetchJson(url)
+    if (!data) { imdbIdCache.set(cacheKey, { value: null, ts: Date.now() }); return null }
     const imdbId = data.imdb_id || null
     imdbIdCache.set(cacheKey, { value: imdbId, ts: Date.now() })
     // Prune cache

@@ -3,6 +3,7 @@ import { RefreshCw, Wifi, Check, AlertCircle, Download, X, MonitorSmartphone } f
 import { useStore } from '../store/useStore.js'
 import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from './OctoLoader.jsx'
+import Modal from './ui/Modal.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
 import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
 
@@ -25,6 +26,7 @@ export default function SyncDevices() {
   const [message, setMessage] = useState('')
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
   const [pairedDevices, setPairedDevices] = useState([])
+  const [confirmForget, setConfirmForget] = useState(false)
   const syncListenerRef = useRef(null)
 
   // El merge es una UNIÓN por clave (lo remoto se junta con lo local, gana el
@@ -376,13 +378,7 @@ export default function SyncDevices() {
           <button
             data-tv-card
             tabIndex={0}
-            onClick={async () => {
-              const SyncServer = await getSyncServer()
-              if (!SyncServer) return
-              await SyncServer.forgetDevices()
-              forgetTokens()
-              setPairedDevices([])
-            }}
+            onClick={() => setConfirmForget(true)}
             className="btn-secondary px-3 py-1.5 text-xs"
           >
             Olvidar todos
@@ -390,22 +386,49 @@ export default function SyncDevices() {
         </div>
       )}
 
+      {/* Confirmación: olvidar todos los dispositivos autorizados */}
+      {confirmForget && (
+        <Modal onClose={() => setConfirmForget(false)} labelledBy="sync-forget-title">
+          <h3 id="sync-forget-title" className="text-white font-semibold mb-2">Olvidar todos los dispositivos</h3>
+          <p className="text-dark-400 text-sm mb-5">
+            Se desemparejarán los {pairedDevices.length} dispositivos autorizados y tendrán que volver a pedir permiso para enviarte contenido.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setConfirmForget(false)} className="btn-ghost text-sm">
+              Cancelar
+            </button>
+            <button
+              onClick={async () => {
+                setConfirmForget(false)
+                const SyncServer = await getSyncServer()
+                if (!SyncServer) return
+                await SyncServer.forgetDevices()
+                forgetTokens()
+                setPairedDevices([])
+              }}
+              className="btn-primary text-sm bg-red-600 hover:bg-red-500"
+            >
+              Olvidar todos
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {/* Diálogo de acción: Descargar o Enviar */}
       {actionDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setActionDevice(null)}>
-          <div className="bg-dark-900 border border-dark-700 rounded-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setActionDevice(null)} labelledBy="sync-action-title">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="text-white font-bold text-lg">{actionDevice.alias || actionDevice.ip}</p>
+                <p id="sync-action-title" className="text-white font-bold text-lg">{actionDevice.alias || actionDevice.ip}</p>
                 <p className="text-xs text-dark-400 font-mono mt-0.5">
                   {actionDevice.ip || actionDevice.url}{actionDevice.fingerprint ? ` · ${actionDevice.fingerprint}` : ''}
                 </p>
               </div>
-              <button onClick={() => setActionDevice(null)} className="btn-ghost p-1.5" data-tv-card tabIndex={0}>
+              <button onClick={() => setActionDevice(null)} className="btn-ghost p-1.5" data-tv-card tabIndex={0} aria-label="Cerrar">
                 <X size={18} />
               </button>
             </div>
-            <p className="text-sm text-dark-400 mb-4">Qué quieres hacer con este dispositivo?</p>
+            <p className="text-sm text-dark-400 mb-4">¿Qué quieres hacer con este dispositivo?</p>
             <div className="space-y-2">
               <button
                 data-tv-card
@@ -435,8 +458,7 @@ export default function SyncDevices() {
             <p className="text-xs text-dark-500 mt-4 text-center">
               La primera vez, el otro dispositivo pedirá aceptar la conexión en su pantalla.
             </p>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

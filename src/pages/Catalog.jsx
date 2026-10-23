@@ -12,13 +12,19 @@ export default function Catalog() {
   const [loading, setLoading] = useState(true)
   const [skip, setSkip] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+  const [catalogName, setCatalogName] = useState('')
 
   useEffect(() => {
     setItems([])
     setSkip(0)
     setHasMore(true)
     setLoading(true)
+    setCatalogName('')
     loadContent(0, true)
+    pluginManager.getAllCatalogs().then(cats => {
+      const cat = cats.find(c => c.pluginId === pluginId && c.id === catalogId)
+      if (cat) setCatalogName(cat.name || cat.pluginName || '')
+    }).catch(() => {})
   }, [pluginId, catalogId, type])
 
   const loadContent = async (offset, reset = false) => {
@@ -54,7 +60,7 @@ export default function Catalog() {
   return (
     <div className="p-4 lg:p-6">
       <h1 className="text-2xl font-bold text-white mb-6">
-        {items.length > 0 ? '' : 'Catálogo'}
+        {catalogName || 'Catálogo'}
       </h1>
       <MediaGrid>
         {items.map(item => (

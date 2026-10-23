@@ -48,16 +48,18 @@ const HEADERS = {
 async function fetchPage(url, referer, extraHeaders = {}) {
   const headers = { ...HEADERS, ...extraHeaders }
   if (referer) headers['Referer'] = referer
+  // 15s timeout to prevent hanging on captcha pages. El clearTimeout va en
+  // finally: en error el timer de 15s quedaba vivo hasta disparar.
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
   try {
-    // 15s timeout to prevent hanging on captcha pages
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
     const result = await fetchHtml(url, controller.signal, headers)
-    clearTimeout(timeout)
     capturePageMeta(url, result)
     return result
   } catch {
     return ''
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

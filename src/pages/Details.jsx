@@ -10,6 +10,7 @@ import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { parseStreamLang, parseStreamQuality, sortByLangPriority } from '../utils/streamMeta.js'
 import StreamList from '../components/StreamList.jsx'
+import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
@@ -23,6 +24,7 @@ import { useWindowedList } from '../hooks/useWindowedList.js'
 import { Play, Heart, Star, ArrowLeft, Clock, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download, Bookmark, X } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
 import LogoLoader from '../components/LogoLoader.jsx'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
@@ -74,7 +76,21 @@ export default function Details() {
   const addToHistory = useStore(s => s.addToHistory)
   const updateProgress = useStore(s => s.updateProgress)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
-  const historyItem = useStore(s => s.watchHistory.find(h => h.id === id && h.type === type))
+  // Suscripción granular al historial: updateProgress reescribe el item cada
+  // ~5s durante la reproducción; devolver una clave estable evita re-renderizar
+  // toda la ficha salvo que cambie algo realmente visible (episodio, % entero
+  // de progreso o bloques de 30s).
+  const historyKey = useStore(s => {
+    const h = s.watchHistory.find(x => x.id === id && x.type === type)
+    return h
+      ? [h.season, h.episode, h.episodeName, h.server, h.duration,
+         Math.round((h.progress || 0) * 100), Math.floor((h.currentTime || 0) / 30)].join('|')
+      : ''
+  })
+  const historyItem = useMemo(
+    () => useStore.getState().watchHistory.find(h => h.id === id && h.type === type) || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [historyKey, id, type])
   const [meta, setMeta] = useState(null)
   const [streams, setStreams] = useState([])
   const [loading, setLoading] = useState(true)
@@ -526,8 +542,18 @@ export default function Details() {
       streamAbortRef.current?.abort()
       castAbortRef.current?.abort()
       seasonAbortRef.current?.abort()
+      episodeStreamAbortRef.current?.abort()
+      zapAbortRef.current?.abort()
     }
   }, [type, id, location.state?.autoplay])
+
+  // El listener de 'torrentProgress' vive en el plugin nativo/IPC: sin
+  // remove() al desmontar se acumulan listeners que retienen setState de un
+  // componente ya muerto.
+  useEffect(() => () => {
+    try { dlListenerRef.current?.remove?.() } catch { /* noop */ }
+    dlListenerRef.current = null
+  }, [])
 
   const [resolvingStream, setResolvingStream] = useState(false)
 
@@ -1285,10 +1311,9 @@ export default function Details() {
 
   if (!meta) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <p className="text-dark-400 text-lg">Contenido no encontrado</p>
-        <button onClick={() => navigate('/')} className="btn-primary">Volver al inicio</button>
-      </div>
+      <EmptyState minH="min-h-[60vh]" action="Volver al inicio" onAction={() => navigate('/')}>
+        <p className="text-lg">Contenido no encontrado</p>
+      </EmptyState>
     )
   }
 
@@ -1309,6 +1334,118 @@ export default function Details() {
     }
     return true
   }
+
+  // Reparto + Similar + Recomendaciones: compartido entre la vista de serie y
+  // la de temporada (antes estaba duplicado entero en cada una).
+  const relatedSections = (
+    <>
+      {/* Cast - justo encima de Similar */}
+      {(cast.length > 0 || castLoading) && (
+        <div className="mt-8" ref={castSectionRef}>
+          <h2 className="flex items-center gap-2 text-xl font-bold text-white mb-4">
+            <Users size={18} className="text-primary-500" />
+            Reparto
+          </h2>
+          {castLoading ? (
+            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex-shrink-0 w-20 text-center">
+                  <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 animate-pulse" />
+                  <div className="h-3 bg-dark-700 rounded mb-1 animate-pulse" />
+                  <div className="h-3 bg-dark-700 rounded w-12 mx-auto animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+              {cast.map(member => (
+                <div key={member.id} data-tv-card tabIndex={0} role="button" className="flex-shrink-0 w-20 text-center cursor-pointer"
+                  onClick={() => handleSelectPerson(member)}
+                  onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleSelectPerson(member))}
+                >
+                  {member.photo ? (
+                    <LazyImage
+                      src={member.photo}
+                      alt={member.name}
+                      className="w-16 h-16 rounded-full object-cover mx-auto mb-2 border-2 border-dark-700"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 flex items-center justify-center">
+                      <Users size={20} className="text-dark-500" />
+                    </div>
+                  )}
+                  <p className="text-xs text-white font-medium truncate">{member.name}</p>
+                  <p className="text-xs text-dark-500 truncate">{member.character}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {meta.similar && meta.similar.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-xl font-bold text-white mb-4">Similar</h2>
+          <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+            {meta.similar.map(item => {
+              const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
+              return (
+                <div
+                  key={`${item.type}-${item.id}`}
+                  data-tv-card
+                  tabIndex={0}
+                  role="button"
+                  className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
+                  onClick={goToItem}
+                  onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
+                >
+                  {item.poster ? (
+                    <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
+                  ) : (
+                    <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
+                      <FilmIcon size={24} className="text-dark-500" />
+                    </div>
+                  )}
+                  <p className="text-xs text-white mt-2 truncate">{item.name}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {meta.recommendations && meta.recommendations.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-xl font-bold text-white mb-4">Recomendaciones</h2>
+          <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+            {meta.recommendations.map(item => {
+              const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
+              return (
+                <div
+                  key={`${item.type}-${item.id}`}
+                  data-tv-card
+                  tabIndex={0}
+                  role="button"
+                  className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
+                  onClick={goToItem}
+                  onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
+                >
+                  {item.poster ? (
+                    <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
+                  ) : (
+                    <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
+                      <FilmIcon size={24} className="text-dark-500" />
+                    </div>
+                  )}
+                  <p className="text-xs text-white mt-2 truncate">{item.name}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  )
 
   return (
     <div className="min-h-screen pb-8">
@@ -1385,11 +1522,10 @@ export default function Details() {
       {/* Resume dialog — data-tv-modal confina la navegación D-pad al
           diálogo y autoFocus lleva el foco a "Continuar" al abrirse */}
       {showResumeDialog && (
-        <div data-tv-modal className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-dark-800 rounded-2xl p-6 max-w-sm w-full border border-dark-700 shadow-2xl">
+        <Modal onClose={() => setShowResumeDialog(false)} labelledBy="resume-title" closeOnBackdrop={false}>
             <div className="flex items-center gap-3 mb-4">
               <Clock className="text-primary-400" size={28} />
-              <h2 className="text-xl font-bold text-white">Continuar reproducción</h2>
+              <h2 id="resume-title" className="text-xl font-bold text-white">Continuar reproducción</h2>
             </div>
             <p className="text-dark-300 mb-2">
               Tienes una reproducción a medias.
@@ -1422,15 +1558,13 @@ export default function Details() {
             >
               Cancelar
             </button>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Picker de archivo dentro del torrent — packs con varios vídeos */}
       {torrentPick && (
-        <div data-tv-modal className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-dark-800 rounded-2xl p-6 max-w-lg w-full border border-dark-700 shadow-2xl max-h-[80vh] flex flex-col">
-            <h2 className="text-xl font-bold text-white mb-1">Elegir archivo</h2>
+        <Modal onClose={() => setTorrentPick(null)} labelledBy="torrent-pick-title" className="max-h-[80vh] flex flex-col">
+            <h2 id="torrent-pick-title" className="text-xl font-bold text-white mb-1">Elegir archivo</h2>
             <p className="text-dark-400 text-sm mb-4">
               Este torrent contiene {torrentPick.files.length} vídeos
             </p>
@@ -1474,8 +1608,7 @@ export default function Details() {
             >
               Cancelar
             </button>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Chip de progreso de la descarga offline (torrent → Descargas) */}
@@ -1806,111 +1939,7 @@ export default function Details() {
           </div>
         )}
 
-        {/* Cast - justo encima de Similar */}
-        {(cast.length > 0 || castLoading) && (
-          <div className="mt-8" ref={castSectionRef}>
-            <h2 className="flex items-center gap-2 text-xl font-bold text-white mb-4">
-              <Users size={18} className="text-primary-500" />
-              Reparto
-            </h2>
-            {castLoading ? (
-              <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex-shrink-0 w-20 text-center">
-                    <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 animate-pulse" />
-                    <div className="h-3 bg-dark-700 rounded mb-1 animate-pulse" />
-                    <div className="h-3 bg-dark-700 rounded w-12 mx-auto animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-                {cast.map(member => (
-                  <div key={member.id} data-tv-card tabIndex={0} role="button" className="flex-shrink-0 w-20 text-center cursor-pointer"
-                    onClick={() => handleSelectPerson(member)}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleSelectPerson(member))}
-                  >
-                    {member.photo ? (
-                      <LazyImage
-                        src={member.photo}
-                        alt={member.name}
-                        className="w-16 h-16 rounded-full object-cover mx-auto mb-2 border-2 border-dark-700"
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 flex items-center justify-center">
-                        <Users size={20} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white font-medium truncate">{member.name}</p>
-                    <p className="text-[10px] text-dark-500 truncate">{member.character}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {meta.similar && meta.similar.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-xl font-bold text-white mb-4">Similar</h2>
-            <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {meta.similar.map(item => {
-                const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
-                return (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    data-tv-card
-                    tabIndex={0}
-                    role="button"
-                    className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
-                    onClick={goToItem}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
-                  >
-                    {item.poster ? (
-                      <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
-                    ) : (
-                      <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
-                        <FilmIcon size={24} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white mt-2 truncate">{item.name}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {meta.recommendations && meta.recommendations.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-xl font-bold text-white mb-4">Recomendaciones</h2>
-            <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {meta.recommendations.map(item => {
-                const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
-                return (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    data-tv-card
-                    tabIndex={0}
-                    role="button"
-                    className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
-                    onClick={goToItem}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
-                  >
-                    {item.poster ? (
-                      <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
-                    ) : (
-                      <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
-                        <FilmIcon size={24} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white mt-2 truncate">{item.name}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        {relatedSections}
           </>
         )}
 
@@ -2011,111 +2040,7 @@ export default function Details() {
           )}
         </div>
 
-        {/* Cast - justo encima de Similar */}
-        {(cast.length > 0 || castLoading) && (
-          <div className="mt-8" ref={castSectionRef}>
-            <h2 className="flex items-center gap-2 text-xl font-bold text-white mb-4">
-              <Users size={18} className="text-primary-500" />
-              Reparto
-            </h2>
-            {castLoading ? (
-              <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex-shrink-0 w-20 text-center">
-                    <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 animate-pulse" />
-                    <div className="h-3 bg-dark-700 rounded mb-1 animate-pulse" />
-                    <div className="h-3 bg-dark-700 rounded w-12 mx-auto animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-                {cast.map(member => (
-                  <div key={member.id} data-tv-card tabIndex={0} role="button" className="flex-shrink-0 w-20 text-center cursor-pointer"
-                    onClick={() => handleSelectPerson(member)}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleSelectPerson(member))}
-                  >
-                    {member.photo ? (
-                      <LazyImage
-                        src={member.photo}
-                        alt={member.name}
-                        className="w-16 h-16 rounded-full object-cover mx-auto mb-2 border-2 border-dark-700"
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-dark-700 mx-auto mb-2 flex items-center justify-center">
-                        <Users size={20} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white font-medium truncate">{member.name}</p>
-                    <p className="text-[10px] text-dark-500 truncate">{member.character}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {meta.similar && meta.similar.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-xl font-bold text-white mb-4">Similar</h2>
-            <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {meta.similar.map(item => {
-                const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
-                return (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    data-tv-card
-                    tabIndex={0}
-                    role="button"
-                    className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
-                    onClick={goToItem}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
-                  >
-                    {item.poster ? (
-                      <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
-                    ) : (
-                      <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
-                        <FilmIcon size={24} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white mt-2 truncate">{item.name}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {meta.recommendations && meta.recommendations.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-xl font-bold text-white mb-4">Recomendaciones</h2>
-            <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {meta.recommendations.map(item => {
-                const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
-                return (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    data-tv-card
-                    tabIndex={0}
-                    role="button"
-                    className="flex-shrink-0 w-32 sm:w-36 cursor-pointer"
-                    onClick={goToItem}
-                    onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), goToItem())}
-                  >
-                    {item.poster ? (
-                      <LazyImage src={item.poster} alt={item.name} className="w-full aspect-[2/3] object-cover rounded-lg" />
-                    ) : (
-                      <div className="w-full aspect-[2/3] bg-dark-700 rounded-lg flex items-center justify-center">
-                        <FilmIcon size={24} className="text-dark-500" />
-                      </div>
-                    )}
-                    <p className="text-xs text-white mt-2 truncate">{item.name}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        {relatedSections}
           </>
         )}
 
@@ -2230,16 +2155,7 @@ export default function Details() {
 
       {/* Person details popup rendered outside the scrollable TV content */}
       {selectedPerson && createPortal((
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setSelectedPerson(null)}
-        >
-          <div
-            data-tv-modal
-            tabIndex={-1}
-            className="bg-dark-800 rounded-2xl p-6 max-w-md w-full border border-dark-700 shadow-2xl max-h-[80vh] overflow-y-auto"
-            onClick={e => e.stopPropagation()}
-          >
+        <Modal onClose={() => setSelectedPerson(null)} labelledBy="person-title" className="max-h-[80vh] overflow-y-auto">
             <div className="flex gap-4 mb-4">
               {selectedPerson.photo ? (
                 <img
@@ -2253,7 +2169,7 @@ export default function Details() {
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-bold text-white truncate">{selectedPerson.name}</h3>
+                <h3 id="person-title" className="text-lg font-bold text-white truncate">{selectedPerson.name}</h3>
                 {selectedPerson.character && (
                   <p className="text-sm text-primary-400 truncate">como {selectedPerson.character}</p>
                 )}
@@ -2283,13 +2199,11 @@ export default function Details() {
               data-tv-card
               tabIndex={0}
               onClick={() => setSelectedPerson(null)}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPerson(null))}
               className="w-full mt-4 btn-secondary py-2 text-sm"
             >
               Cerrar
             </button>
-          </div>
-        </div>
+        </Modal>
       ), document.body)}
     </div>
   )

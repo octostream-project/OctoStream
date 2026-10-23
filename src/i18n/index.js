@@ -55,12 +55,18 @@ export const addCustomTranslations = (lang, translations) => {
   Object.assign(customTranslations[lang], translations)
 }
 
+// Cacheado: t() se llama cientos de veces por pantalla y antes cada una
+// hacía una lectura síncrona de localStorage.
+let langCache = null
 export const getLanguage = () => {
-  return getItemSync('octostream_language') || navigator.language?.split('-')[0] || 'es'
+  if (langCache) return langCache
+  langCache = getItemSync('octostream_language') || navigator.language?.split('-')[0] || 'es'
+  return langCache
 }
 
 export const setLanguage = (lang) => {
   setItemSync('octostream_language', lang)
+  langCache = lang
   notifyLanguageChange()
 }
 

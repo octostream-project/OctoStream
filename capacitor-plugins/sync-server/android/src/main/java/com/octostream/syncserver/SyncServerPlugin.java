@@ -489,6 +489,8 @@ public class SyncServerPlugin extends Plugin {
             synchronized (SERVER_LOCK) {
                 if (server == null) {
                     server = new SyncHttpServer(PORT);
+                    // NanoHTTPD 2.3.1 aplica SOCKET_READ_TIMEOUT=5000 en cada
+                    // conexión — un cliente colgado no retiene el hilo.
                     server.start();
                     Log.i(TAG, "Sync server started on port " + PORT);
                 }
@@ -549,6 +551,13 @@ public class SyncServerPlugin extends Plugin {
         }
         boolean allow = call.getBoolean("allow", true);
         JSONObject pp = pendingPairs.remove(devId);
+        if (allow && pp == null) {
+            // Petición caducada o inexistente: crear un dispositivo
+            // emparejado con alias/huella vacíos sería un emparejamiento
+            // fantasma.
+            call.reject("pair request expired or unknown");
+            return;
+        }
         if (allow) {
             try {
                 JSONObject d = new JSONObject();

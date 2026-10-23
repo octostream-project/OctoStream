@@ -8,6 +8,7 @@ import BottomNav from './components/BottomNav.jsx'
 import Screensaver from './components/Screensaver.jsx'
 import RemotePlayReceiver from './components/RemotePlayReceiver.jsx'
 import UpdateChecker from './components/UpdateChecker.jsx'
+import LogoLoader from './components/LogoLoader.jsx'
 import { ToastHost } from './components/ui/Toast.jsx'
 import { useStore } from './store/useStore.js'
 import { isAndroidNative, isElectron } from './utils/platform.js'
@@ -220,6 +221,7 @@ export default function App() {
     if (!isAndroidNative()) return
     let paused = false
     let lifecycleToken = 0
+    let retryTimer = null
 
     const onPause = () => {
       paused = true
@@ -284,7 +286,10 @@ export default function App() {
         if (token === lifecycleToken && !paused) {
           setWarpBlocking(true)
           console.warn('[App] WARP reconnect failed:', e?.message)
-          setTimeout(() => { if (!paused) onResume() }, 15000)
+          // Timer referenciado: sin él disparaba onResume con closures
+          // obsoletas incluso tras el desmontaje del efecto.
+          clearTimeout(retryTimer)
+          retryTimer = setTimeout(() => { retryTimer = null; if (!paused) onResume() }, 15000)
         }
       }
     }
@@ -295,6 +300,7 @@ export default function App() {
     })
 
     return () => {
+      clearTimeout(retryTimer)
       pauseListener.then(listener => listener.remove()).catch(() => {})
     }
   }, [])
@@ -649,7 +655,7 @@ export default function App() {
 
           {/* Main content: scroll interno en las apps, normal en web */}
           <main className={`flex-1 ${appShell ? 'overflow-y-auto' : ''}`}>
-            <Suspense fallback={<div className="flex items-center justify-center h-64 text-white/60">Cargando...</div>}>
+            <Suspense fallback={<div className="flex items-center justify-center h-64"><LogoLoader size={64} /></div>}>
               {routesMounted && (
               <Routes>
                 <Route path="/" element={<Home />} />

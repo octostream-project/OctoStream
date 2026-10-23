@@ -30,11 +30,13 @@ export default function OctoLoader({ size = 32, className = '' }) {
       aria-label="Cargando"
     >
       <defs>
+        {/* Degradado dentro de la paleta primary (indigo) — antes
+            púrpura→cian rompía con el resto de la app. */}
         <linearGradient id={gid} x1="0%" y1="0%" x2="100%" y2="100%" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#a855f7" />
-          <stop offset="35%" stopColor="#d946ef" />
-          <stop offset="65%" stopColor="#3b82f6" />
-          <stop offset="100%" stopColor="#06b6d4" />
+          <stop offset="0%" stopColor="#a5b4fc" />
+          <stop offset="35%" stopColor="#818cf8" />
+          <stop offset="65%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#4f46e5" />
         </linearGradient>
         {/* Glow reproducible a cualquier tamaño */}
         <filter id={glow} x="-40%" y="-40%" width="180%" height="180%">

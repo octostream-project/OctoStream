@@ -5,6 +5,7 @@ import { embedStreamPlugin } from '../plugins/builtIn/index.js'
 import { pickLocalVideo, pickLocalSubtitle, playLocalFile } from '../utils/exoPlayer.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { Play, Link2, Plus, Trash2, Clapperboard, Usb, Subtitles, X } from 'lucide-react'
+import EmptyState from '../components/ui/EmptyState.jsx'
 
 const STORAGE_KEY = 'octostream_custom_streams'
 
@@ -263,11 +264,10 @@ export default function AddStream() {
         <h2 className="text-xl font-bold text-white mb-4">Enlaces guardados</h2>
 
         {customStreams.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <Clapperboard className="text-dark-600" size={48} />
-            <p className="text-dark-400">No tienes enlaces guardados</p>
-            <p className="text-dark-500 text-sm">Añade una URL arriba para empezar</p>
-          </div>
+          <EmptyState icon={Clapperboard} minH="min-h-[20vh]">
+            No tienes enlaces guardados
+            <span className="text-dark-500 text-sm">Añade una URL arriba para empezar</span>
+          </EmptyState>
         ) : (
           <div className="space-y-2">
             {customStreams.map(stream => (
@@ -284,13 +284,15 @@ export default function AddStream() {
                 </div>
                 <button
                   onClick={() => handlePlay(stream.url, stream.name)}
-                  className="btn-ghost p-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`Reproducir ${stream.name}`}
+                  className="btn-ghost p-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Play size={20} />
                 </button>
                 <button
                   onClick={() => handleDelete(stream.id)}
-                  className="btn-ghost p-2 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`Borrar ${stream.name}`}
+                  className="btn-ghost p-2 text-red-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Trash2 size={18} />
                 </button>

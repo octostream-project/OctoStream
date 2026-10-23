@@ -82,6 +82,14 @@ public class OctoVpnService extends VpnService {
         }
         startForegroundWithNotif();
         final String conf = confPath;
+        // Un segundo START con el túnel ya corriendo lanzaba otro runVpn:
+        // sobrescribía mMgmt/mProcess y el primer OctoMgmtThread quedaba
+        // bloqueado en accept() sin referencia para cerrarlo (hilo +
+        // LocalServerSocket fugados).
+        if (running) {
+            Log.i(TAG, "ovpn ya activo — ignorando START extra");
+            return START_STICKY;
+        }
         new Thread(() -> runVpn(conf), "ovpn-main").start();
         return START_STICKY;
     }

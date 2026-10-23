@@ -1,5 +1,6 @@
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../base.js'
 import { getItemSync } from '../../utils/storage.js'
+import { httpGetJson } from '../../utils/httpClient.js'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
@@ -204,15 +205,17 @@ async function tmdbFetch(endpoint, apiKey, params = {}, signal) {
   let inflight = tmdbInflight.get(key)
   if (!inflight) {
     inflight = (async () => {
-      const fetchSignal = AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined
-      const res = await fetch(url.toString(), { signal: fetchSignal })
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('API key de TMDB inválida')
-        throw new Error(`Error TMDB: ${res.status}`)
+      try {
+        // httpClient: timeout por defecto 20s + gate VPN/WARP en nativo —
+        // un fetch() crudo saldría por la IP física con el túnel caído.
+        const data = await httpGetJson(url.toString())
+        cacheSet(key, data)
+        return data
+      } catch (e) {
+        if (e?.httpStatus === 401) throw new Error('API key de TMDB inválida')
+        if (e?.httpStatus) throw new Error(`Error TMDB: ${e.httpStatus}`)
+        throw e
       }
-      const data = await res.json()
-      cacheSet(key, data)
-      return data
     })().finally(() => tmdbInflight.delete(key))
     tmdbInflight.set(key, inflight)
   }
