@@ -322,3 +322,12 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 - Añadir tests para `storage.js` y `useStore.js`.
 - Considerar `AbortController` para cancelar peticiones de plugins y HTTP.
 - Code-splitting adicional de iconos `lucide-react` (importar solo los usados).
+
+- Subtítulos IA (duck.ai): el menú nativo de subtítulos tiene "Subtítulos IA…"
+  que emite `aiSubsRequested{imdbId,season,episode}` → `src/utils/aiSubs.js`
+  decide: sub español en OpenSubtitles/Stremio → aplicar; otro idioma → traducir
+  con duck.ai chat; sin sub → `startAiAudio` (ExoPlayer headless x4 con
+  TeeAudioProcessor → WAVs 20 s vía `aiAudioChunk` → dictado duck.ai → cues
+  progresivos por `setExternalCues`). `src/utils/duckAi.js` implementa el
+  challenge VQD (eval del JS anti-bot en el DOM real), dictation y chat con
+  reintento ante 418/429. En directo no se ofrece.

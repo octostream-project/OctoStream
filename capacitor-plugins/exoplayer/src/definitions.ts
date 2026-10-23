@@ -136,6 +136,24 @@ export interface PlaybackState {
   errorCode?: number
 }
 
+export interface SetExternalCuesOptions {
+  /** [startMs, endMs] por cue, en el tiempo de la media */
+  times: Array<[number, number]>
+  /** Texto del cue (saltos de línea con \n) */
+  texts: string[]
+}
+
+/** Chunk de audio capturado por el tap headless (WAV 16 kHz mono, base64). */
+export interface AiAudioChunkEvent {
+  wav: string
+  startMs: number
+  endMs: number
+}
+
+export interface AiAudioErrorEvent {
+  message?: string
+}
+
 export interface PlayEmbedOptions {
   url: string
   title?: string
@@ -263,6 +281,19 @@ export interface ExoPlayerPlugin {
   /** Indica si hay un mini-player PiP reproduciendo. */
   isPipActive(): Promise<{ active: boolean }>
   /**
+   * Subtítulos IA: arranca el tap headless (segundo ExoPlayer sin ventana que
+   * decodifica el mismo stream a x4) que emite 'aiAudioChunk' con WAVs de
+   * `chunkSec` segundos (15-60, defecto 45). Rechaza si no hay reproducción
+   * o si es un directo.
+   */
+  startAiAudio(options?: { chunkSec?: number }): Promise<void>
+  /** Detiene el tap de audio IA. */
+  stopAiAudio(): Promise<void>
+  /** Aplica cues generados/traducidos en JS al overlay de subtítulos externo. */
+  setExternalCues(options: SetExternalCuesOptions): Promise<void>
+  /** Toast corto sobre el diálogo del player (feedback de procesos IA). */
+  osdMessage(options: { text: string }): Promise<void>
+  /**
    * Liveness del player nativo (player, PiP o diálogo de embed/resolver/carga).
    * Usado por el watchdog del WebView: si la app quedó oculta y esto devuelve
    * false, el player murió sin emitir 'closed' y hay que restaurar la UI.
@@ -281,6 +312,19 @@ export interface ExoPlayerPlugin {
     remove: () => void
   }> | { remove: () => void }
   addListener(eventName: 'castRequested', listener: (event: CastRequestedEvent) => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  /** El usuario eligió "Subtítulos IA…" en el menú nativo de subtítulos. */
+  addListener(eventName: 'aiSubsRequested', listener: () => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  addListener(eventName: 'aiAudioChunk', listener: (event: AiAudioChunkEvent) => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  addListener(eventName: 'aiAudioDone', listener: () => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  addListener(eventName: 'aiAudioError', listener: (event: AiAudioErrorEvent) => void): Promise<{
     remove: () => void
   }> | { remove: () => void }
 }

@@ -4,6 +4,7 @@
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative, isElectron } from './platform.js'
 import { sanitizeHttpUrl } from './sanitizeUrl.js'
+import { initAiSubs, disposeAiSubs } from './aiSubs.js'
 
 let stateListener = null
 let zapListener = null
@@ -43,12 +44,15 @@ let castRequestListener = null
 
 // Listen for playback state events from native ExoPlayer
 if (isAndroidNative()) {
+  initAiSubs()
   ExoPlayer.addListener('playbackState', (event) => {
     // 'position' llega cada 5s durante toda la reproducción — no loguearlo:
     // en Android cada console.log cruza el bridge a logcat (spam constante).
     if (event.state !== 'position') {
       console.log('[ExoPlayer] State:', event.state, event.message || '')
     }
+    // Al cerrar el player muere también el tap de audio IA y su sesión.
+    if (event.state === 'closed') disposeAiSubs()
     if (stateListener) stateListener(event)
   })
   ExoPlayer.addListener('channelZap', (event) => {

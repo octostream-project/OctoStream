@@ -1,5 +1,5 @@
 import { WebPlugin } from '@capacitor/core'
-import type { ExoPlayerPlugin, PlayOptions, PlayPipOptions, PickVideoResult, SeekOptions, RateOptions, PlayEmbedOptions, PlayEmbedResult, ResolveEmbedOptions, PlayRelayOptions, PlayRelayResult, SetChannelsOptions, SetEpisodesOptions, SwitchChannelOptions } from './definitions'
+import type { ExoPlayerPlugin, PlayOptions, PlayPipOptions, PickVideoResult, SeekOptions, RateOptions, PlayEmbedOptions, PlayEmbedResult, ResolveEmbedOptions, PlayRelayOptions, PlayRelayResult, SetChannelsOptions, SetEpisodesOptions, SwitchChannelOptions, SetExternalCuesOptions } from './definitions'
 
 export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async play(_options: PlayOptions): Promise<{ status: string }> {
@@ -95,4 +95,14 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async readTextFile(_options: { uri: string }): Promise<{ text: string }> {
     throw new Error('readTextFile is only available on Android')
   }
+
+  async startAiAudio(): Promise<void> {
+    throw new Error('AI subtitles are only available on Android')
+  }
+
+  async stopAiAudio(): Promise<void> {}
+
+  async setExternalCues(_options: SetExternalCuesOptions): Promise<void> {}
+
+  async osdMessage(_options: { text: string }): Promise<void> {}
 }

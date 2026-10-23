@@ -47,6 +47,7 @@ import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackParameters;
+import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.TrackSelectionOverride;
@@ -64,6 +65,9 @@ import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.audio.AudioSink;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
+import androidx.media3.exoplayer.audio.TeeAudioProcessor;
 import androidx.media3.exoplayer.dash.DashMediaSource;
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager;
 import androidx.media3.exoplayer.drm.DrmSessionManager;
@@ -107,11 +111,15 @@ import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -7298,11 +7306,28 @@ public class ExoPlayerPlugin extends Plugin {
         // online en el addon OpenSubtitles de Stremio (sin API key).
         final boolean canSearchOnline = mediaImdbId != null && !mediaImdbId.isEmpty();
         if (canSearchOnline) labels.add("Buscar en OpenSubtitles…");
+        // Subtítulos IA (duck.ai): JS decide entre traducir una pista
+        // existente o transcribir el audio con el tap headless. Solo en VOD —
+        // en directo los cues llegarían ~20 s tarde siempre.
+        final boolean canAiSubs = !"live".equals(playerMode);
+        if (canAiSubs) labels.add("Subtítulos IA…");
         showInPlayerMenu("Subtítulos", labels.toArray(new String[0]), 0, (selected) -> {
-            if (canSearchOnline && selected == labels.size() - 1) {
+            if (canAiSubs && selected == labels.size() - 1) {
+                JSObject ev = new JSObject();
+                ev.put("imdbId", mediaImdbId != null ? mediaImdbId : "");
+                ev.put("season", mediaSeason);
+                ev.put("episode", mediaEpisode);
+                ev.put("url", currentUrl != null ? currentUrl : "");
+                ev.put("position", player != null ? player.getCurrentPosition() : 0);
+                notifyListeners("aiSubsRequested", ev);
+                return;
+            }
+            if (canSearchOnline && selected == labels.size() - 1 - (canAiSubs ? 1 : 0)) {
                 searchOpenSubtitlesOnline();
                 return;
             }
+            // Pista elegida o "Desactivados": el tap IA ya no hace falta.
+            stopAiAudioTap();
             clearExternalCues();
             TrackSelectionParameters.Builder parameters = player.getTrackSelectionParameters().buildUpon()
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT);
@@ -7516,6 +7541,343 @@ public class ExoPlayerPlugin extends Plugin {
         mainHandler.removeCallbacks(extSubTicker);
         mainHandler.post(extSubTicker);
         Log.i(TAG, "External subtitle overlay active (" + times.size() + " cues)");
+    }
+
+    // ---------------- Subtítulos IA (duck.ai): tap de audio headless ---------
+    // Un segundo ExoPlayer sin ventana decodifica el MISMO stream (mismos
+    // headers/proxy vía lastDataSourceFactory) a velocidad x4 con un
+    // TeeAudioProcessor en su cadena de audio: el PCM sale a ~16 kHz mono en
+    // WAVs de 20 s que viajan a JS como eventos 'aiAudioChunk'. JS los manda
+    // al dictado de duck.ai, traduce y devuelve cues por setExternalCues.
+    // El tee recibe el PCM ANTES del procesador Sonic, así que la velocidad
+    // de reproducción no corrompe el audio transcrito.
+    private static final long AI_LOOKAHEAD_MS = 180_000; // máx. 3 min por delante
+    private ExoPlayer aiTapPlayer = null;
+    private PcmChunker aiPcmChunker = null;
+    private long aiLastMainPos = -1;
+    private ExecutorService aiEmitExecutor = null;
+
+    private final Runnable aiPaceTicker = new Runnable() {
+        @Override public void run() {
+            if (aiTapPlayer == null) return;
+            if (player != null) {
+                long pos = player.getCurrentPosition();
+                // Seek del usuario (>3 s de salto): el tap salta también y se
+                // descarta el PCM pendiente del tramo anterior.
+                if (aiLastMainPos >= 0 && Math.abs(pos - aiLastMainPos) > 3000) {
+                    try {
+                        aiTapPlayer.seekTo(pos);
+                        if (aiPcmChunker != null) aiPcmChunker.reset(pos);
+                    } catch (Exception ignored) {}
+                }
+                aiLastMainPos = pos;
+                long aheadMs = aiPcmChunker != null ? aiPcmChunker.positionMs() - pos : 0;
+                boolean want = aheadMs < AI_LOOKAHEAD_MS;
+                if (aiTapPlayer.getPlayWhenReady() != want) aiTapPlayer.setPlayWhenReady(want);
+            }
+            mainHandler.postDelayed(this, 1200);
+        }
+    };
+
+    private void startAiAudioTap(long startPosMs, int chunkSec) {
+        stopAiAudioTap();
+        if (lastDataSourceFactory == null || getContext() == null) return;
+        aiEmitExecutor = Executors.newSingleThreadExecutor();
+        final PcmChunker chunker = new PcmChunker(chunkSec, (startMs, endMs, wav) -> {
+            ExecutorService ex = aiEmitExecutor;
+            if (ex == null) return;
+            ex.execute(() -> {
+                JSObject e = new JSObject();
+                e.put("startMs", startMs);
+                e.put("endMs", endMs);
+                e.put("wav", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP));
+                notifyListeners("aiAudioChunk", e);
+            });
+        });
+        chunker.reset(startPosMs);
+        TeeAudioProcessor tee = new TeeAudioProcessor(new TeeAudioProcessor.AudioBufferSink() {
+            @Override public void flush(int sampleRateHz, int channelCount, int encoding) {
+                // Solo PCM 16-bit: con enableFloatOutput apagado es lo que
+                // produce la cadena por defecto.
+                chunker.configure(encoding == C.ENCODING_PCM_16BIT ? sampleRateHz : -1, channelCount);
+            }
+            @Override public void handleBuffer(ByteBuffer buffer) {
+                chunker.feed(buffer);
+            }
+        });
+        DefaultRenderersFactory rf = new NextRenderersFactory(getContext()) {
+            @Override
+            protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput,
+                                               boolean enableAudioOffload) {
+                return new DefaultAudioSink.Builder(context)
+                        .setAudioProcessors(new AudioProcessor[]{ tee })
+                        .build();
+            }
+        };
+        rf.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                .setEnableDecoderFallback(true);
+        aiPcmChunker = chunker;
+        ExoPlayer tap;
+        try {
+            tap = new ExoPlayer.Builder(getContext(), rf)
+                    // Sin handleAudioFocus: si el tap pidiera foco de audio,
+                    // el player principal recibiría AUDIOFOCUS_LOSS.
+                    .setAudioAttributes(AudioAttributes.DEFAULT, false)
+                    .build();
+        } catch (Exception e) {
+            aiPcmChunker = null;
+            return;
+        }
+        tap.setTrackSelectionParameters(tap.getTrackSelectionParameters().buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build());
+        tap.setVolume(0f);
+        tap.addListener(new Player.Listener() {
+            @Override public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_ENDED) {
+                    notifyListeners("aiAudioDone", new JSObject());
+                }
+            }
+            @Override public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                JSObject e = new JSObject();
+                e.put("message", error.getMessage() != null ? error.getMessage() : "error");
+                notifyListeners("aiAudioError", e);
+            }
+        });
+        try {
+            MediaSource src = buildMediaSource(currentUrl, currentStreamType,
+                    lastDataSourceFactory, null, null);
+            tap.setMediaSource(src);
+            tap.seekTo(startPosMs);
+            tap.setPlaybackParameters(new PlaybackParameters(4f));
+            tap.prepare();
+            tap.play();
+            aiTapPlayer = tap;
+            aiLastMainPos = -1;
+            mainHandler.post(aiPaceTicker);
+            Log.i(TAG, "AI audio tap started at " + startPosMs + "ms");
+        } catch (Exception e) {
+            try { tap.release(); } catch (Exception ignored) {}
+            JSObject err = new JSObject();
+            err.put("message", e.getMessage() != null ? e.getMessage() : "error al abrir la fuente");
+            notifyListeners("aiAudioError", err);
+        }
+    }
+
+    private void stopAiAudioTap() {
+        mainHandler.removeCallbacks(aiPaceTicker);
+        if (aiTapPlayer != null) {
+            try { aiTapPlayer.release(); } catch (Exception ignored) {}
+            aiTapPlayer = null;
+        }
+        aiPcmChunker = null;
+        aiLastMainPos = -1;
+        if (aiEmitExecutor != null) {
+            aiEmitExecutor.shutdownNow();
+            aiEmitExecutor = null;
+        }
+    }
+
+    @PluginMethod
+    public void startAiAudio(PluginCall call) {
+        if (player == null || currentUrl == null || currentUrl.isEmpty()) {
+            call.reject("no hay reproducción activa");
+            return;
+        }
+        if ("live".equals(playerMode)) {
+            call.reject("los subtítulos IA no están disponibles en directo");
+            return;
+        }
+        // Chunks grandes = menos peticiones de dictado (rate limit de duck.ai).
+        final int chunkSec = Math.max(15, Math.min(60, call.getInt("chunkSec", 45)));
+        mainHandler.post(() -> {
+            if (player != null) startAiAudioTap(player.getCurrentPosition(), chunkSec);
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopAiAudio(PluginCall call) {
+        mainHandler.post(this::stopAiAudioTap);
+        call.resolve();
+    }
+
+    // Cues generados/traducidos en JS: times = [[startMs,endMs],…],
+    // texts = ["línea 1\nlínea 2",…] — se pintan por el overlay externo.
+    @PluginMethod
+    public void setExternalCues(PluginCall call) {
+        JSONArray times = call.getArray("times");
+        JSONArray texts = call.getArray("texts");
+        if (times == null || texts == null || times.length() != texts.length()) {
+            call.reject("times/texts inválidos");
+            return;
+        }
+        List<long[]> t = new ArrayList<>();
+        List<String> x = new ArrayList<>();
+        for (int i = 0; i < times.length(); i++) {
+            JSONArray pair = times.optJSONArray(i);
+            if (pair == null || pair.length() < 2) continue;
+            long a = pair.optLong(0), b = pair.optLong(1);
+            if (b <= a) continue;
+            t.add(new long[]{ a, b });
+            x.add(texts.optString(i, ""));
+        }
+        mainHandler.post(() -> applyExternalCues(t, x));
+        call.resolve();
+    }
+
+    // Feedback visible mientras el diálogo del player está al frente (la UI
+    // web queda oculta): un Toast corto es la vía no bloqueante.
+    @PluginMethod
+    public void osdMessage(PluginCall call) {
+        String text = call.getString("text", "");
+        mainHandler.post(() -> {
+            Context ctx = getContext();
+            if (ctx != null && !text.isEmpty()) {
+                Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show();
+            }
+        });
+        call.resolve();
+    }
+
+    // PCM 16-bit → mono 16 kHz → WAV de CHUNK_S segundos. El remuestreo es
+    // lineal (suficiente para voz; el dictado no necesita Hi-Fi).
+    private static final class PcmChunker {
+        static final int OUT_RATE = 16000;
+
+        private final int chunkS;
+
+        interface Listener { void onChunk(long startMs, long endMs, byte[] wav); }
+
+        private final Listener listener;
+        private int inRate = OUT_RATE;
+        private int inCh = 1;
+        private long baseMs = 0;
+        private long inSamples = 0;
+        private long chunkStartSample = 0;
+        private byte[] carry = new byte[8];
+        private int carryLen = 0;
+        private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+        private double outPos = 0;
+        private short prev = 0;
+        private boolean havePrev = false;
+
+        PcmChunker(int chunkSec, Listener l) {
+            chunkS = Math.max(5, chunkSec);
+            listener = l;
+        }
+
+        void configure(int rate, int ch) {
+            inRate = rate > 0 ? rate : -1; // -1 = formato no soportado: descartar
+            inCh = Math.max(1, Math.min(8, ch));
+            if (carry.length < 2 * inCh) carry = new byte[2 * inCh];
+        }
+
+        void reset(long posMs) {
+            baseMs = posMs;
+            inSamples = 0;
+            chunkStartSample = 0;
+            carryLen = 0;
+            out.reset();
+            outPos = 0;
+            havePrev = false;
+        }
+
+        long positionMs() {
+            return inRate > 0 ? baseMs + inSamples * 1000L / inRate : baseMs;
+        }
+
+        void feed(ByteBuffer buf) {
+            if (inRate <= 0) { buf.position(buf.limit()); return; }
+            buf.order(ByteOrder.LITTLE_ENDIAN);
+            final int frameBytes = 2 * inCh;
+            while (buf.hasRemaining() || (carryLen > 0 && carryLen == frameBytes)) {
+                if (carryLen > 0) {
+                    while (carryLen < frameBytes && buf.hasRemaining()) carry[carryLen++] = buf.get();
+                    if (carryLen < frameBytes) return;
+                    emitFrame(carry, 0);
+                    carryLen = 0;
+                } else if (buf.remaining() < frameBytes) {
+                    while (buf.hasRemaining()) carry[carryLen++] = buf.get();
+                    return;
+                } else {
+                    int sum = 0;
+                    for (int c = 0; c < inCh; c++) sum += buf.getShort();
+                    emitMono((short) (sum / inCh));
+                }
+            }
+        }
+
+        private void emitFrame(byte[] f, int off) {
+            int sum = 0;
+            for (int c = 0; c < inCh; c++) {
+                int v = (f[off + 2 * c] & 0xFF) | (f[off + 2 * c + 1] << 8);
+                sum += (short) v;
+            }
+            emitMono((short) (sum / inCh));
+        }
+
+        private void emitMono(short s) {
+            // Interpolación lineal entre el sample anterior y el actual en las
+            // posiciones de salida que caen dentro de este intervalo.
+            while (outPos <= inSamples) {
+                int v;
+                if (havePrev) {
+                    double t = outPos - (inSamples - 1);
+                    v = (int) Math.round(prev + (s - prev) * t);
+                    v = Math.max(-32768, Math.min(32767, v));
+                } else {
+                    v = s;
+                }
+                out.write(v & 0xFF);
+                out.write((v >> 8) & 0xFF);
+                outPos += (double) inRate / OUT_RATE;
+            }
+            prev = s;
+            havePrev = true;
+            inSamples++;
+            if (inSamples - chunkStartSample >= chunkS * (long) inRate) flushChunk();
+        }
+
+        private void flushChunk() {
+            if (out.size() == 0) return;
+            long start = baseMs + chunkStartSample * 1000L / inRate;
+            long end = baseMs + inSamples * 1000L / inRate;
+            chunkStartSample = inSamples;
+            listener.onChunk(start, end, wavBytes(out.toByteArray()));
+            out.reset();
+        }
+
+        private static byte[] wavBytes(byte[] pcm) {
+            byte[] w = new byte[44 + pcm.length];
+            System.arraycopy(pcm, 0, w, 44, pcm.length);
+            int byteRate = OUT_RATE * 2;
+            int blockAlign = 2;
+            w[0] = 'R'; w[1] = 'I'; w[2] = 'F'; w[3] = 'F';
+            putInt(w, 4, 36 + pcm.length);
+            w[8] = 'W'; w[9] = 'A'; w[10] = 'V'; w[11] = 'E';
+            w[12] = 'f'; w[13] = 'm'; w[14] = 't'; w[15] = ' ';
+            putInt(w, 16, 16);          // tamaño fmt
+            putShort(w, 20, (short) 1); // PCM
+            putShort(w, 22, (short) 1); // mono
+            putInt(w, 24, OUT_RATE);
+            putInt(w, 28, byteRate);
+            putShort(w, 32, (short) blockAlign);
+            putShort(w, 34, (short) 16); // bits
+            w[36] = 'd'; w[37] = 'a'; w[38] = 't'; w[39] = 'a';
+            putInt(w, 40, pcm.length);
+            return w;
+        }
+
+        private static void putInt(byte[] b, int off, int v) {
+            b[off] = (byte) (v & 0xFF); b[off + 1] = (byte) ((v >> 8) & 0xFF);
+            b[off + 2] = (byte) ((v >> 16) & 0xFF); b[off + 3] = (byte) ((v >> 24) & 0xFF);
+        }
+
+        private static void putShort(byte[] b, int off, short v) {
+            b[off] = (byte) (v & 0xFF); b[off + 1] = (byte) ((v >> 8) & 0xFF);
+        }
     }
 
     private void clearExternalCues() {
@@ -9292,6 +9654,8 @@ public class ExoPlayerPlugin extends Plugin {
         // Y el relay local (WebView oculto + servidor loopback) si estaba
         // sirviendo media de un embed con CDN bloqueado.
         stopEmbedRelay();
+        // El tap de audio IA (segundo ExoPlayer headless) muere con el player.
+        stopAiAudioTap();
         pendingSeekMs = 0;
         if (embedDialog != null) {
             try { embedDialog.dismiss(); } catch (Exception ignored) {}
