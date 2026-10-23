@@ -399,21 +399,32 @@ public class CloudProxyPlugin extends Plugin {
                 // Parar el proceso viejo fuera del lock y del hilo del bridge:
                 // waitFor(5s) aquí es tolerable (hilo propio), no en el caller.
                 if (needsStop) stopAether();
-                // Fallback de protocolo: el data-plane QUIC de MASQUE es
-                // filtrado por algunos ISP (handshake ok, tráfico descartado
-                // → scan de 120s sin gateway). Si el protocolo preferido no
-                // levanta los proxies a tiempo, se reintenta con el otro
-                // (WireGuard clásico valida en ~10s cuando UDP pasa).
-                String first = preferredProtocol;
-                String second = "masque".equals(first) ? "wg" : "masque";
-                try {
-                    startAether(first);
-                } catch (Exception firstErr) {
-                    Log.w(TAG, "Aether " + first + " failed (" + firstErr.getMessage() + ") — retrying with " + second);
-                    stopAether();
-                    startAether(second);
-                    preferredProtocol = second;
+                // Fallback de protocolos: el data-plane QUIC de MASQUE es
+                // filtrado/ahogado por algunos ISP. Cadena: masque (UDP h3)
+                // → masque-h2 (TCP, parece HTTPS) → wg. Se empieza por el
+                // preferido y se recorre el resto en orden; el último que
+                // funcione queda como preferido para la sesión.
+                String[] chain = { "masque", "masque-h2", "wg" };
+                int startIdx = 0;
+                for (int i = 0; i < chain.length; i++) {
+                    if (chain[i].equals(preferredProtocol)) { startIdx = i; break; }
                 }
+                Exception lastErr = null;
+                boolean started = false;
+                for (int i = 0; i < chain.length && !started; i++) {
+                    String proto = chain[(startIdx + i) % chain.length];
+                    try {
+                        startAether(proto);
+                        started = true;
+                        preferredProtocol = proto;
+                    } catch (Exception err) {
+                        lastErr = err;
+                        Log.w(TAG, "Aether " + proto + " failed (" + err.getMessage() + ") — trying next");
+                        stopAether();
+                    }
+                }
+                if (!started) throw lastErr != null ? lastErr
+                        : new RuntimeException("no aether protocol worked");
                 Process startedProcess = aetherProcess;
                 boolean cancelled;
                 synchronized (PROCESS_LOCK) {
@@ -935,8 +946,12 @@ public class CloudProxyPlugin extends Plugin {
 
         // Environment variables for Aether - optimized for battery
         Map<String, String> env = builder.environment();
-        env.put("AETHER_PROTOCOL", protocol);
-        boolean isMasque = "masque".equals(protocol);
+        // "masque-h2" = MASQUE sobre HTTP/2 (TCP 443): parece HTTPS normal y
+        // sobrevive a redes que bloquean o ahogan UDP/QUIC. El protocolo que
+        // recibe el binario sigue siendo "masque".
+        boolean isH2 = "masque-h2".equals(protocol);
+        boolean isMasque = isH2 || "masque".equals(protocol);
+        env.put("AETHER_PROTOCOL", isH2 ? "masque" : protocol);
         // ironclad: full tunnel + real HTTP request per candidate (most secure scan)
         env.put("AETHER_SCAN", "ironclad");
         env.put("AETHER_IP", "v4");
@@ -949,7 +964,11 @@ public class CloudProxyPlugin extends Plugin {
         env.put("TMPDIR", getContext().getCacheDir().getAbsolutePath());
         // Quick reconnect to reuse last known good endpoint
         env.put("AETHER_QUICK_RECONNECT", "1");
-        if (isMasque) {
+        if (isH2) {
+            // Transporte HTTP/2 sobre TCP con peer fijado (sin scan).
+            env.put("AETHER_MASQUE_HTTP2", "1");
+            env.put("AETHER_MASQUE_H2_PEER", "162.159.198.1:443");
+        } else if (isMasque) {
             // Endpoint MASQUE fijado para saltarse el scan de 120s — solo vale
             // para QUIC/443; en WG los endpoints son otros puertos (908…).
             env.put("AETHER_PEER", "162.159.198.1:443");
@@ -1070,8 +1089,9 @@ public class CloudProxyPlugin extends Plugin {
      * repetidamente (racha de "tunnel ended/failed"), los proxies locales
      * quedan como listeners zombis — aceptan CONNECTs que nunca llegan al
      * upstream. El fallback masque→wg del arranque no cubre este caso, así
-     * que aquí se reinicia aether con el otro protocolo. Solo se escala
-     * DESDE masque hacia wg — si wg también tormenta, no se hace ping-pong.
+     * que aquí se reinicia aether con el siguiente protocolo de la cadena
+     * (masque → masque-h2 → wg). En wg no hay más escalones — si él también
+     * tormenta se queda reintentando internamente, sin ping-pong.
      */
     private void onTunnelDied(Process process) {
         boolean ours;
@@ -1085,13 +1105,17 @@ public class CloudProxyPlugin extends Plugin {
         if (now - lastTunnelFailAt > 60000) tunnelFailStreak = 0;
         lastTunnelFailAt = now;
         tunnelFailStreak++;
-        // ~5 muertes en MASQUE (~10s de túnel inválido) bastan para rendirse.
-        if (tunnelFailStreak < 5 || protocolSwitching
-                || !"masque".equals(currentProtocol)) return;
+        // ~5 muertes (~10s de túnel inválido) bastan para rendirse.
+        if (tunnelFailStreak < 5 || protocolSwitching) return;
+        // Siguiente escalón: masque → masque-h2 (TCP, sobrevive a redes que
+        // bloquean UDP/QUIC) → wg. En wg no hay más adonde escalar.
+        final String next = "masque".equals(currentProtocol) ? "masque-h2"
+                : "masque-h2".equals(currentProtocol) ? "wg" : null;
+        if (next == null) return;
         protocolSwitching = true;
-        preferredProtocol = "wg";
-        Log.w(TAG, "MASQUE tunnel can't hold (" + tunnelFailStreak
-                + " deaths) — restarting aether with wg");
+        preferredProtocol = next;
+        Log.w(TAG, currentProtocol + " tunnel can't hold (" + tunnelFailStreak
+                + " deaths) — restarting aether with " + next);
         new Thread(() -> {
             try {
                 synchronized (PROCESS_LOCK) {
@@ -1101,18 +1125,18 @@ public class CloudProxyPlugin extends Plugin {
                     connecting = true;
                 }
                 stopAether();
-                startAether("wg");
+                startAether(next);
                 synchronized (PROCESS_LOCK) {
                     connected = aetherProcess != null && aetherProcess.isAlive();
                     connecting = false;
                 }
                 if (connected) {
-                    Log.i(TAG, "Aether restarted with wg after MASQUE storm");
+                    Log.i(TAG, "Aether restarted with " + next + " after tunnel storm");
                 } else {
                     markDisconnected();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Protocol switch to wg failed: " + e.getMessage());
+                Log.e(TAG, "Protocol switch to " + next + " failed: " + e.getMessage());
                 synchronized (PROCESS_LOCK) { connecting = false; }
                 markDisconnected();
             } finally {
