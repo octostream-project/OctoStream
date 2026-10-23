@@ -1412,6 +1412,7 @@ ipcMain.handle('player:volume', (_e, arg = {}) => { if (Number.isFinite(arg.v)) 
 ipcMain.handle('player:mute', (_e, arg = {}) => { getMpv()?.setMute(arg.m) })
 ipcMain.handle('player:text', (_e, arg = {}) => { getMpv()?.showText(arg.text) })
 ipcMain.handle('player:sub-delay', (_e, arg = {}) => { if (Number.isFinite(arg.sec)) getMpv()?.setSubDelay(arg.sec) })
+ipcMain.handle('player:sub-style', (_e, arg = {}) => { getMpv()?.setSubStyle(arg) })
 ipcMain.handle('player:sub-off', () => { getMpv()?.subOff() })
 ipcMain.handle('player:set-channels', (_e, arg = {}) => { getMpv()?.setChannels(arg.channels, arg.channelIndex) })
 // Input y estado para el OSC cuando mpv está embebido en la ventana.

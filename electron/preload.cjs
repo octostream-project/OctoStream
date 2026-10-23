@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('octostream', {
     setMute: (m) => ipcRenderer.invoke('player:mute', { m }),
     showText: (text) => ipcRenderer.invoke('player:text', { text }),
     setSubDelay: (sec) => ipcRenderer.invoke('player:sub-delay', { sec }),
+    subStyle: (arg) => ipcRenderer.invoke('player:sub-style', arg),
     subOff: () => ipcRenderer.invoke('player:sub-off'),
     setChannels: (arg) => ipcRenderer.invoke('player:set-channels', arg),
     addSubtitle: (arg) => ipcRenderer.invoke('player:add-sub', arg),

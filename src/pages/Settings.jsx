@@ -16,6 +16,7 @@ import { checkForUpdate } from '../utils/appUpdater.js'
 import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
 import { setItemSync, removeItemSync } from '../utils/storage.js'
 import { invalidateLangPriority } from '../utils/streamMeta.js'
+import { getSubStyle, saveSubStyle } from '../utils/subStyle.js'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -84,6 +85,12 @@ export default function Settings() {
   const [osApiKey, setOsApiKey] = useState(localStorage.getItem('octostream_opensubs_apikey') || '')
   const [osSaved, setOsSaved] = useState(false)
   const [osError, setOsError] = useState('')
+  const [subStyle, setSubStyle] = useState(() => getSubStyle())
+  const updSubStyle = patch => {
+    const next = { ...subStyle, ...patch }
+    setSubStyle(next)
+    saveSubStyle(patch)
+  }
 
   // Catálogos temáticos externos (MDBList / Trakt)
   const [mdbApiKey, setMdbApiKey] = useState(localStorage.getItem('octostream_mdblist_key') || '')
@@ -844,6 +851,101 @@ export default function Settings() {
                 Ir a opensubtitles.com
                 <ExternalLink size={14} />
               </a>
+            </div>
+          </div>
+
+          {/* Estilo de subtítulos: se aplica en caliente al SubtitleView
+              nativo (Android) o a mpv (Electron). */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Captions className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Estilo de subtítulos</h3>
+                <p className="text-dark-400 text-sm">
+                  Tamaño, color, fondo y posición — se aplica en el momento
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Tamaño</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[[0.75, '75%'], [1.0, '100%'], [1.25, '125%'], [1.5, '150%']].map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => updSubStyle({ scale: v })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.scale === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Color del texto</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[['#FFFFFF', 'Blanco'], ['#FFE135', 'Amarillo'], ['#33FFFF', 'Cian'], ['#7CFC00', 'Verde'], ['#FF9E3D', 'Naranja']].map(([hex, label]) => (
+                    <button
+                      key={hex}
+                      onClick={() => updSubStyle({ color: hex })}
+                      className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 ${
+                        subStyle.color === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ backgroundColor: hex }} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Fondo</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[['#00000000', 'Sin fondo'], ['#80000000', 'Semi'], ['#FF000000', 'Opaco']].map(([hex, label]) => (
+                    <button
+                      key={hex}
+                      onClick={() => updSubStyle({ bg: hex })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.bg === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Posición vertical</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[[0.02, 'Bajo'], [0.08, 'Medio'], [0.16, 'Alto']].map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => updSubStyle({ bottom: v })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.bottom === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vista previa aproximada del resultado */}
+              <div className="bg-black rounded-lg h-20 flex items-end justify-center pb-2 overflow-hidden">
+                <span
+                  className="px-2 rounded leading-snug text-center"
+                  style={{
+                    color: subStyle.color,
+                    backgroundColor: subStyle.bg,
+                    fontSize: `${Math.round(13 * subStyle.scale)}px`,
+                    marginBottom: `${Math.round(subStyle.bottom * 100)}px`,
+                    textShadow: '0 0 3px #000, 0 0 3px #000',
+                  }}
+                >Así se verán los subtítulos</span>
+              </div>
             </div>
           </div>
 

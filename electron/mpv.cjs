@@ -421,6 +421,15 @@ class MpvSession {
     if (this.running) this._cmd('sub-add', filePath, 'select', label || '', lang || '').catch(() => {})
   }
   setSubDelay(sec) { this.running && this._cmd('set_property', 'sub-delay', sec).catch(() => {}) }
+  // Estilo de subtítulos desde Ajustes: sub-scale, sub-color/sub-back-color
+  // (#AARRGGBB) y sub-pos (0-100, posición vertical desde arriba).
+  setSubStyle({ scale, color, backColor, pos } = {}) {
+    if (!this.running) return
+    if (Number.isFinite(scale)) this._cmd('set_property', 'sub-scale', Math.max(0.4, Math.min(2.5, scale))).catch(() => {})
+    if (color) this._cmd('set_property', 'sub-color', String(color)).catch(() => {})
+    if (backColor) this._cmd('set_property', 'sub-back-color', String(backColor)).catch(() => {})
+    if (Number.isFinite(pos)) this._cmd('set_property', 'sub-pos', Math.max(0, Math.min(100, pos))).catch(() => {})
+  }
   subOff() { this.running && this._cmd('set_property', 'sid', 'no').catch(() => {}) }
   // Input reenviado por el renderer cuando mpv está embebido (--wid): el
   // hijo X11 no recibe teclado/ratón, todo entra como comandos.

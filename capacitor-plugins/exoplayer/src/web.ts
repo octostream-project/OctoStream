@@ -105,4 +105,6 @@ export class ExoPlayerWeb extends WebPlugin implements ExoPlayerPlugin {
   async setExternalCues(_options: SetExternalCuesOptions): Promise<void> {}
 
   async osdMessage(_options: { text: string }): Promise<void> {}
+
+  async setSubtitleStyle(_options: { scale?: number; color?: string; bg?: string; bottom?: number }): Promise<void> {}
 }

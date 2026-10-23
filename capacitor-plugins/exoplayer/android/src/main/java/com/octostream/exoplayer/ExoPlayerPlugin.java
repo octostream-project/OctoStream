@@ -4479,6 +4479,7 @@ public class ExoPlayerPlugin extends Plugin {
         playerView.setPlayer(player);
         // La pantalla no debe dormirse mientras se reproduce vídeo.
         playerView.setKeepScreenOn(true);
+        applySubtitleStyle();
 
         // Si hay un mini-player PiP activo, se re-ancla dentro del diálogo y
         // el principal queda muteado (el mini conserva el audio).
@@ -7724,6 +7725,41 @@ public class ExoPlayerPlugin extends Plugin {
             x.add(texts.optString(i, ""));
         }
         mainHandler.post(() -> applyExternalCues(t, x));
+        call.resolve();
+    }
+
+    // ---- Estilo de subtítulos (Ajustes → Subtítulos): afecta tanto a las
+    // pistas internas/externas como al overlay de cues, todo pasa por el
+    // SubtitleView del PlayerView.
+    private float subStyleScale = 1.0f;
+    private int subStyleColor = Color.WHITE;
+    private int subStyleBg = 0x80000000;       // negro semi
+    private float subStyleBottom = 0.05f;      // fracción de alto desde abajo
+
+    private static int parseColorOr(String s, int fallback) {
+        try { return Color.parseColor(s); } catch (Exception e) { return fallback; }
+    }
+
+    private void applySubtitleStyle() {
+        if (playerView == null) return;
+        androidx.media3.ui.SubtitleView sv = playerView.getSubtitleView();
+        if (sv == null) return;
+        // 0.0533 es la fracción por defecto de Media3.
+        sv.setFractionalTextSize(0.0533f * subStyleScale);
+        sv.setStyle(new androidx.media3.ui.CaptionStyleCompat(
+                subStyleColor, subStyleBg, Color.TRANSPARENT,
+                androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                Color.BLACK, null));
+        sv.setBottomPaddingFraction(subStyleBottom);
+    }
+
+    @PluginMethod
+    public void setSubtitleStyle(PluginCall call) {
+        subStyleScale = (float) Math.max(0.4, Math.min(2.5, call.getDouble("scale", 1.0)));
+        subStyleColor = parseColorOr(call.getString("color"), Color.WHITE);
+        subStyleBg = parseColorOr(call.getString("bg"), 0x80000000);
+        subStyleBottom = (float) Math.max(0.0, Math.min(0.4, call.getDouble("bottom", 0.05)));
+        applySubtitleStyle();
         call.resolve();
     }
 

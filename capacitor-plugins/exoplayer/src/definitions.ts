@@ -293,6 +293,9 @@ export interface ExoPlayerPlugin {
   setExternalCues(options: SetExternalCuesOptions): Promise<void>
   /** Toast corto sobre el diálogo del player (feedback de procesos IA). */
   osdMessage(options: { text: string }): Promise<void>
+  /** Estilo del SubtitleView: scale (0.4-2.5), color/bg '#RRGGBB'/'#AARRGGBB',
+   *  bottom = fracción de alto desde abajo (0-0.4). */
+  setSubtitleStyle(options: { scale?: number; color?: string; bg?: string; bottom?: number }): Promise<void>
   /**
    * Liveness del player nativo (player, PiP o diálogo de embed/resolver/carga).
    * Usado por el watchdog del WebView: si la app quedó oculta y esto devuelve
