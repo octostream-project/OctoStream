@@ -222,6 +222,31 @@ async function unlockLinkRemote(linkUrl) {
   }
 }
 
+// /magnet/instant: disponibilidad inmediata por infoHash/magnet, sin subir
+// nada a la cuenta. Devuelve Map<infoHash, boolean> o null si la API falla —
+// el caller decide entonces no marcar nada (mejor no ocultar fuentes buenas).
+export async function instantAvailability(hashes) {
+  const hs = [...new Set((hashes || []).map(h => String(h || '').toLowerCase()).filter(h => /^[0-9a-f]{32,40}$/.test(h)))]
+  if (!hs.length || !isAlldebridEnabled()) return null
+  try {
+    try { await waitForVpnTunnel(20000) } catch {}
+    const body = hs.map(h => `magnets[]=${encodeURIComponent(`magnet:?xt=urn:btih:${h}`)}`).join('&')
+    const url = apiUrl('/magnet/instant', {}, API_BASE_41)
+    const data = await httpPostJson(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' }, true)
+    if (data?.status !== 'success' || !Array.isArray(data?.data?.magnets)) return null
+    const out = new Map()
+    for (const m of data.data.magnets) {
+      const h = String(m?.hash || m?.magnet || '').toLowerCase()
+      const match = h.match(/[0-9a-f]{32,40}/)
+      if (match) out.set(match[0], m?.instant === true)
+    }
+    return out
+  } catch (e) {
+    console.warn('[AllDebrid] instant check failed:', e?.message)
+    return null
+  }
+}
+
 // Upload a magnet link and return the magnet ID
 export async function uploadMagnet(magnetUrl) {
   try {

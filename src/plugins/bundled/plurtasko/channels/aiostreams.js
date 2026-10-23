@@ -196,9 +196,10 @@ export const aiostreams = {
         const s = list[0]
         console.log('[aiostreams] sample:', String(s.description || s.title || s.name || '').slice(0, 300))
       }
-      const mapped = list.map(stremioToStream)
-      _processingCount = mapped.filter(s => s && s.processing).length
-      return mapped.filter(Boolean)
+      let mapped = list.map(stremioToStream).filter(Boolean)
+      mapped = await applyDebridAvailability(mapped, signal)
+      _processingCount = mapped.filter(s => s.processing).length
+      return mapped
     }
 
     const url = `${cfg.instance}/api/v1/search?type=${stremioType}&id=${encodeURIComponent(id)}&requiredFields=parsedFile`
@@ -219,6 +220,34 @@ export const aiostreams = {
 // para saber si la ficha debe re-pedir la lista aunque esté vacía.
 let _processingCount = 0
 export function aioProcessingCount() { return _processingCount }
+
+// Disponibilidad real en AllDebrid: el formatter de la instancia puede no
+// marcar el estado de caché — sin este check las fuentes no listas llegan
+// como "reproducibles" y al pulsarlas la instancia sirve su vídeo
+// placeholder de "not cached". /magnet/instant consulta por infoHash sin
+// subir nada; los no-instantáneos pasan a entrada "descargando".
+// Si la API falla devuelve la lista intacta (mejor no ocultar fuentes).
+async function applyDebridAvailability(streams, signal) {
+  const { isAlldebridEnabled, instantAvailability } = await import('../../alldebrid.js')
+  if (!isAlldebridEnabled() || signal?.aborted) return streams
+  const hashes = streams.map(s => s._infoHash).filter(Boolean)
+  if (!hashes.length) return streams
+  const avail = await instantAvailability(hashes)
+  if (!avail) return streams
+  return streams.map(s => {
+    if (!s._infoHash || s.processing) return s
+    if (avail.get(s._infoHash) !== false) {
+      // Confirmado instantáneo → marcar como cacheado aunque el
+      // formatter no lo dijera (chip ⚡).
+      return avail.has(s._infoHash) ? { ...s, cached: true } : s
+    }
+    // Solo entradas con URL http: son las que sirven el vídeo "not cached"
+    // de la instancia. Los magnets puros (P2P) quedan jugables — OctoStream
+    // puede reproducirlos por torrent local aunque el debrid no los tenga.
+    if (!/^https?:/i.test(String(s.url || ''))) return s
+    return { ...s, processing: true, url: undefined, streamType: undefined, cached: false }
+  })
+}
 
 // ── Respuesta protocolo Stremio ────────────────────────────────────────────
 // streams[]: {name, title|description, url?, infoHash?, fileIdx?,
@@ -327,6 +356,9 @@ function stremioToStream(s) {
     stream.cached = meta.cached
     stream.size = meta.size || undefined
     stream.seeds = meta.seeds || undefined
+    stream._infoHash = hash
+    stream._magnet = magnet
+    stream._triggerUrl = okUrl || undefined
     stream.pluginName = 'AIOStreams'
     stream.channelName = 'AIOStreams'
     return stream
@@ -345,6 +377,9 @@ function stremioToStream(s) {
     headers,
     size: meta.size || undefined,
     seeds: meta.seeds || undefined,
+    _infoHash: validHash ? hash : undefined,
+    _magnet: magnet || undefined,
+    _triggerUrl: okUrl,
     cached: meta.cached ?? (Boolean(s.behaviorHints?.cached) || undefined),
     pluginName: 'AIOStreams',
     channelName: 'AIOStreams',
