@@ -1,5 +1,0 @@
-﻿Subtitulos IA: OCR de texto en pantalla (carteles, mensajes de movil, rotulos quemados). El tap headless ahora puede decodificar video a un ImageReader; se muestrea cada ~3s de media, se deduplica por hash de luminancia y los fotogramas distintos salen como JPEG base64 (evento aiVideoFrame). JS los manda al modelo vision de duck.ai (gpt-6-luna, fallback haiku/5.4-mini) para leer+traducir el texto visible y lo pinta como cues. Cola latest-wins, tope de 40 fotogramas/sesion y apagado tras 3 errores seguidos.
-
-Generated with [Devin](https://devin.ai)
-
-Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
