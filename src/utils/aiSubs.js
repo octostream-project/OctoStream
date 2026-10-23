@@ -116,10 +116,42 @@ const TRANSLATE_PROMPT = arr =>
   'comentarios, numeración ni formato markdown. Responde SOLO con el array JSON traducido.\n' +
   JSON.stringify(arr)
 
-// Fallback de traducción sin IA: endpoint gtx de Google Translate (el mismo
-// que usa la app/web de Google — gratis y sin key). Los textos viajan
-// numerados "N. línea" porque gtx preserva los índices de línea, así se
-// pueden volver a cortar tras la traducción.
+// Fallbacks de traducción sin duck.ai (en orden de privacidad):
+// 1) Lingva — frontend privado de Google Translate (sin tracking). Varias
+//    instancias públicas porque se caen a menudo: cuando Google las bloquea
+//    devuelven 200 con el texto SIN traducir → se detecta comparando con la
+//    entrada si el idioma detectado no era ya español.
+// 2) Google gtx (el endpoint de la web de Google) como última red.
+const LINGVA_MIRRORS = [
+  'https://lingva.ml',
+  'https://translate.plausibility.cloud',
+  'https://lingva.lunar.icu',
+]
+
+async function lingvaTranslateLines(lines, signal) {
+  const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
+  let lastErr = null
+  for (const base of LINGVA_MIRRORS) {
+    try {
+      const data = await httpGetJson(
+        `${base}/api/v1/auto/es/${encodeURIComponent(numbered)}`, {}, signal)
+      const merged = String(data?.translation || '').trim()
+      if (!merged) continue
+      // Eco roto de Lingva: fuente detectada no-es pero salida == entrada.
+      if (data?.info?.detectedSource && data.info.detectedSource !== 'es' &&
+          normVision(merged.replace(/^\s*\d+[.)]\s*/gm, '')) === normVision(lines.join('\n'))) {
+        continue
+      }
+      const out = merged.split('\n').map(l => l.replace(/^\s*\d+[.)]\s*/, '').trim())
+      return out.length === lines.length ? out : [merged]
+    } catch (e) {
+      if (e?.name === 'AbortError') throw e
+      lastErr = e
+    }
+  }
+  throw lastErr || new Error('Lingva sin instancia')
+}
+
 async function gtxTranslateLines(lines, signal) {
   const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
   const url = 'https://translate.googleapis.com/translate_a/single' +
@@ -155,7 +187,10 @@ async function translateLines(lines, signal) {
     return lines
   } catch (e) {
     if (e?.name === 'AbortError') throw e
-    // duck.ai saturado/cortado: Google gtx como red de seguridad.
+    // duck.ai saturado/cortado → Lingva (privado) → Google gtx → original.
+    try {
+      return await lingvaTranslateLines(lines, signal)
+    } catch { /* instancias caídas: sigue gtx */ }
     try {
       return await gtxTranslateLines(lines, signal)
     } catch {
