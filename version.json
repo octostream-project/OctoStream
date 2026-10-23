@@ -1,18 +1,18 @@
 {
-  "versionCode": 2096,
-  "versionName": "2.09.6",
+  "versionCode": 2097,
+  "versionName": "2.09.7",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.6/octostream-2.09.6-arm64-v8a.apk",
-  "sha256": "693e3fca3e830eaad5bc0fa6f91cfaee8dfc8dc51b8be605c97966414e39554c",
-  "notes": "Subtitulos IA con duck.ai (transcripcion y traduccion a castellano) y estilo de subtitulos configurable.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.7/octostream-2.09.7-arm64-v8a.apk",
+  "sha256": "e2ea23ac74e741f82b20cccc86bbbcb209ed7551a49dd7c8f4d6efab02fc81aa",
+  "notes": "Subtitulos IA: fix de cues invisibles, OCR on-device de texto en pantalla (ML Kit) y traduccion con fallback privado Lingva+gtx.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.6/octostream-2.09.6-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.6/octostream-2.09.6-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.6/octostream-2.09.6-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.7/octostream-2.09.7-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.7/octostream-2.09.7-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.7/octostream-2.09.7-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "693e3fca3e830eaad5bc0fa6f91cfaee8dfc8dc51b8be605c97966414e39554c",
-    "armeabi-v7a": "4e82e870d6dc48343ce629897aa68035d5b8328cd51c7c6d976012602769bcbf",
-    "x86_64": "46e7afbd4e54b2de79a7e782cf17b7cf042fe73194e4b451751703dbbefe7089"
+    "arm64-v8a": "e2ea23ac74e741f82b20cccc86bbbcb209ed7551a49dd7c8f4d6efab02fc81aa",
+    "armeabi-v7a": "182d95447765144c3be46b7348409f5adf661260578ee541487ce23ea3c092a3",
+    "x86_64": "fd31dcb22904f26bf14defdfb36f1807e25e29738d9d2b2fbf18d24380399d33"
   }
 }
