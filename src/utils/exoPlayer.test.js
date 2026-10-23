@@ -81,6 +81,7 @@ describe('playStream', () => {
       url: 'https://example.com/video.m3u8',
       streamType: 'hls',
       direct: false,
+      warpBound: false,
       bypassVpn: false,
       licenseUrl: null,
       headers: {},

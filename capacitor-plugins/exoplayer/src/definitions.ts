@@ -3,6 +3,9 @@ export interface PlayOptions {
   streamType?: 'hls' | 'dash' | 'mp4'
   /** Keep this stream outside WARP (used by TDT Spain). */
   direct?: boolean
+  /** Route the URL was resolved with: true → must play via WARP (IP-bound
+   * streams), false → must play direct. Omitido = decidir por sonda. */
+  warpBound?: boolean
   licenseUrl?: string
   headers?: Record<string, string>
   drmHeaders?: Record<string, string>

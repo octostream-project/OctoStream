@@ -6,6 +6,7 @@ import { isAndroidNative, isElectron } from './platform.js'
 import { sanitizeHttpUrl } from './sanitizeUrl.js'
 import { initAiSubs, disposeAiSubs } from './aiSubs.js'
 import { pushSubStyle } from './subStyle.js'
+import { isWarpConnected } from './warpStatus.js'
 
 let stateListener = null
 let zapListener = null
@@ -138,6 +139,11 @@ export async function playStream(options, onStateChange) {
     url,
     streamType: options.streamType || 'hls',
     direct: options.direct === true,
+    // El enlace se resolvió saliendo por la ruta actual — si era WARP, la
+    // URL quedó ligada a la IP del túnel ("expected ip …"): reproducirla
+    // en directo la rompe con IP-mismatch, y al revés igual. El nativo
+    // fuerza la misma ruta con esta marca.
+    warpBound: isWarpConnected(),
     bypassVpn: options.bypassVpn === true,
     licenseUrl: options.licenseUrl || null,
     headers: options.headers || {},

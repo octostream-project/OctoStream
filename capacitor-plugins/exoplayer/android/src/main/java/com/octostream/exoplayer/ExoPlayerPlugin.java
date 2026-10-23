@@ -169,6 +169,11 @@ public class ExoPlayerPlugin extends Plugin {
     private String currentStreamType = "hls";
     private boolean currentDirect = false;
     private boolean currentBypassVpn = false;
+    // Ruta con la que JS resolvió el enlace (null = sin marcar): si salió
+    // por WARP la URL quedó ligada a la IP de salida del túnel y debe
+    // reproducirse por el proxy aunque la sonda falle; si salió por la
+    // física, directo aunque el proxy esté vivo.
+    private Boolean boundToWarp = null;
     // True for a short window after closePlayer() so the dialog's
     // dispatchKeyEvent can swallow the leaked ACTION_UP/ACTION_DOWN of the
     // same Back press that closed the dialog. Without this, the leaked key
@@ -571,6 +576,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Origin", origin);
                             }
                             currentBypassVpn = false;
+                            boundToWarp = null;
                             openPlayer(directUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                         return;
@@ -689,6 +695,7 @@ public class ExoPlayerPlugin extends Plugin {
                 relayKeepAlive = true;
                 try {
                     currentBypassVpn = false;
+                    boundToWarp = null;
                     openPlayer(relayUrl, "hls", false, null, new JSObject(), new JSObject(),
                             title, mode, null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 } finally {
@@ -1988,6 +1995,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Cookie", cookies);
                             }
                             currentBypassVpn = false;
+                            boundToWarp = null;
                             openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                     }
@@ -3065,6 +3073,7 @@ public class ExoPlayerPlugin extends Plugin {
                 headers.put("Cookie", cookies);
             }
             currentBypassVpn = false;
+            boundToWarp = null;
             openPlayer(url, st, false, null, headers, new JSObject(), title, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
         });
     }
@@ -3435,6 +3444,7 @@ public class ExoPlayerPlugin extends Plugin {
         String streamType = call.getString("streamType", "hls");
         boolean direct = call.getBoolean("direct", false);
         boolean bypassVpn = call.getBoolean("bypassVpn", false);
+        boundToWarp = call.getBoolean("warpBound");
         String licenseUrl = call.getString("licenseUrl", null);
         JSONObject headersJson = call.getObject("headers", new JSObject());
         JSONObject drmHeadersJson = call.getObject("drmHeaders", new JSObject());
@@ -4604,7 +4614,8 @@ public class ExoPlayerPlugin extends Plugin {
                         Log.w(TAG, "WARP proxy local caído (conexión rechazada) — reintento en directo sin proxy");
                         try {
                             DataSource.Factory dsf = buildStreamDataSourceFactory(
-                                    currentUrl, currentHeaders, currentDirect, true);
+                                    currentUrl, currentHeaders, currentDirect,
+                                    !Boolean.TRUE.equals(boundToWarp));
                             MediaSource src = buildMediaSource(
                                     currentUrl, currentStreamType, dsf, lastDrmSessionManager, lastLicenseUrl);
                             lastDataSourceFactory = dsf;
@@ -6623,6 +6634,18 @@ public class ExoPlayerPlugin extends Plugin {
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
         if (isTdtSpainDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
+        // La resolución del enlace salió por una ruta concreta y la URL quedó
+        // ligada a la IP de salida de esa ruta (error "opened on a different
+        // connection / expected ip"). Reproducirla por la otra siempre falla:
+        // si JS la marcó, respetarla aunque la sonda diga lo contrario — la
+        // sonda solo sirve para mantener el estado WARP honesto y disparar
+        // la reconexión.
+        if (boundToWarp != null) {
+            if (!com.octostream.cloudproxy.CloudProxyPlugin.isLocalProxyUp()) {
+                com.octostream.cloudproxy.CloudProxyPlugin.markDisconnected();
+            }
+            return boundToWarp;
+        }
         String httpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
         if (httpProxy == null || httpProxy.isEmpty()) return false;
         // 'connected' tiene histéresis (~30s) para no caer por misses sueltos,
@@ -6672,6 +6695,10 @@ public class ExoPlayerPlugin extends Plugin {
         if (shouldUseWarpProxy(url, direct, forceBypassProxy)) {
             try {
                 String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
+                // URL ligada a WARP con el estado marcado caído: getHttpProxy()
+                // da null pero el proxy debe usarse igualmente — la IP de la
+                // firma del enlace es la del túnel, no la física.
+                if (socksProxy == null) socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr();
                 String[] parts = socksProxy.split(":", 2);
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                         .connectTimeout(15, TimeUnit.SECONDS)
@@ -7951,7 +7978,8 @@ public class ExoPlayerPlugin extends Plugin {
         subStyleColor = parseColorOr(call.getString("color"), Color.WHITE);
         subStyleBg = parseColorOr(call.getString("bg"), 0x80000000);
         subStyleBottom = (float) Math.max(0.0, Math.min(0.4, call.getDouble("bottom", 0.05)));
-        applySubtitleStyle();
+        // Toca vistas — solo en el hilo main (el plugin corre en CapacitorPlugins).
+        mainHandler.post(this::applySubtitleStyle);
         call.resolve();
     }
 

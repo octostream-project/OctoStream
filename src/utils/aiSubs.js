@@ -166,6 +166,21 @@ async function gtxTranslateLines(lines, signal) {
   return out.length === lines.length ? out : [merged.trim()]
 }
 
+async function fallbackTranslate(lines, signal) {
+  try {
+    return await lingvaTranslateLines(lines, signal)
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e
+  }
+  try {
+    return await gtxTranslateLines(lines, signal)
+  } catch {
+    return lines // mejor original que nada
+  }
+}
+
+const sameText = (a, b) => normVision(a.join('\n')) === normVision(b.join('\n'))
+
 async function translateLines(lines, signal) {
   if (!lines.length) return lines
   try {
@@ -179,23 +194,21 @@ async function translateLines(lines, signal) {
       try { parsed = JSON.parse(body.slice(i, j + 1)) } catch { parsed = null }
     }
     if (Array.isArray(parsed) && parsed.length === lines.length) {
-      return parsed.map(v => String(v ?? ''))
+      const out = parsed.map(v => String(v ?? ''))
+      // Eco del modelo (devuelve la entrada sin traducir): probar fallbacks
+      // antes de aceptar inglés como resultado.
+      return sameText(out, lines) ? await fallbackTranslate(lines, signal) : out
     }
     // Mismo número de líneas no vacías → usar tal cual.
     const alt = body.split('\n').filter(l => l.trim() !== '')
-    if (alt.length === lines.length) return alt.map(l => l.trim())
-    return lines
+    if (alt.length === lines.length) {
+      return sameText(alt, lines) ? await fallbackTranslate(lines, signal) : alt.map(l => l.trim())
+    }
+    return await fallbackTranslate(lines, signal)
   } catch (e) {
     if (e?.name === 'AbortError') throw e
     // duck.ai saturado/cortado → Lingva (privado) → Google gtx → original.
-    try {
-      return await lingvaTranslateLines(lines, signal)
-    } catch { /* instancias caídas: sigue gtx */ }
-    try {
-      return await gtxTranslateLines(lines, signal)
-    } catch {
-      return lines // mejor original que nada
-    }
+    return await fallbackTranslate(lines, signal)
   }
 }
 
@@ -299,12 +312,6 @@ export function chunkToCues(text, startMs, endMs) {
   return cues
 }
 
-const DICTATE_PROMPT = t =>
-  'Texto transcrito de audio para subtítulos. Si ya está en español, ' +
-  'devuélvelo corregido (puntuación, mayúsculas, tildes). Si está en otro ' +
-  'idioma, tradúcelo al español castellano. Responde SOLO con el texto final, ' +
-  'sin comillas ni comentarios.\n' + t
-
 async function processChunk(ev) {
   // duck.ai satura a veces (418/429): esperar y reintentar antes de
   // resignar el tramo — perder 45 s de diálogo es peor que llegar tarde.
@@ -320,12 +327,13 @@ async function processChunk(ev) {
     }
   }
   if (!src) return
+  // Traducir por la misma cadena que los subs existentes: duck.ai →
+  // Lingva → gtx → original. Antes iba solo por duckChat y cualquier
+  // fallo dejaba el texto en inglés.
   let final = src
   try {
-    const tr = await duckChat([{ role: 'user', content: DICTATE_PROMPT(src) }], {
-      signal: active?.abort?.signal,
-    })
-    if (tr) final = tr
+    const [tr] = await translateLines([src], active?.abort?.signal)
+    if (tr && tr.trim()) final = tr
   } catch { /* sin traducción: mostrar el texto original */ }
   for (const c of chunkToCues(final, ev.startMs, ev.endMs)) {
     active.cues.times.push(c.t)

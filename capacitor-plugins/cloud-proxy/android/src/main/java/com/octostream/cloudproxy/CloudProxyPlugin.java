@@ -635,18 +635,38 @@ public class CloudProxyPlugin extends Plugin {
         return connected ? HTTP_PROXY_ADDR : null;
     }
 
+    /** La dirección del proxy local aunque el estado esté marcado caído —
+     * para URLs que DEBEN salir por WARP (ligadas a la IP del túnel). */
+    public static String getHttpProxyAddr() {
+        return HTTP_PROXY_ADDR;
+    }
+
     /**
      * Sonda barata del puerto HTTP CONNECT local (400ms). La usa ExoPlayer
      * antes de rutar un stream por WARP: 'connected' tiene histéresis (~30s)
      * y un túnel muerto haría colgar y fallar cada servidor hasta reiniciar.
      */
     public static boolean isLocalProxyUp() {
-        try (java.net.Socket s = new java.net.Socket()) {
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", HTTP_PROXY_PORT), 400);
-            return true;
-        } catch (Exception e) {
-            return false;
+        // Un TCP connect a loopback de 400ms puede fallar aunque el proxy
+        // siga vivo si aether tiene la cola de accept saturada (túnel
+        // reconectando con CONNECTs pendientes). Un reintento corto separa
+        // "muerto de verdad" (connection refused, instantáneo) de un
+        // momento de saturación — antes un solo timeout marcaba todo el
+        // estado WARP caído hasta reabrir la app.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try (java.net.Socket s = new java.net.Socket()) {
+                s.connect(new java.net.InetSocketAddress("127.0.0.1", HTTP_PROXY_PORT), 400);
+                return true;
+            } catch (Exception e) {
+                if (attempt == 0) {
+                    try { Thread.sleep(200); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                }
+            }
         }
+        return false;
     }
 
     /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
@@ -655,6 +675,24 @@ public class CloudProxyPlugin extends Plugin {
             connected = false;
             statusMisses = 0;
         }
+        // CRÍTICO: también limpiar el proxy del sistema. Si solo se cambia el
+        // flag, http.proxyHost sigue apuntando al listener muerto y TODA la
+        // red "directa" (DefaultHttpDataSource del stream, CapacitorHttp) va
+        // igualmente al puerto muerto — bytes truncados que se manifestaban
+        // como errores de decoder (FfmpegAudioRenderer audio/ac3). El
+        // fail-closed de JS no se rompe: waitForWarp ya gatea las peticiones.
+        System.clearProperty("http.proxyHost");
+        System.clearProperty("http.proxyPort");
+        System.clearProperty("https.proxyHost");
+        System.clearProperty("https.proxyPort");
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                if (androidx.webkit.WebViewFeature.isFeatureSupported(
+                        androidx.webkit.WebViewFeature.PROXY_OVERRIDE)) {
+                    ProxyController.getInstance().clearProxyOverride(DIRECT_EXECUTOR, () -> {});
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     /** @deprecated usar {@link #getHttpProxy()} — nunca devolvió el puerto SOCKS. */

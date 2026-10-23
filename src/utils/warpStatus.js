@@ -14,6 +14,7 @@ let _connecting = false
 let _listeners = []
 let _pollTimer = null
 let _refreshing = null
+let _reconnecting = null
 const _waiters = new Set()
 
 // Whether the user wants WARP to come up automatically. When disabled,
@@ -135,10 +136,25 @@ export function waitForWarp(timeoutMs = 15000) {
     // of burning the whole timeout on every page load. A few spaced probes
     // still cover the startup window where App.jsx is about to call
     // connect() but getStatus() has not observed "connecting" yet.
+    let reconnectTried = false
     const probe = async () => {
       for (let i = 0; i < 3 && !settled; i++) {
         await refresh()
         if (_connected || _connecting) return // handshake in progress → wait for it
+        // A mitad de sesión el túnel puede marcarse caído (la sonda del
+        // puerto local del ExoPlayer llama a markDisconnected()) y nadie lo
+        // reconectaba hasta reabrir la app. Relanzar connect() una vez: el
+        // plugin mata el aether ahogado y levanta uno nuevo (~2s).
+        // Single-flight: varios waiters concurrentes comparten el mismo
+        // connect() — antes cada uno lanzaba el suyo (6 arranques a la vez).
+        if (!reconnectTried && isAndroidNative() && warpAutoConnectEnabled()) {
+          reconnectTried = true
+          if (!_reconnecting) {
+            _reconnecting = CloudProxy.connect()
+              .catch(() => {})
+              .finally(() => { _reconnecting = null; refresh() })
+          }
+        }
         if (i < 2) await new Promise(r => setTimeout(r, 700))
       }
       finish(false)
