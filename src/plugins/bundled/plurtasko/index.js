@@ -47,7 +47,7 @@ import { bloghorror } from './channels/bloghorror.js'
 import { torrentio } from './channels/torrentio.js'
 import { estrenoscinesaa } from './channels/estrenoscinesaa.js'
 import { cinemitas } from './channels/cinemitas.js'
-import { aiostreams, aiostreamsConfig } from './channels/aiostreams.js'
+import { aiostreams, aiostreamsConfig, applyDebridAvailability } from './channels/aiostreams.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
@@ -1063,7 +1063,9 @@ export const plurtaskoFactory = (config) => {
         const cached = getCachedSearch(cacheKey)
         if (cached) {
           console.log(`[Plurtasko] Cache hit for "${name}" S${season || '?'}E${episode || '?'} (${cached.length} streams)`)
-          return cached
+          // El estado de caché debrid puede haber cambiado desde que se
+          // guardó la lista — /magnet/instant la actualiza por infoHash.
+          return await applyDebridAvailability(cached)
         }
 
         // Extraer TMDB ID y fetch IMDb ID para validación estricta cuando el canal lo permita.
@@ -1550,6 +1552,11 @@ export const plurtaskoFactory = (config) => {
           const { _channelId, ...rest } = s
           return rest
         })
+        // Estado real de caché en AllDebrid por infoHash — el formatter de
+        // la instancia puede no marcarlo y las no-listas servirían el
+        // vídeo placeholder "not cached". Convierte a entradas
+        // "descargando" (popup de descarga) y confirma las listas.
+        allStreams = await applyDebridAvailability(allStreams)
         console.log(`[Plurtasko] Total resolved streams for "${name}": ${allStreams.length}`)
         // No cachear resultados vacíos: un fallo temporal (WARP no listo,
         // timeout, red lenta) no debe bloquear búsquedas posteriores 5 min.

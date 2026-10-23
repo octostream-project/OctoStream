@@ -231,9 +231,15 @@ export async function instantAvailability(hashes) {
   try {
     try { await waitForVpnTunnel(20000) } catch {}
     const body = hs.map(h => `magnets[]=${encodeURIComponent(`magnet:?xt=urn:btih:${h}`)}`).join('&')
-    const url = apiUrl('/magnet/instant', {}, API_BASE_41)
-    const data = await httpPostJson(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' }, true)
-    if (data?.status !== 'success' || !Array.isArray(data?.data?.magnets)) return null
+    // El endpoint existe en v4 y v4.1 — se prueban ambas por si la
+    // instancia de la API cambia de versión.
+    let data = null
+    for (const base of [API_BASE_41, API_BASE]) {
+      const url = apiUrl('/magnet/instant', {}, base)
+      const res = await httpPostJson(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' }, true)
+      if (res?.status === 'success') { data = res; break }
+    }
+    if (!Array.isArray(data?.data?.magnets)) return null
     const out = new Map()
     for (const m of data.data.magnets) {
       const h = String(m?.hash || m?.magnet || '').toLowerCase()

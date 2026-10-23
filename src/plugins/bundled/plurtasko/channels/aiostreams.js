@@ -196,8 +196,7 @@ export const aiostreams = {
         const s = list[0]
         console.log('[aiostreams] sample:', String(s.description || s.title || s.name || '').slice(0, 300))
       }
-      let mapped = list.map(stremioToStream).filter(Boolean)
-      mapped = await applyDebridAvailability(mapped, signal)
+      const mapped = list.map(stremioToStream).filter(Boolean)
       _processingCount = mapped.filter(s => s.processing).length
       return mapped
     }
@@ -227,25 +226,37 @@ export function aioProcessingCount() { return _processingCount }
 // placeholder de "not cached". /magnet/instant consulta por infoHash sin
 // subir nada; los no-instantáneos pasan a entrada "descargando".
 // Si la API falla devuelve la lista intacta (mejor no ocultar fuentes).
-async function applyDebridAvailability(streams, signal) {
+export async function applyDebridAvailability(streams, signal) {
   const { isAlldebridEnabled, instantAvailability } = await import('../../alldebrid.js')
-  if (!isAlldebridEnabled() || signal?.aborted) return streams
+  const { toast } = await import('../../../../components/ui/Toast.jsx')
+  if (!isAlldebridEnabled() || signal?.aborted) {
+    toast(`[aio] instant check skip: ad=${isAlldebridEnabled()}`)
+    return streams
+  }
   const hashes = streams.map(s => s._infoHash).filter(Boolean)
+  toast(`[aio] instant check: ${hashes.length}/${streams.length} hashes`)
   if (!hashes.length) return streams
   const avail = await instantAvailability(hashes)
+  toast(`[aio] instant result: ${avail ? `${[...avail.values()].filter(v => v === false).length} no-listos de ${avail.size}` : 'FALLO API'}`)
   if (!avail) return streams
   return streams.map(s => {
-    if (!s._infoHash || s.processing) return s
-    if (avail.get(s._infoHash) !== false) {
-      // Confirmado instantáneo → marcar como cacheado aunque el
-      // formatter no lo dijera (chip ⚡).
-      return avail.has(s._infoHash) ? { ...s, cached: true } : s
+    if (!s._infoHash) return s
+    const ready = avail.get(s._infoHash)
+    if (ready === true) {
+      // Confirmado instantáneo → chip ⚡ aunque el formatter no lo diga.
+      // Si venía marcada "descargando" y guarda la URL de la instancia,
+      // se recupera como reproducible directo.
+      if (s.processing && /^https?:/i.test(String(s._triggerUrl || ''))) {
+        return { ...s, processing: undefined, url: s._triggerUrl, streamType: inferStreamType(s._triggerUrl, 'mp4'), cached: true }
+      }
+      return s.processing ? s : { ...s, cached: true }
     }
+    if (s.processing) return s
     // Solo entradas con URL http: son las que sirven el vídeo "not cached"
     // de la instancia. Los magnets puros (P2P) quedan jugables — OctoStream
     // puede reproducirlos por torrent local aunque el debrid no los tenga.
     if (!/^https?:/i.test(String(s.url || ''))) return s
-    return { ...s, processing: true, url: undefined, streamType: undefined, cached: false }
+    return { ...s, processing: true, url: undefined, streamType: undefined, cached: false, _triggerUrl: s._triggerUrl || s.url }
   })
 }
 
