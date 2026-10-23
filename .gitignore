@@ -36,3 +36,5 @@ releases/*.apk
 *.jks
 keystore.properties
 dist-releases/
+
+_logcat_live.txt
