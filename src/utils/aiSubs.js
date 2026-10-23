@@ -14,7 +14,7 @@
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpGetText } from './httpClient.js'
-import { dictateWav, duckChat, duckChatImage } from './duckAi.js'
+import { dictateWav, duckChat } from './duckAi.js'
 import { getJsonSync, setJsonSync } from './storage.js'
 
 const OPENSUBS_STREMIO = 'https://opensubtitles-v3.strem.io'
@@ -116,25 +116,52 @@ const TRANSLATE_PROMPT = arr =>
   'comentarios, numeración ni formato markdown. Responde SOLO con el array JSON traducido.\n' +
   JSON.stringify(arr)
 
+// Fallback de traducción sin IA: endpoint gtx de Google Translate (el mismo
+// que usa la app/web de Google — gratis y sin key). Los textos viajan
+// numerados "N. línea" porque gtx preserva los índices de línea, así se
+// pueden volver a cortar tras la traducción.
+async function gtxTranslateLines(lines, signal) {
+  const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
+  const url = 'https://translate.googleapis.com/translate_a/single' +
+    `?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(numbered)}`
+  const data = await httpGetJson(url, {}, signal)
+  const merged = (data?.[0] || []).map(seg => seg?.[0] || '').join('')
+  if (!merged.trim()) throw new Error('gtx vacío')
+  const out = merged.split('\n')
+    .map(l => l.replace(/^\s*\d+[.)]\s*/, '').trim())
+  // Solo si cuadran los números; si Google fusionó líneas se devuelve todo
+  // junto mejor que descuadrar los tiempos.
+  return out.length === lines.length ? out : [merged.trim()]
+}
+
 async function translateLines(lines, signal) {
   if (!lines.length) return lines
-  const raw = await duckChat([{ role: 'user', content: TRANSLATE_PROMPT(lines) }], { signal })
-  // El modelo debe devolver un array JSON; si devuelve texto suelto, se
-  // intenta recortar al primer '[' … último ']'.
-  let parsed = null
-  const body = raw.trim()
-  const i = body.indexOf('['); const j = body.lastIndexOf(']')
-  if (i !== -1 && j > i) {
-    try { parsed = JSON.parse(body.slice(i, j + 1)) } catch { parsed = null }
+  try {
+    const raw = await duckChat([{ role: 'user', content: TRANSLATE_PROMPT(lines) }], { signal })
+    // El modelo debe devolver un array JSON; si devuelve texto suelto, se
+    // intenta recortar al primer '[' … último ']'.
+    let parsed = null
+    const body = raw.trim()
+    const i = body.indexOf('['); const j = body.lastIndexOf(']')
+    if (i !== -1 && j > i) {
+      try { parsed = JSON.parse(body.slice(i, j + 1)) } catch { parsed = null }
+    }
+    if (Array.isArray(parsed) && parsed.length === lines.length) {
+      return parsed.map(v => String(v ?? ''))
+    }
+    // Mismo número de líneas no vacías → usar tal cual.
+    const alt = body.split('\n').filter(l => l.trim() !== '')
+    if (alt.length === lines.length) return alt.map(l => l.trim())
+    return lines
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e
+    // duck.ai saturado/cortado: Google gtx como red de seguridad.
+    try {
+      return await gtxTranslateLines(lines, signal)
+    } catch {
+      return lines // mejor original que nada
+    }
   }
-  if (Array.isArray(parsed) && parsed.length === lines.length) {
-    return parsed.map(v => String(v ?? ''))
-  }
-  // Fallback: mismo número de líneas no vacías → usar tal cual; si no,
-  // devolver el original (mejor inglés que nada).
-  const alt = body.split('\n').filter(l => l.trim() !== '')
-  if (alt.length === lines.length) return alt.map(l => l.trim())
-  return lines
 }
 
 async function translateCues(cues, signal, onProgress) {
@@ -287,33 +314,30 @@ function onAudioChunk(ev) {
     })
 }
 
-// ---------- OCR de texto en pantalla (visión) ----------
-// El tap emite 'aiVideoFrame' solo cuando el fotograma cambió. Aquí cada
-// imagen va al modelo vision para leer carteles/rótulos/mensajes quemados en
-// el vídeo y traducirlos. Latest-wins: si la cola va detrás se guarda solo
-// el último frame pendiente — el anti-bot castiga el paralelismo.
-
-const VISION_PROMPT =
-  'Esta imagen es un fotograma de una película. Lee TODO el texto visible ' +
-  '(carteles, rótulos, mensajes de móvil, subtítulos quemados, titulares). ' +
-  'Tradúcelo al español castellano y responde SOLO con el texto final, una ' +
-  'frase por línea. Si no hay texto legible responde exactamente: SIN_TEXTO'
+// ---------- OCR de texto en pantalla (ML Kit on-device) ----------
+// El tap emite 'aiVideoFrame' con el TEXTO ya leído por ML Kit cuando el
+// fotograma cambió. Aquí solo se traduce (duck.ai → Google gtx de
+// respaldo). Latest-wins: si la cola va detrás se guarda solo el último
+// frame pendiente — el anti-bot castiga el paralelismo.
 
 const normVision = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim()
 
 async function processFrame(ev) {
   const v = active.vision
-  const dataUrl = `data:image/jpeg;base64,${ev.jpeg}`
-  const out = await duckChatImage(dataUrl, VISION_PROMPT, { signal: active?.abort?.signal })
+  const raw = String(ev?.text || '').trim()
+  if (!raw) return
+  const norm = normVision(raw)
+  if (norm === v.lastText) return // mismo rótulo que el frame previo
+  v.lastText = norm
   v.calls++
-  v.errors = 0
-  const text = String(out || '').trim()
-  if (!text || /^SIN_TEXTO/.test(text)) return
-  if (normVision(text) === v.lastText) return // mismo rótulo que el frame previo
-  v.lastText = normVision(text)
+  // El OCR ya vino hecho del nativo (ML Kit on-device): solo se traduce el
+  // texto leído — llamada de texto barata, sin gastar cupo de imágenes.
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 4)
+  const tr = await translateLines(lines, active?.abort?.signal)
+  const text = tr.map(l => String(l).trim()).filter(Boolean).join('\n') || raw
   const a = Math.max(0, ev.ts - 1500)
   active.cues.times.push([a, ev.ts + VISION_CUE_MS])
-  active.cues.texts.push(text.split('\n').filter(Boolean).slice(0, 2).join('\n'))
+  active.cues.texts.push(text)
   const order = active.cues.times.map((_, i) => i)
     .sort((x, y) => active.cues.times[x][0] - active.cues.times[y][0])
   active.cues.times = order.map(i => active.cues.times[i])

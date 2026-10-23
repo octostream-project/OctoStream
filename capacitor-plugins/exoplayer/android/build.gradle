@@ -59,4 +59,9 @@ dependencies {
     implementation 'androidx.mediarouter:mediarouter:1.7.0'
     implementation 'com.google.android.gms:play-services-cast:21.5.0'
     implementation 'com.google.android.gms:play-services-cast-framework:21.5.0'
+    // OCR on-device para los subtítulos IA (texto quemado en pantalla:
+    // carteles, mensajes de móvil, rótulos). ~4 MB de modelo incluido en el
+    // APK — sin red, sin API key, sin límite de llamadas (mejor que el
+    // modelo vision de duck.ai para esto).
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 }

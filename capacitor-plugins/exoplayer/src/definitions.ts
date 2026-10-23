@@ -154,10 +154,10 @@ export interface AiAudioErrorEvent {
   message?: string
 }
 
-/** Fotograma distinto capturado por el tap (OCR de texto en pantalla). */
+/** Texto OCR de un fotograma distinto del tap (ML Kit on-device). */
 export interface AiVideoFrameEvent {
   ts: number
-  jpeg: string
+  text: string
 }
 
 export interface PlayEmbedOptions {
@@ -291,8 +291,8 @@ export interface ExoPlayerPlugin {
    * decodifica el mismo stream a x4) que emite 'aiAudioChunk' con WAVs de
    * `chunkSec` segundos (15-60, defecto 45). Rechaza si no hay reproducción
    * o si es un directo. Con `video: true` además decodifica vídeo a un
-   * ImageReader y emite 'aiVideoFrame' con JPEGs de los fotogramas que
-   * cambian (OCR de texto en pantalla).
+   * ImageReader y emite 'aiVideoFrame' con el texto OCR (ML Kit on-device)
+   * de los fotogramas que cambian.
    */
   startAiAudio(options?: { chunkSec?: number; video?: boolean }): Promise<void>
   /** Detiene el tap de audio IA. */

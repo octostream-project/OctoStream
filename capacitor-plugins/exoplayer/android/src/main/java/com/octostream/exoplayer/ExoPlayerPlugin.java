@@ -10,6 +10,9 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 import android.media.audiofx.LoudnessEnhancer;
 import android.net.Uri;
 import android.provider.OpenableColumns;
@@ -7618,6 +7621,7 @@ public class ExoPlayerPlugin extends Plugin {
     private android.media.ImageReader aiImageReader = null;
     private android.os.HandlerThread aiFrameThread = null;
     private android.os.Handler aiFrameHandler = null;
+    private com.google.mlkit.vision.text.TextRecognizer aiTextRecognizer = null;
     private byte[] aiPrevFrameHash = null;
     private long aiLastFrameMs = -1;
     private boolean aiVideoEnabled = false;
@@ -7653,23 +7657,35 @@ public class ExoPlayerPlugin extends Plugin {
         }
         aiPrevFrameHash = hash;
         aiLastFrameMs = posMs;
-        // JPEG ≤640px de ancho: el OCR de vision no necesita más y así el
-        // payload base64 se queda en ~50 KB.
-        int tw = Math.min(640, w);
-        Bitmap out = Bitmap.createScaledBitmap(full, tw, h * tw / w, true);
-        full.recycle();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        out.compress(Bitmap.CompressFormat.JPEG, 60, bos);
-        out.recycle();
-        String jpeg = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP);
+        // OCR on-device con ML Kit (sin red, sin límite de llamadas): solo el
+        // TEXTO leído sale hacia JS, que lo traduce — mucho más barato que
+        // mandar cada fotograma al modelo vision de duck.ai.
+        if (aiTextRecognizer == null) {
+            aiTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        }
         ExecutorService ex = aiEmitExecutor;
-        if (ex == null) return;
-        ex.execute(() -> {
-            JSObject e = new JSObject();
-            e.put("ts", posMs);
-            e.put("jpeg", jpeg);
-            notifyListeners("aiVideoFrame", e);
-        });
+        if (ex == null) { full.recycle(); return; }
+        aiTextRecognizer.process(InputImage.fromBitmap(full, 0))
+                .addOnSuccessListener(ex, result -> {
+                    full.recycle();
+                    StringBuilder sb = new StringBuilder();
+                    for (com.google.mlkit.vision.text.Text.TextBlock b : result.getTextBlocks()) {
+                        for (com.google.mlkit.vision.text.Text.Line l : b.getLines()) {
+                            String t = l.getText().trim();
+                            if (!t.isEmpty()) {
+                                if (sb.length() > 0) sb.append('\n');
+                                sb.append(t);
+                            }
+                        }
+                    }
+                    String t = sb.toString();
+                    if (t.isEmpty()) return;
+                    JSObject e = new JSObject();
+                    e.put("ts", posMs);
+                    e.put("text", t);
+                    notifyListeners("aiVideoFrame", e);
+                })
+                .addOnFailureListener(ex, err -> full.recycle());
     }
 
     private void startAiFrameCapture(ExoPlayer tap) {
@@ -7810,6 +7826,10 @@ public class ExoPlayerPlugin extends Plugin {
             aiFrameThread.quitSafely();
             aiFrameThread = null;
             aiFrameHandler = null;
+        }
+        if (aiTextRecognizer != null) {
+            try { aiTextRecognizer.close(); } catch (Exception ignored) {}
+            aiTextRecognizer = null;
         }
         aiPrevFrameHash = null;
         aiLastFrameMs = -1;
