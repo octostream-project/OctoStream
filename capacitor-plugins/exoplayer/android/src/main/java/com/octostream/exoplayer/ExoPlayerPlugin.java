@@ -6,6 +6,7 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
@@ -7610,8 +7611,101 @@ public class ExoPlayerPlugin extends Plugin {
         }
     };
 
-    private void startAiAudioTap(long startPosMs, int chunkSec) {
+    // --- OCR de texto en pantalla (carteles/mensajes quemados en el vídeo):
+    // cuando se pide `video`, el tap también decodifica vídeo a un
+    // ImageReader. Se muestrea cada ~3 s de media, se descarta por hash si el
+    // fotograma no cambió, y los distintos salen como JPEG base64.
+    private android.media.ImageReader aiImageReader = null;
+    private android.os.HandlerThread aiFrameThread = null;
+    private android.os.Handler aiFrameHandler = null;
+    private byte[] aiPrevFrameHash = null;
+    private long aiLastFrameMs = -1;
+    private boolean aiVideoEnabled = false;
+
+    private void onAiFrame(android.media.Image img, long posMs) {
+        android.media.Image.Plane plane = img.getPlanes()[0];
+        int w = img.getWidth(), h = img.getHeight();
+        int rowStride = plane.getRowStride();
+        int pixelStride = plane.getPixelStride();
+        Bitmap padded = Bitmap.createBitmap(
+                w + (rowStride - pixelStride * w) / Math.max(1, pixelStride),
+                h, Bitmap.Config.ARGB_8888);
+        padded.copyPixelsFromBuffer(plane.getBuffer());
+        Bitmap full = Bitmap.createBitmap(padded, 0, 0, w, h);
+        padded.recycle();
+        // Hash perceptual 16×9 de luminancia para saltar fotogramas repetidos
+        // (plano fijo durante segundos = mismo texto).
+        Bitmap tiny = Bitmap.createScaledBitmap(full, 16, 9, true);
+        int[] px = new int[144];
+        tiny.getPixels(px, 0, 16, 0, 0, 16, 9);
+        tiny.recycle();
+        byte[] hash = new byte[144];
+        for (int i = 0; i < 144; i++) {
+            int c = px[i];
+            hash[i] = (byte) ((((c >> 16) & 0xFF) * 30 + ((c >> 8) & 0xFF) * 59 + (c & 0xFF) * 11) / 100);
+        }
+        if (aiPrevFrameHash != null) {
+            int diff = 0;
+            for (int i = 0; i < 144; i++) {
+                diff += Math.abs((hash[i] & 0xFF) - (aiPrevFrameHash[i] & 0xFF));
+            }
+            if (diff / 144 < 8) { full.recycle(); return; }
+        }
+        aiPrevFrameHash = hash;
+        aiLastFrameMs = posMs;
+        // JPEG ≤640px de ancho: el OCR de vision no necesita más y así el
+        // payload base64 se queda en ~50 KB.
+        int tw = Math.min(640, w);
+        Bitmap out = Bitmap.createScaledBitmap(full, tw, h * tw / w, true);
+        full.recycle();
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        out.compress(Bitmap.CompressFormat.JPEG, 60, bos);
+        out.recycle();
+        String jpeg = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP);
+        ExecutorService ex = aiEmitExecutor;
+        if (ex == null) return;
+        ex.execute(() -> {
+            JSObject e = new JSObject();
+            e.put("ts", posMs);
+            e.put("jpeg", jpeg);
+            notifyListeners("aiVideoFrame", e);
+        });
+    }
+
+    private void startAiFrameCapture(ExoPlayer tap) {
+        aiFrameThread = new android.os.HandlerThread("ai-frames");
+        aiFrameThread.start();
+        aiFrameHandler = new android.os.Handler(aiFrameThread.getLooper());
+        tap.addListener(new Player.Listener() {
+            @Override public void onVideoSizeChanged(androidx.media3.common.VideoSize size) {
+                // El ImageReader tiene que ir a la resolución nativa del
+                // vídeo: el decoder escribe el frame entero en el buffer y un
+                // tamaño distinto lo corrompe.
+                if (size.width <= 0 || size.height <= 0 || aiImageReader != null || aiFrameHandler == null) return;
+                aiImageReader = android.media.ImageReader.newInstance(
+                        size.width, size.height, android.graphics.PixelFormat.RGBA_8888, 2);
+                aiImageReader.setOnImageAvailableListener(reader -> {
+                    android.media.Image img = reader.acquireLatestImage();
+                    if (img == null) return;
+                    try {
+                        ExoPlayer p = aiTapPlayer;
+                        if (p == null || !aiVideoEnabled) return;
+                        long pos = p.getCurrentPosition();
+                        if (pos - aiLastFrameMs < 3000) return; // ~3 s de media
+                        onAiFrame(img, pos);
+                    } catch (Throwable ignored) {
+                    } finally {
+                        img.close();
+                    }
+                }, aiFrameHandler);
+                tap.setVideoSurface(aiImageReader.getSurface());
+            }
+        });
+    }
+
+    private void startAiAudioTap(long startPosMs, int chunkSec, boolean video) {
         stopAiAudioTap();
+        aiVideoEnabled = video;
         if (lastDataSourceFactory == null || getContext() == null) return;
         aiEmitExecutor = Executors.newSingleThreadExecutor();
         final PcmChunker chunker = new PcmChunker(chunkSec, (startMs, endMs, wav) -> {
@@ -7660,10 +7754,11 @@ public class ExoPlayerPlugin extends Plugin {
             return;
         }
         tap.setTrackSelectionParameters(tap.getTrackSelectionParameters().buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !video)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build());
         tap.setVolume(0f);
+        if (video) startAiFrameCapture(tap);
         tap.addListener(new Player.Listener() {
             @Override public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_ENDED) {
@@ -7699,11 +7794,26 @@ public class ExoPlayerPlugin extends Plugin {
     private void stopAiAudioTap() {
         mainHandler.removeCallbacks(aiPaceTicker);
         if (aiTapPlayer != null) {
-            try { aiTapPlayer.release(); } catch (Exception ignored) {}
+            try {
+                aiTapPlayer.setVideoSurface(null);
+                aiTapPlayer.release();
+            } catch (Exception ignored) {}
             aiTapPlayer = null;
         }
         aiPcmChunker = null;
         aiLastMainPos = -1;
+        if (aiImageReader != null) {
+            try { aiImageReader.close(); } catch (Exception ignored) {}
+            aiImageReader = null;
+        }
+        if (aiFrameThread != null) {
+            aiFrameThread.quitSafely();
+            aiFrameThread = null;
+            aiFrameHandler = null;
+        }
+        aiPrevFrameHash = null;
+        aiLastFrameMs = -1;
+        aiVideoEnabled = false;
         if (aiEmitExecutor != null) {
             aiEmitExecutor.shutdownNow();
             aiEmitExecutor = null;
@@ -7722,8 +7832,9 @@ public class ExoPlayerPlugin extends Plugin {
         }
         // Chunks grandes = menos peticiones de dictado (rate limit de duck.ai).
         final int chunkSec = Math.max(15, Math.min(60, call.getInt("chunkSec", 45)));
+        final boolean video = Boolean.TRUE.equals(call.getBoolean("video", false));
         mainHandler.post(() -> {
-            if (player != null) startAiAudioTap(player.getCurrentPosition(), chunkSec);
+            if (player != null) startAiAudioTap(player.getCurrentPosition(), chunkSec, video);
         });
         call.resolve();
     }

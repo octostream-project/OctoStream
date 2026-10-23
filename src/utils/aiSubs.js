@@ -14,7 +14,7 @@
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpGetText } from './httpClient.js'
-import { dictateWav, duckChat } from './duckAi.js'
+import { dictateWav, duckChat, duckChatImage } from './duckAi.js'
 import { getJsonSync, setJsonSync } from './storage.js'
 
 const OPENSUBS_STREMIO = 'https://opensubtitles-v3.strem.io'
@@ -25,6 +25,9 @@ const DICTATE_RETRIES = 2 // reintentos extra ante 418/429 persistentes
 const DICTATE_RETRY_DELAY_MS = 20000
 const CACHE_KEY = 'octostream_ai_subs_cache'
 const CACHE_MAX = 5 // medios con subs IA cacheados
+const VISION_MAX_CALLS = 40 // tope de fotogramas OCR por sesión (rate-limit)
+const VISION_MAX_ERRORS = 3 // errores seguidos → apagar el OCR de la sesión
+const VISION_CUE_MS = 3500 // cuánto dura el cue de un fotograma detectado
 
 let listenersReady = false
 let active = null // { abort, cues:{times,texts}, queue:Promise, transcribing }
@@ -284,6 +287,78 @@ function onAudioChunk(ev) {
     })
 }
 
+// ---------- OCR de texto en pantalla (visión) ----------
+// El tap emite 'aiVideoFrame' solo cuando el fotograma cambió. Aquí cada
+// imagen va al modelo vision para leer carteles/rótulos/mensajes quemados en
+// el vídeo y traducirlos. Latest-wins: si la cola va detrás se guarda solo
+// el último frame pendiente — el anti-bot castiga el paralelismo.
+
+const VISION_PROMPT =
+  'Esta imagen es un fotograma de una película. Lee TODO el texto visible ' +
+  '(carteles, rótulos, mensajes de móvil, subtítulos quemados, titulares). ' +
+  'Tradúcelo al español castellano y responde SOLO con el texto final, una ' +
+  'frase por línea. Si no hay texto legible responde exactamente: SIN_TEXTO'
+
+const normVision = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+async function processFrame(ev) {
+  const v = active.vision
+  const dataUrl = `data:image/jpeg;base64,${ev.jpeg}`
+  const out = await duckChatImage(dataUrl, VISION_PROMPT, { signal: active?.abort?.signal })
+  v.calls++
+  v.errors = 0
+  const text = String(out || '').trim()
+  if (!text || /^SIN_TEXTO/.test(text)) return
+  if (normVision(text) === v.lastText) return // mismo rótulo que el frame previo
+  v.lastText = normVision(text)
+  const a = Math.max(0, ev.ts - 1500)
+  active.cues.times.push([a, ev.ts + VISION_CUE_MS])
+  active.cues.texts.push(text.split('\n').filter(Boolean).slice(0, 2).join('\n'))
+  const order = active.cues.times.map((_, i) => i)
+    .sort((x, y) => active.cues.times[x][0] - active.cues.times[y][0])
+  active.cues.times = order.map(i => active.cues.times[i])
+  active.cues.texts = order.map(i => active.cues.texts[i])
+  await ExoPlayer.setExternalCues(active.cues)
+}
+
+function onVideoFrame(ev) {
+  const s = active
+  if (!s?.transcribing || !s.vision || s.vision.dead) return
+  const v = s.vision
+  if (v.calls >= VISION_MAX_CALLS) {
+    v.dead = true
+    osd('Subs IA: OCR pausado (máx. de fotogramas)')
+    return
+  }
+  v.pending = ev // latest-wins: solo importa el fotograma más reciente
+  if (v.busy) return
+  v.busy = true
+  s.queue = s.queue
+    .then(async () => {
+      while (active === s && !v.dead && v.pending) {
+        const frame = v.pending
+        v.pending = null
+        try {
+          await processFrame(frame)
+        } catch (e) {
+          v.errors++
+          if (e?.name === 'AbortError') throw e
+          if (v.errors >= VISION_MAX_ERRORS) {
+            v.dead = true
+            osd('Subs IA: OCR de texto en pantalla detenido (límite)')
+          }
+        }
+      }
+    })
+    .catch(e => {
+      console.warn('[aiSubs] frame error:', e?.message || e)
+      if (e?.name === 'AbortError') active = null
+    })
+    .finally(() => {
+      if (active?.vision === v) v.busy = false
+    })
+}
+
 // ---------- entry points ----------
 
 async function onRequest(meta) {
@@ -306,6 +381,7 @@ async function onRequest(meta) {
     cues: { times: [], texts: [] },
     queue: Promise.resolve(),
     transcribing: false,
+    vision: { calls: 0, errors: 0, dead: false, busy: false, pending: null, lastText: '' },
   }
   try {
     if (meta?.imdbId) {
@@ -319,8 +395,10 @@ async function onRequest(meta) {
       }
     }
     active.transcribing = true
-    osdNow('Subs IA: transcribiendo audio…')
-    await ExoPlayer.startAiAudio({ chunkSec: DICTATE_CHUNK_SEC }) // rechaza en directo
+    osdNow('Subs IA: transcribiendo audio + OCR…')
+    // video: el tap también captura fotogramas para leer carteles/rótulos
+    // quemados en la imagen (mensajes de móvil, titulares…).
+    await ExoPlayer.startAiAudio({ chunkSec: DICTATE_CHUNK_SEC, video: true })
   } catch (e) {
     console.warn('[aiSubs]', e?.message || e)
     osdNow(`Subs IA: ${String(e?.message || 'error').slice(0, 60)}`)
@@ -372,6 +450,7 @@ export function initAiSubs() {
     })
   })
   ExoPlayer.addListener('aiAudioChunk', onAudioChunk)
+  ExoPlayer.addListener('aiVideoFrame', onVideoFrame)
   ExoPlayer.addListener('aiAudioDone', onAudioDone)
   ExoPlayer.addListener('aiAudioError', onAudioError)
 }

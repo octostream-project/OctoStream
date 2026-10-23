@@ -203,7 +203,7 @@ export async function dictateWav(wav, signal) {
 const DEFAULT_MODEL = 'gpt-5.4-nano'
 
 /** Chat completion (SSE ensamblado). Devuelve el texto del mensaje final. */
-export async function duckChat(messages, { model, signal } = {}) {
+export async function duckChat(messages, { model, signal, canUploadFiles } = {}) {
   const r = await duckPost(CHAT_URL, {
     contentType: 'application/json',
     body: JSON.stringify({
@@ -211,6 +211,7 @@ export async function duckChat(messages, { model, signal } = {}) {
       metadata: { toolChoice: { NewsSearch: false, VideosSearch: false, LocalSearch: false, WeatherForecast: false } },
       messages,
       canUseTools: true,
+      canUploadFiles: !!canUploadFiles,
       reasoningEffort: 'none',
       durableStream: {
         messageId: '', conversationId: '',
@@ -232,6 +233,34 @@ export async function duckChat(messages, { model, signal } = {}) {
     } catch { /* líneas non-JSON / [DONE] */ }
   }
   return text.trim()
+}
+
+// Modelos gratuitos con vision (catálogo /duckchat/v1/models,
+// supportsImageUpload + tier free). gpt-6-luna lleva la etiqueta
+// EVERYDAY_USE: pensado para volumen alto sin quemar el límite tan rápido.
+const VISION_MODELS = ['gpt-6-luna', 'claude-haiku-4-5', 'gpt-5.4-mini']
+
+/** OCR/vision: manda una imagen (dataURL base64) + prompt → texto. */
+export async function duckChatImage(dataUrl, prompt, { signal } = {}) {
+  const mime = (dataUrl.match(/^data:(image\/\w+)/) || [null, 'image/jpeg'])[1]
+  const content = [
+    { type: 'image', mimeType: mime, image: dataUrl },
+    { type: 'text', text: prompt },
+  ]
+  let lastErr = null
+  for (const model of VISION_MODELS) {
+    try {
+      return await duckChat([{ role: 'user', content }], {
+        model: getItemSync('octostream_ai_vision_model') || model,
+        canUploadFiles: true,
+        signal,
+      })
+    } catch (e) {
+      lastErr = e
+      if (signal?.aborted) throw e
+    }
+  }
+  throw lastErr || new Error('Vision: sin modelo disponible')
 }
 
 /** Comprueba rápida de que duck.ai responde (para mostrar/ocultar la opción). */

@@ -154,6 +154,12 @@ export interface AiAudioErrorEvent {
   message?: string
 }
 
+/** Fotograma distinto capturado por el tap (OCR de texto en pantalla). */
+export interface AiVideoFrameEvent {
+  ts: number
+  jpeg: string
+}
+
 export interface PlayEmbedOptions {
   url: string
   title?: string
@@ -284,9 +290,11 @@ export interface ExoPlayerPlugin {
    * Subtítulos IA: arranca el tap headless (segundo ExoPlayer sin ventana que
    * decodifica el mismo stream a x4) que emite 'aiAudioChunk' con WAVs de
    * `chunkSec` segundos (15-60, defecto 45). Rechaza si no hay reproducción
-   * o si es un directo.
+   * o si es un directo. Con `video: true` además decodifica vídeo a un
+   * ImageReader y emite 'aiVideoFrame' con JPEGs de los fotogramas que
+   * cambian (OCR de texto en pantalla).
    */
-  startAiAudio(options?: { chunkSec?: number }): Promise<void>
+  startAiAudio(options?: { chunkSec?: number; video?: boolean }): Promise<void>
   /** Detiene el tap de audio IA. */
   stopAiAudio(): Promise<void>
   /** Aplica cues generados/traducidos en JS al overlay de subtítulos externo. */
@@ -325,6 +333,9 @@ export interface ExoPlayerPlugin {
     remove: () => void
   }> | { remove: () => void }
   addListener(eventName: 'aiAudioDone', listener: () => void): Promise<{
+    remove: () => void
+  }> | { remove: () => void }
+  addListener(eventName: 'aiVideoFrame', listener: (event: AiVideoFrameEvent) => void): Promise<{
     remove: () => void
   }> | { remove: () => void }
   addListener(eventName: 'aiAudioError', listener: (event: AiAudioErrorEvent) => void): Promise<{
