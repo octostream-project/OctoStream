@@ -127,6 +127,9 @@ export default function Details() {
   // Picker de archivo dentro del torrent (packs multi-archivo):
   // {stream, files, skipResume, candidatesPool} mientras el diálogo está abierto.
   const [torrentPick, setTorrentPick] = useState(null)
+  // Confirmación antes de mandar un magnet a AllDebrid — un toque
+  // accidental en la ficha no debe quemar la cuota/cooldown del debrid.
+  const [debridConfirm, setDebridConfirm] = useState(null)
   // Chip de progreso de descarga offline (torrent → carpeta Descargas).
   const [dlStatus, setDlStatus] = useState(null)
   const dlListenerRef = useRef(null)
@@ -612,6 +615,34 @@ export default function Details() {
   // `episodeStreams` aún lleva los enlaces del episodio ANTERIOR cuando
   // handlePlay corre dentro de handlePlayEpisode — usarlo haría que el
   // fallback debrid reprodujera el capítulo viejo.
+  // Lanza la descarga real del magnet en el debrid (tras confirmación):
+  // upload a AllDebrid con seguimiento de progreso, o la URL de la
+  // instancia AIOStreams (pedirla es lo que dispara el procesamiento).
+  const startDebridDownload = async (stream) => {
+    try {
+      if (stream._magnet && isAlldebridEnabled()) {
+        toast('Enviando el magnet a AllDebrid…')
+        const id = await adUploadMagnet(stream._magnet)
+        if (id) {
+          trackMagnet(id, btihOf(stream._magnet) || stream._infoHash, stream.releaseTitle || stream.name)
+          toast('Añadido a AllDebrid — verás el progreso aquí y aparecerá al estar listo')
+        } else {
+          toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
+        }
+      } else if (stream._triggerUrl) {
+        toast('Solicitando la descarga a AIOStreams…')
+        httpGetText(stream._triggerUrl).catch(() => {})
+        toast('Descarga solicitada — la ficha se actualiza sola')
+      } else {
+        toast('Esta fuente ya está en cola del debrid — aparecerá al estar lista')
+      }
+    } catch (e) {
+      toast.error(`No se pudo iniciar la descarga: ${e?.message || e}`)
+    }
+    // Re-pedir la lista pronto para reflejar el estado de la cola.
+    processingRefetchRef.current?.()
+  }
+
   const handlePlay = async (stream, skipResume = false, candidatesPool = null) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
@@ -640,29 +671,11 @@ export default function Details() {
           return
         }
       } else {
-      try {
-        if (stream._magnet && isAlldebridEnabled()) {
-          toast('Enviando el magnet a AllDebrid…')
-          const id = await adUploadMagnet(stream._magnet)
-          if (id) {
-            trackMagnet(id, btihOf(stream._magnet) || stream._infoHash, stream.releaseTitle || stream.name)
-            toast('Añadido a AllDebrid — verás el progreso aquí y aparecerá al estar listo')
-          } else {
-            toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
-          }
-        } else if (stream._triggerUrl) {
-          toast('Solicitando la descarga a AIOStreams…')
-          httpGetText(stream._triggerUrl).catch(() => {})
-          toast('Descarga solicitada — la ficha se actualiza sola')
-        } else {
-          toast('Esta fuente ya está en cola del debrid — aparecerá al estar lista')
-        }
-      } catch (e) {
-        toast.error(`No se pudo iniciar la descarga: ${e?.message || e}`)
-      }
-      // Re-pedir la lista pronto para reflejar el estado de la cola.
-      processingRefetchRef.current?.()
-      return
+        // Aún descargando o sin job: confirmación antes de (re)lanzar la
+        // descarga — consume cuota del debrid y un toque accidental en la
+        // ficha no debe dispararla.
+        setDebridConfirm(stream)
+        return
       }
     }
     // Torrent multi-archivo (pack de temporada): listar los vídeos y dejar
@@ -1724,6 +1737,39 @@ export default function Details() {
             >
               Cancelar
             </button>
+        </Modal>
+      )}
+
+      {/* Confirmación antes de lanzar la descarga en debrid */}
+      {debridConfirm && (
+        <Modal onClose={() => setDebridConfirm(null)} labelledBy="debrid-confirm-title">
+          <h2 id="debrid-confirm-title" className="text-xl font-bold text-white mb-1">Descargar en debrid</h2>
+          <p className="text-dark-300 text-sm mb-1 break-all">{debridConfirm.releaseTitle || debridConfirm.name}</p>
+          <p className="text-dark-400 text-sm mb-4">
+            Esta fuente aún no está cacheada. Se enviará a AllDebrid para descargarla — aparecerá reproducible al terminar.
+          </p>
+          <div className="flex gap-3">
+            <button
+              data-tv-card
+              data-tv-initial
+              autoFocus
+              onClick={() => {
+                const s = debridConfirm
+                setDebridConfirm(null)
+                startDebridDownload(s)
+              }}
+              className="flex-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg px-4 py-3 font-medium transition-colors"
+            >
+              Descargar
+            </button>
+            <button
+              data-tv-card
+              onClick={() => setDebridConfirm(null)}
+              className="flex-1 bg-dark-700 hover:bg-dark-600 text-dark-300 rounded-lg px-4 py-3 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
         </Modal>
       )}
 
