@@ -7590,11 +7590,15 @@ public class ExoPlayerPlugin extends Plugin {
     private ExoPlayer aiTapPlayer = null;
     private PcmChunker aiPcmChunker = null;
     private long aiLastMainPos = -1;
+    // Posición del tap cacheada desde el ticker (main thread): ExoPlayer
+    // prohíbe leerla desde el hilo del ImageReader (IllegalStateException).
+    private volatile long aiTapPosMs = -1;
     private ExecutorService aiEmitExecutor = null;
 
     private final Runnable aiPaceTicker = new Runnable() {
         @Override public void run() {
             if (aiTapPlayer == null) return;
+            try { aiTapPosMs = aiTapPlayer.getCurrentPosition(); } catch (Throwable ignored) {}
             if (player != null) {
                 long pos = player.getCurrentPosition();
                 // Seek del usuario (>3 s de salto): el tap salta también y se
@@ -7704,9 +7708,8 @@ public class ExoPlayerPlugin extends Plugin {
                     android.media.Image img = reader.acquireLatestImage();
                     if (img == null) return;
                     try {
-                        ExoPlayer p = aiTapPlayer;
-                        if (p == null || !aiVideoEnabled) return;
-                        long pos = p.getCurrentPosition();
+                        if (!aiVideoEnabled || aiTapPosMs < 0) return;
+                        long pos = aiTapPosMs;
                         if (pos - aiLastFrameMs < 3000) return; // ~3 s de media
                         onAiFrame(img, pos);
                     } catch (Throwable ignored) {
@@ -7782,6 +7785,10 @@ public class ExoPlayerPlugin extends Plugin {
                 }
             }
             @Override public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                Log.e(TAG, "AI tap error: " + error.getErrorCodeName(), error);
+                // Liberar el tap roto ya: soltar codec/superficie/ML Kit para
+                // que nada del fallo arrastre al player principal.
+                stopAiAudioTap();
                 JSObject e = new JSObject();
                 e.put("message", error.getMessage() != null ? error.getMessage() : "error");
                 notifyListeners("aiAudioError", e);
@@ -7792,7 +7799,10 @@ public class ExoPlayerPlugin extends Plugin {
                     lastDataSourceFactory, null, null);
             tap.setMediaSource(src);
             tap.seekTo(startPosMs);
-            tap.setPlaybackParameters(new PlaybackParameters(4f));
+            // Con vídeo el tap decodifica ambos y el stream tira el doble por
+            // el túnel aether — bajar a x2 evita saturar el proxy (el audio
+            // solo aguanta x4 sin problema).
+            tap.setPlaybackParameters(new PlaybackParameters(video ? 2f : 4f));
             tap.prepare();
             tap.play();
             aiTapPlayer = tap;
@@ -7818,6 +7828,7 @@ public class ExoPlayerPlugin extends Plugin {
         }
         aiPcmChunker = null;
         aiLastMainPos = -1;
+        aiTapPosMs = -1;
         if (aiImageReader != null) {
             try { aiImageReader.close(); } catch (Exception ignored) {}
             aiImageReader = null;

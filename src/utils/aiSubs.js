@@ -469,7 +469,24 @@ async function onRequest(meta) {
 
 function onAudioError(ev) {
   if (!active) return
-  osdNow(`Subs IA: audio no accesible (${String(ev?.message || 'error').slice(0, 40)})`)
+  const msg = String(ev?.message || 'error').slice(0, 40)
+  // Error transitorio del tap (túnel saturado, codec ocupado): un reintento
+  // desde la posición actual del vídeo suele recuperarlo.
+  if (active.transcribing && !active.retried) {
+    active.retried = true
+    osdNow('Subs IA: error de audio, reintentando…')
+    active.queue = active.queue.then(async () => {
+      if (!active?.transcribing) return
+      try {
+        await ExoPlayer.startAiAudio({ chunkSec: DICTATE_CHUNK_SEC, video: true })
+      } catch {
+        osdNow(`Subs IA: audio no accesible (${msg})`)
+        disposeAiSubs()
+      }
+    })
+    return
+  }
+  osdNow(`Subs IA: audio no accesible (${msg})`)
   disposeAiSubs()
 }
 
