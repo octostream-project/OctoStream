@@ -157,8 +157,11 @@ function normalizeStream(s, defaultLang) {
   }
   if (!lang) lang = normalizeLang(defaultLang)
   const server = s.server || 'Unknown'
-  // Build name: "Server (Lang) Quality" - e.g. "Streamwish (Lat) 1080P"
-  const name = `${server}${lang ? ` (${lang})` : ''} ${quality}`.trim()
+  // Build name: "Server (Lang) Quality" - e.g. "Streamwish (Lat) 1080P".
+  // Canales con título de release real (AIOStreams: nombre del torrent)
+  // lo usan como base — el servidor queda solo en `server`.
+  const base = s.releaseTitle || server
+  const name = `${base}${lang ? ` (${lang})` : ''} ${quality}`.trim()
   return { ...s, quality, lang, server, name }
 }
 

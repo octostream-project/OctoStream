@@ -238,6 +238,10 @@ function stremioToStream(s) {
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
+  // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
+  // es reproducible ahora, así que se oculta. Cuando el usuario reabra la
+  // ficha y ya esté en caché aparecerá solo.
+  if (meta.cached === false) return null
   const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
   const headers = s.behaviorHints?.proxyHeaders?.request
@@ -264,6 +268,7 @@ function stremioToStream(s) {
     stream.name = `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
     stream.lang = lang
     stream.title = release
+    stream.releaseTitle = release || undefined
     stream.headers = headers
     stream.cached = meta.cached
     stream.size = meta.size || undefined
@@ -282,6 +287,7 @@ function stremioToStream(s) {
     server: serverLabel,
     lang,
     title: release,
+    releaseTitle: release || undefined,
     headers,
     size: meta.size || undefined,
     cached: meta.cached ?? (Boolean(s.behaviorHints?.cached) || undefined),
@@ -293,6 +299,9 @@ function stremioToStream(s) {
 
 // ── Respuesta Search API (self-hosted) ─────────────────────────────────────
 function searchToStream(item) {
+  // Igual que en stremioToStream: los "not ready" se ocultan hasta que el
+  // debrid termine de cachearlos.
+  if (item.cached === false) return null
   const parsed = item.parsedFile || {}
   const release = item.filename || item.folderName || ''
   const service = (item.service || 'direct').toLowerCase()
@@ -319,8 +328,10 @@ function searchToStream(item) {
       `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(release || addon)}`
     )
     const stream = makeTorrentStream(label, magnet, quality, release)
-    stream.name = `${label}${lang ? ` (${lang})` : ''} ${quality}${seeders ? ` 👤${seeders}` : ''}${sizeLabel ? ` ${sizeLabel}` : ''}`
+    stream.name = `${release || label}${lang ? ` (${lang})` : ''} ${quality}${seeders ? ` 👤${seeders}` : ''}${sizeLabel ? ` ${sizeLabel}` : ''}`
     stream.lang = lang
+    stream.title = release
+    stream.releaseTitle = release || undefined
     stream.seeds = seeders
     stream.seasonPack = Boolean(parsed.seasonPack) || undefined
     stream.pluginName = 'AIOStreams'
@@ -339,6 +350,7 @@ function searchToStream(item) {
     server: label,
     lang,
     title: release,
+    releaseTitle: release || undefined,
     headers: item.type === 'http' && item.requestHeaders ? item.requestHeaders : undefined,
     viaDebrid: service !== 'direct',
     cached: Boolean(item.cached) || undefined,
