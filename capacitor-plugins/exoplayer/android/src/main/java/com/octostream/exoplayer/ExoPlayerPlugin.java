@@ -891,6 +891,11 @@ public class ExoPlayerPlugin extends Plugin {
                     // DEBUG: log non-asset requests to trace player traffic
                     if (!u.matches(".*\\.(js|css|png|jpe?g|svg|woff2?|ico|gif|webp)(\\?.*)?$"))
                         Log.d(TAG, "HL req: " + hostOf(u));
+                    // Sonda async de playlist: requests sin extensión (iframe
+                    // cross-origin de FCTV/IframePlayer, APIs SPA) — el
+                    // wrapper JS no llega al contexto del iframe.
+                    if (!request.isForMainFrame() && "GET".equalsIgnoreCase(request.getMethod()))
+                        probePlaylist(u, request.getRequestHeaders(), videoHeaders, videoReferer, foundRaw, done);
                     return null;
                 }
                 @Override
@@ -1014,6 +1019,102 @@ public class ExoPlayerPlugin extends Plugin {
 
     // GET síncrono vía stack nativo para servirlo al WebView. Corre dentro de
     // shouldInterceptRequest (hilo de red de WebView — bloquear está OK).
+    // Sonda de playlist para iframes cross-origin: el fetch del playlist del
+    // player ocurre en el contexto del iframe, fuera del alcance de los
+    // wrappers JS de fetch/XHR (FCTV IframePlayer pide el stream a una URL
+    // tokenizada tipo /token-<b64>a/... sin extensión .m3u8). El request sí
+    // pasa por shouldInterceptRequest — se relanza el GET en segundo plano
+    // con los headers originales y se mira si el cuerpo es #EXTM3U (o un
+    // texto con una URL .m3u8). La página hace su propia petición igual; la
+    // sonda es una copia pasiva (deduplicada, ≤8KB leídos).
+    private final java.util.Set<String> playlistProbed =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private final ExecutorService playlistProbePool = Executors.newFixedThreadPool(3);
+
+    private void probePlaylist(String u, java.util.Map<String, String> reqHeaders,
+                               java.util.Map<String, String> videoHeaders,
+                               String[] videoReferer,
+                               java.util.function.BiConsumer<String, String> resolved,
+                               boolean[] done) {
+        try {
+            if (done != null && done[0]) return;
+            if (u == null || !(u.startsWith("http://") || u.startsWith("https://"))) return;
+            String path = android.net.Uri.parse(u).getPath();
+            if (path == null) path = "";
+            // Estáticos y segmentos conocidos: no son playlists.
+            if (path.matches("(?i).*\\.(js|css|png|jpe?g|svg|webp|gif|ico|woff2?|ttf|otf|json|xml|txt|map|html?|php|wasm|mp3|mp4|m4s|ts|aac|vtt|srt|m3u|pdf)$")) return;
+            synchronized (playlistProbed) {
+                if (playlistProbed.size() > 400) playlistProbed.clear();
+                if (!playlistProbed.add(u)) return;
+            }
+            playlistProbePool.execute(() -> {
+                java.net.HttpURLConnection conn = null;
+                try {
+                    conn = (java.net.HttpURLConnection) new java.net.URL(u).openConnection();
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    conn.setInstanceFollowRedirects(true);
+                    String ua = reqHeaders != null ? pickHeader(reqHeaders, "User-Agent") : null;
+                    conn.setRequestProperty("User-Agent", ua != null ? ua
+                        : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    if (reqHeaders != null) {
+                        for (String k : new String[]{"Referer", "Origin", "Accept", "Accept-Language", "Cookie"}) {
+                            String v = pickHeader(reqHeaders, k);
+                            if (v != null) conn.setRequestProperty(k, v);
+                        }
+                    }
+                    int code = conn.getResponseCode();
+                    if (code < 200 || code >= 300) { conn.disconnect(); return; }
+                    byte[] buf = new byte[8192];
+                    int n;
+                    try (java.io.InputStream in = conn.getInputStream()) { n = in.read(buf); }
+                    if (n <= 0 || (done != null && done[0])) return;
+                    String head = new String(buf, 0, n, java.nio.charset.StandardCharsets.UTF_8)
+                        .replaceFirst("^\\s+", "");
+                    String hit = null;
+                    if (head.startsWith("#EXTM3U")) {
+                        hit = u;
+                    } else if (head.length() < 200000) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                            .compile("https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*")
+                            .matcher(head);
+                        if (m.find()) hit = m.group(0);
+                    }
+                    if (hit == null || (done != null && done[0])) return;
+                    Log.d(TAG, "Probe playlist hit: " + hostOf(hit));
+                    if (reqHeaders != null && videoHeaders != null) {
+                        synchronized (videoHeaders) {
+                            for (String k : new String[]{"User-Agent", "Referer", "Origin", "Cookie"}) {
+                                String v = pickHeader(reqHeaders, k);
+                                if (v != null) videoHeaders.put(k, v);
+                            }
+                        }
+                    }
+                    if (videoReferer != null) {
+                        String ref = reqHeaders != null ? pickHeader(reqHeaders, "Referer") : null;
+                        if (ref != null) videoReferer[0] = ref;
+                    }
+                    resolved.accept(hit, "hls");
+                } catch (Exception ignored) {
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private static String pickHeader(java.util.Map<String, String> h, String name) {
+        if (h == null) return null;
+        String v = h.get(name);
+        if (v == null) v = h.get(name.toLowerCase());
+        if (v == null) {
+            for (java.util.Map.Entry<String, String> e : h.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase(name)) return e.getValue();
+            }
+        }
+        return v;
+    }
+
     private WebResourceResponse proxyEmbedGet(String u, String fallbackReferer, java.util.Map<String, String> reqHeaders) {
         java.net.HttpURLConnection conn = null;
         try {
@@ -2116,7 +2217,8 @@ public class ExoPlayerPlugin extends Plugin {
             }
         }
 
-        resolverWebView.addJavascriptInterface(new VideoResolverInterface(), "AndroidVideoResolver");
+        final VideoResolverInterface videoBridge = new VideoResolverInterface();
+        resolverWebView.addJavascriptInterface(videoBridge, "AndroidVideoResolver");
 
         resolverWebView.setWebViewClient(new WebViewClient() {
             private boolean isAllowedTopUrl(String u) {
@@ -2266,6 +2368,14 @@ public class ExoPlayerPlugin extends Plugin {
                     || u.contains("/hls/") || u.contains("/dash/") || u.contains("master")) {
                     Log.d(TAG, "Intercept candidate: " + hostOf(u));
                 }
+                // Sonda async: playlist sin extensión dentro de iframe
+                // cross-origin (FCTV IframePlayer) — el wrapper JS de
+                // fetch/XHR solo vive en el documento top.
+                if ("GET".equalsIgnoreCase(request.getMethod()))
+                    probePlaylist(u, request.getRequestHeaders(), null, null,
+                        (hit, st) -> mainHandler.post(() -> {
+                            if (!resolved[0]) videoBridge.resolveEmbedVideo(hit, st);
+                        }), resolved);
                 checkVideoUrl(u, resolved, call, embedTitle);
                 return null;
             }
