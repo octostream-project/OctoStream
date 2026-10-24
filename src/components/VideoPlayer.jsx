@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
+import { parseStreamLang } from '../utils/streamMeta.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { setPlayerOpen, markPlayerClosed } from '../utils/tvNavigation.js'
 import {
@@ -784,6 +785,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         logo: currentChannel?.logo || currentChannel?.poster || meta?.poster || '',
         onZap: onZapChannel,
         mode,
+        // Idioma detectado del stream — el player lo usa para lanzar los
+        // subtítulos en español automáticos cuando no es ESP/LAT.
+        lang: parseStreamLang(stream) || '',
         // IMDB + temporada/episodio para el botón "Buscar en OpenSubtitles"
         // del menú de subtítulos nativo (addon Stremio, sin API key).
         imdbId: meta?.imdbId || '',

@@ -4,7 +4,7 @@
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative, isElectron } from './platform.js'
 import { sanitizeHttpUrl } from './sanitizeUrl.js'
-import { initAiSubs, disposeAiSubs } from './aiSubs.js'
+import { initAiSubs, disposeAiSubs, maybeAutoSubs } from './aiSubs.js'
 import { pushSubStyle } from './subStyle.js'
 import { isWarpConnected } from './warpStatus.js'
 
@@ -168,7 +168,13 @@ export async function playStream(options, onStateChange) {
     longBuffering: options.longBuffering === true,
     fastStart: options.fastStart === true,
     loadingText: options.loadingText || null,
-  }).then(r => { pushSubStyle(); return r })
+  }).then(r => {
+    pushSubStyle()
+    // Audio no-español → subtítulos en español automáticos (OpenSubtitles
+    // → traducción → transcripción IA). El propio maybeAutoSubs decide.
+    maybeAutoSubs(options)
+    return r
+  })
 }
 
 /**

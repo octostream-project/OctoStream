@@ -16,6 +16,7 @@ import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpGetText } from './httpClient.js'
 import { dictateWav, duckChat } from './duckAi.js'
 import { getJsonSync, setJsonSync } from './storage.js'
+import { parseStreamLang } from './streamMeta.js'
 
 const OPENSUBS_STREMIO = 'https://opensubtitles-v3.strem.io'
 const TRANSLATE_BATCH_CUES = 30 // cues por petición de chat (~1-2 s c/u)
@@ -522,8 +523,33 @@ function onAudioDone() {
   })
 }
 
+// Auto-carga de subtítulos en español al reproducir: si el audio detectado
+// del stream NO es español (ESP/LAT/DUAL/MULTI — SUB/VOSE ya llevan subs),
+// se lanza el mismo pipeline del botón "Subs IA" sin intervención:
+// OpenSubtitles → traducción → transcripción de audio como última vía.
+// Idioma desconocido (sin dato) no dispara nada — podría ser cualquier cosa.
+const SPANISH_AUDIO = new Set(['ESP', 'LAT', 'DUAL', 'MULTI', 'SUB', 'VOSE', 'ESPSUB', 'CAST'])
+let lastAutoKey = '' // los reintentos de playStream no re-disparan
+
+export function maybeAutoSubs(options = {}) {
+  if (!isAndroidNative()) return
+  if (options.mode === 'live') return
+  const lang = parseStreamLang({ lang: options.lang }) || String(options.lang || '').trim().toUpperCase()
+  if (!lang || SPANISH_AUDIO.has(lang)) return
+  const key = `${options.imdbId || ''}|${options.url || ''}`
+  if (key === lastAutoKey) return
+  lastAutoKey = key
+  onRequest({
+    imdbId: options.imdbId || '',
+    season: options.season || 0,
+    episode: options.episode || 0,
+    url: options.url || '',
+  }).catch(e => console.warn('[aiSubs] auto:', e?.message || e))
+}
+
 /** Desactiva sesión y listeners lógicos; se llama al cerrar el player. */
 export function disposeAiSubs() {
+  lastAutoKey = ''
   if (active) {
     try { active.abort.abort() } catch { /* el AbortController ya fue usado */ }
     if (active.key && active.cues.times.length) cacheWrite(active.key, active.cues)
