@@ -36,6 +36,7 @@ function getDefaultLangPriority() {
 const TABS = [
   { id: 'autoplay', name: 'Autoplay', icon: Play },
   { id: 'apis', name: 'APIs', icon: Key },
+  { id: 'subs', name: 'Subtítulos', icon: Captions },
   { id: 'debrid', name: 'Debrid', icon: Download },
   { id: 'red', name: 'Red', icon: Globe },
   { id: 'sync', name: 'Sincronizar', icon: RefreshCw },
@@ -86,6 +87,10 @@ export default function Settings() {
   const [osSaved, setOsSaved] = useState(false)
   const [osError, setOsError] = useState('')
   const [subStyle, setSubStyle] = useState(() => getSubStyle())
+  // Subtítulos en español automáticos cuando el audio no es español
+  // (pipeline: OpenSubtitles → traducción IA → transcripción — duck.ai,
+  // sin clave extra).
+  const [autoSubs, setAutoSubs] = useState(localStorage.getItem('octostream_autosubs') !== 'false')
   const updSubStyle = patch => {
     const next = { ...subStyle, ...patch }
     setSubStyle(next)
@@ -821,171 +826,6 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Captions className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">OpenSubtitles API Key</h3>
-                <p className="text-dark-400 text-sm">
-                  Necesaria para buscar y cargar subtítulos en el reproductor
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
-                  <Key size={14} />
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={osApiKey}
-                  onChange={e => setOsApiKey(e.target.value)}
-                  placeholder="Introduce tu OpenSubtitles API key"
-                  className="input w-full"
-                  onKeyDown={e => e.key === 'Enter' && handleOsSave()}
-                />
-              </div>
-
-              {osError && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
-                  <AlertCircle size={16} />
-                  {osError}
-                </div>
-              )}
-
-              {osSaved && (
-                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
-                  <Check size={16} />
-                  Configuración guardada correctamente
-                </div>
-              )}
-
-              <button onClick={handleOsSave} className="btn-primary">
-                <Check size={18} />
-                Guardar
-              </button>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key gratuita?</p>
-              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
-                <li>Regístrate en opensubtitles.com</li>
-                <li>Ve a API consumers → Register</li>
-                <li>Copia tu API key</li>
-                <li>Pégala arriba</li>
-              </ol>
-              <a
-                href="https://www.opensubtitles.com/consumers"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
-              >
-                Ir a opensubtitles.com
-                <ExternalLink size={14} />
-              </a>
-            </div>
-          </div>
-
-          {/* Estilo de subtítulos: se aplica en caliente al SubtitleView
-              nativo (Android) o a mpv (Electron). */}
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Captions className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">Estilo de subtítulos</h3>
-                <p className="text-dark-400 text-sm">
-                  Tamaño, color, fondo y posición — se aplica en el momento
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <p className="text-dark-300 text-sm mb-2">Tamaño</p>
-                <div className="flex gap-2 flex-wrap">
-                  {[[0.75, '75%'], [1.0, '100%'], [1.25, '125%'], [1.5, '150%']].map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => updSubStyle({ scale: v })}
-                      className={`px-3 py-1.5 rounded-lg text-sm ${
-                        subStyle.scale === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
-                      }`}
-                    >{label}</button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-dark-300 text-sm mb-2">Color del texto</p>
-                <div className="flex gap-2 flex-wrap">
-                  {[['#FFFFFF', 'Blanco'], ['#FFE135', 'Amarillo'], ['#33FFFF', 'Cian'], ['#7CFC00', 'Verde'], ['#FF9E3D', 'Naranja']].map(([hex, label]) => (
-                    <button
-                      key={hex}
-                      onClick={() => updSubStyle({ color: hex })}
-                      className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 ${
-                        subStyle.color === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
-                      }`}
-                    >
-                      <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ backgroundColor: hex }} />
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-dark-300 text-sm mb-2">Fondo</p>
-                <div className="flex gap-2 flex-wrap">
-                  {[['#00000000', 'Sin fondo'], ['#80000000', 'Semi'], ['#FF000000', 'Opaco']].map(([hex, label]) => (
-                    <button
-                      key={hex}
-                      onClick={() => updSubStyle({ bg: hex })}
-                      className={`px-3 py-1.5 rounded-lg text-sm ${
-                        subStyle.bg === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
-                      }`}
-                    >{label}</button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-dark-300 text-sm mb-2">Posición vertical</p>
-                <div className="flex gap-2 flex-wrap">
-                  {[[0.02, 'Bajo'], [0.08, 'Medio'], [0.16, 'Alto']].map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => updSubStyle({ bottom: v })}
-                      className={`px-3 py-1.5 rounded-lg text-sm ${
-                        subStyle.bottom === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
-                      }`}
-                    >{label}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vista previa aproximada del resultado */}
-              <div className="bg-black rounded-lg h-20 flex items-end justify-center pb-2 overflow-hidden">
-                <span
-                  className="px-2 rounded leading-snug text-center"
-                  style={{
-                    color: subStyle.color,
-                    backgroundColor: subStyle.bg,
-                    fontSize: `${Math.round(13 * subStyle.scale)}px`,
-                    marginBottom: `${Math.round(subStyle.bottom * 100)}px`,
-                    textShadow: '0 0 3px #000, 0 0 3px #000',
-                  }}
-                >Así se verán los subtítulos</span>
-              </div>
-            </div>
-          </div>
-
-
           {/* MDBList API key */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
@@ -1399,6 +1239,209 @@ export default function Settings() {
                     <AlertCircle size={14} /> No configurada
                   </span>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Subtítulos */}
+      {activeTab === 'subs' && (
+        <div className="space-y-6">
+          {/* Subtítulos automáticos en español */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Captions className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Subtítulos automáticos</h3>
+                <p className="text-dark-400 text-sm">
+                  Si el audio no es español, busca y aplica subs en español al reproducir
+                </p>
+              </div>
+            </div>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-dark-300">
+                Subtítulos en español automáticos
+                <span className="block text-xs text-dark-500">
+                  OpenSubtitles → traducción IA → transcripción de audio (duck.ai, sin claves)
+                </span>
+              </span>
+              <Toggle
+                checked={autoSubs}
+                onChange={newVal => {
+                  setAutoSubs(newVal)
+                  localStorage.setItem('octostream_autosubs', newVal ? 'true' : 'false')
+                }}
+                label="Subtítulos automáticos en español"
+                color="green"
+              />
+            </label>
+          </div>
+
+          {/* OpenSubtitles API key */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Captions className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">OpenSubtitles API Key</h3>
+                <p className="text-dark-400 text-sm">
+                  Necesaria para buscar y cargar subtítulos en el reproductor
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <Key size={14} />
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={osApiKey}
+                  onChange={e => setOsApiKey(e.target.value)}
+                  placeholder="Introduce tu OpenSubtitles API key"
+                  className="input w-full"
+                  onKeyDown={e => e.key === 'Enter' && handleOsSave()}
+                />
+              </div>
+
+              {osError && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
+                  <AlertCircle size={16} />
+                  {osError}
+                </div>
+              )}
+
+              {osSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
+                  <Check size={16} />
+                  Configuración guardada correctamente
+                </div>
+              )}
+
+              <button onClick={handleOsSave} className="btn-primary">
+                <Check size={18} />
+                Guardar
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key gratuita?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en opensubtitles.com</li>
+                <li>Ve a API consumers → Register</li>
+                <li>Copia tu API key</li>
+                <li>Pégala arriba</li>
+              </ol>
+              <a
+                href="https://www.opensubtitles.com/consumers"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
+              >
+                Ir a opensubtitles.com
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          {/* Estilo de subtítulos: se aplica en caliente al SubtitleView
+              nativo (Android) o a mpv (Electron). */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Captions className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Estilo de subtítulos</h3>
+                <p className="text-dark-400 text-sm">
+                  Tamaño, color, fondo y posición — se aplica en el momento
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Tamaño</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[[0.75, '75%'], [1.0, '100%'], [1.25, '125%'], [1.5, '150%']].map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => updSubStyle({ scale: v })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.scale === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Color del texto</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[['#FFFFFF', 'Blanco'], ['#FFE135', 'Amarillo'], ['#33FFFF', 'Cian'], ['#7CFC00', 'Verde'], ['#FF9E3D', 'Naranja']].map(([hex, label]) => (
+                    <button
+                      key={hex}
+                      onClick={() => updSubStyle({ color: hex })}
+                      className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 ${
+                        subStyle.color === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ backgroundColor: hex }} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Fondo</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[['#00000000', 'Sin fondo'], ['#80000000', 'Semi'], ['#FF000000', 'Opaco']].map(([hex, label]) => (
+                    <button
+                      key={hex}
+                      onClick={() => updSubStyle({ bg: hex })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.bg === hex ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-dark-300 text-sm mb-2">Posición vertical</p>
+                <div className="flex gap-2 flex-wrap">
+                  {[[0.02, 'Bajo'], [0.08, 'Medio'], [0.16, 'Alto']].map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => updSubStyle({ bottom: v })}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${
+                        subStyle.bottom === v ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vista previa aproximada del resultado */}
+              <div className="bg-black rounded-lg h-20 flex items-end justify-center pb-2 overflow-hidden">
+                <span
+                  className="px-2 rounded leading-snug text-center"
+                  style={{
+                    color: subStyle.color,
+                    backgroundColor: subStyle.bg,
+                    fontSize: `${Math.round(13 * subStyle.scale)}px`,
+                    marginBottom: `${Math.round(subStyle.bottom * 100)}px`,
+                    textShadow: '0 0 3px #000, 0 0 3px #000',
+                  }}
+                >Así se verán los subtítulos</span>
               </div>
             </div>
           </div>

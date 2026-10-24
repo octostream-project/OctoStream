@@ -533,6 +533,8 @@ let lastAutoKey = '' // los reintentos de playStream no re-disparan
 
 export function maybeAutoSubs(options = {}) {
   if (!isAndroidNative()) return
+  // Ajuste del usuario (Ajustes → Subtítulos): apagado = nada automático.
+  try { if (localStorage.getItem('octostream_autosubs') === 'false') return } catch { /* storage inaccesible */ }
   if (options.mode === 'live') return
   const lang = parseStreamLang({ lang: options.lang }) || String(options.lang || '').trim().toUpperCase()
   if (!lang || SPANISH_AUDIO.has(lang)) return
