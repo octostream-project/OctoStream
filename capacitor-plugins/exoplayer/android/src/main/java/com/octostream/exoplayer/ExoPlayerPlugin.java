@@ -2192,6 +2192,44 @@ public class ExoPlayerPlugin extends Plugin {
                         });
             }
 
+            // Promoción playback→ExoPlayer: la señal apareció DESPUÉS de la
+            // fase resolver (p.ej. FCTV "señal procesándose" hasta el pitido
+            // inicial). Cuando la sonda captura el playlist del iframe, el
+            // embed visible entrega el vídeo a ExoPlayer con los headers del
+            // request original (Referer/Origin del iframe, no del documento).
+            private void promoteEmbedToPlayer(String videoUrl, java.util.Map<String, String> reqHeaders) {
+                resolved[0] = true;
+                Log.d(TAG, "Embed promoted to ExoPlayer: " + hostOf(videoUrl));
+                try {
+                    embedCookies = android.webkit.CookieManager.getInstance().getCookie(videoUrl);
+                } catch (Exception ignored) {}
+                JSObject notify = new JSObject();
+                notify.put("state", "embed_resolved");
+                notify.put("url", videoUrl);
+                notify.put("streamType", "hls");
+                notifyListeners("playbackState", notify);
+                String ref = pickHeader(reqHeaders, "Referer");
+                String ua = pickHeader(reqHeaders, "User-Agent");
+                String origin = pickHeader(reqHeaders, "Origin");
+                String cookies = embedCookies;
+                mainHandler.post(() -> {
+                    if (embedDialog != null) {
+                        try { embedDialog.dismiss(); } catch (Exception ignored) {}
+                        embedDialog = null;
+                    }
+                    cleanupResolver();
+                    JSObject headers = new JSObject();
+                    headers.put("User-Agent", ua != null ? ua
+                        : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    if (ref != null && ref.startsWith("http")) headers.put("Referer", ref);
+                    if (origin != null && origin.startsWith("http")) headers.put("Origin", origin);
+                    if (cookies != null && !cookies.isEmpty()) headers.put("Cookie", cookies);
+                    currentBypassVpn = false;
+                    boundToWarp = null;
+                    openPlayer(videoUrl, "hls", false, null, headers, new JSObject(), embedTitle, "live", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
+                });
+            }
+
             @android.webkit.JavascriptInterface
             public void onVideoFound(String videoUrl) {
                 if (videoUrl != null && !videoUrl.isEmpty() && !resolved[0] && isVideoUrl(videoUrl)) {
@@ -2217,6 +2255,9 @@ public class ExoPlayerPlugin extends Plugin {
             }
         }
 
+        // Headers del request del playlist capturado por la sonda playback —
+        // se reutilizan al promover el stream a ExoPlayer.
+        final java.util.Map<String, String> promoHeaders = new java.util.HashMap<>();
         final VideoResolverInterface videoBridge = new VideoResolverInterface();
         resolverWebView.addJavascriptInterface(videoBridge, "AndroidVideoResolver");
 
@@ -2359,6 +2400,17 @@ public class ExoPlayerPlugin extends Plugin {
                     // /e/<id>/001.mp4 como página del embed y se marcaría
                     // playback con una página HTML.
                     if (!request.isForMainFrame() && isMediaRequest(u)) markEmbedPlaying(mediaStarted);
+                    // Sonda de playlist en playback: si la señal aún no
+                    // existía durante la fase resolver (FCTV "señal en vivo
+                    // procesándose"), el playlist llega tarde — cuando el
+                    // iframe lo pida, promover a ExoPlayer con los headers
+                    // del propio request (Referer del iframe incluido).
+                    if (!request.isForMainFrame() && "GET".equalsIgnoreCase(request.getMethod())) {
+                        probePlaylist(u, request.getRequestHeaders(), promoHeaders, null,
+                            (hit, st) -> mainHandler.post(() -> {
+                                if (!resolved[0]) videoBridge.promoteEmbedToPlayer(hit, promoHeaders);
+                            }), resolved);
+                    }
                     return null;
                 }
                 // Igual en modo resolver: el main frame nunca es media.

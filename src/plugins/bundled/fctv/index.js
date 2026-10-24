@@ -277,14 +277,21 @@ const OFFLINE_CFG = {
 // responde. The site's own iframe uses mdata=b64(matchId_sportType). The
 // player page rejects requests without a Referer — pass the match page URL
 // so the native resolver sends it on the initial loadUrl.
-function buildEmbedStreams(cfg, m, matchId) {
+// channelNames: canales disponibles del partido (match/detail) — el player
+// web lleva selector interno y no se puede enlazar uno concreto (mdata solo
+// lleva matchId_sportType), así que el nombre va delante y todos quedan en
+// el subtítulo.
+function buildEmbedStreams(cfg, m, matchId, channelNames = []) {
   const referer = matchPageUrl(cfg.webDomain, m)
   const mdata = btoa(`${matchId}_${m.sportType}`)
+  const chans = channelNames.filter(Boolean)
+  const lead = chans[0] ? `${chans[0]}${chans.length > 1 ? ` +${chans.length - 1}` : ''}` : 'FCTV'
+  const sub = chans.length ? ` · ${chans.join(', ')}` : ''
   const embeds = []
   for (const [i, dom] of cfg.iframeDomains.slice(0, 3).entries()) {
     embeds.push({
-      name: `FCTV Web ${i + 1}`,
-      title: 'FCTV · Web',
+      name: `${lead} · Web ${i + 1}`,
+      title: `FCTV · Web${sub}`,
       url: `https://${dom}/es/player.html?mdata=${mdata}&ilang=es`,
       referer,
       streamType: 'embed',
@@ -297,8 +304,8 @@ function buildEmbedStreams(cfg, m, matchId) {
   for (const [i, base] of [cfg.playerDomains[0], cfg.webDomain].entries()) {
     if (!base) continue
     embeds.push({
-      name: `FCTV Página${i ? ' (alt)' : ''}`,
-      title: 'FCTV · Web',
+      name: `${lead} · Página${i ? ' (alt)' : ''}`,
+      title: `FCTV · Web${sub}`,
       url: matchPageUrl(base, m),
       streamType: 'embed',
       quality: 'auto',
@@ -607,12 +614,17 @@ async function getUserInfo(cfg, signal) {
   return userInfoCache
 }
 
-async function resolveDirectStreams(cfg, m, signal) {
+// Stream entries del partido ({streamId, siteType, name…}) — los nombres
+// alimentan también las etiquetas de los embeds web.
+async function fetchStreamEntries(cfg, m, signal) {
   const detBuf = await apiGet(cfg, '/api/match/detail', {
     matchId: m.matchId, sportType: m.sportType, stream: 'true', usls: 'rbp',
   }, signal)
-  const entries = parseDetailStreams(new Uint8Array(detBuf))
+  return parseDetailStreams(new Uint8Array(detBuf))
     .filter(e => e.streamId && e.siteType)
+}
+
+async function resolveDirectStreams(cfg, m, entries, signal) {
   if (!entries.length) return []
 
   const ui = await getUserInfo(cfg, signal)
@@ -839,15 +851,23 @@ export const fctvFactory = (config) => {
           matchDate: item?._matchDate || Number(parts[4]) || undefined,
         }
 
-        const embeds = buildEmbedStreams(cfg, m, matchId)
+        // match/detail: stream entries (nombres de canal para los embeds y
+        // datos para la resolución directa). Presupuesto propio de 10s: si el
+        // manager corta antes, los embeds ya construidos no se pierden.
+        let entries = []
+        try {
+          entries = await fetchStreamEntries(cfg, m, shortSignal(signal, 10000))
+          if (!entries.length) logWarn('[FCTV] no stream entries:', matchId)
+        } catch (e) {
+          if (!signal?.aborted) logWarn('[FCTV] match detail failed:', String(e?.message || e))
+        }
 
-        // Direct HLS: match/detail → stream/detail → ROT47 + rb-session token.
-        // Presupuesto propio de 10s. Un abort o fallo aquí no tira los embeds
-        // ya construidos: si el timeout del manager venció, el resultado se
-        // descarta igualmente aguas arriba.
+        const embeds = buildEmbedStreams(cfg, m, matchId, entries.map(e => e.name))
+
+        // Direct HLS: stream/detail → ROT47 + rb-session token.
         let direct = []
         try {
-          direct = await resolveDirectStreams(cfg, m, shortSignal(signal, 10000))
+          direct = await resolveDirectStreams(cfg, m, entries, signal)
         } catch (e) {
           if (!signal?.aborted) {
             logWarn('[FCTV] direct resolve failed:', String(e?.message || e))
