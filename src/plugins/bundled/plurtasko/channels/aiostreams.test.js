@@ -128,6 +128,21 @@ describe('aiostreams (manifest stremio)', () => {
     expect(pending.lang).toBe('Esp')
   })
 
+  it('la URL placeholder de github cuenta como no lista aunque el tag diga [AD+]', async () => {
+    safeFetchJson.mockResolvedValue({
+      streams: [STREMIO({
+        name: '[AD+] Comet 1080p',
+        title: 'Movie.Name.1080p',
+        description: '💾2.10 GB 👤45 ⚙️PirateBay\n🇪🇸',
+        url: 'https://github.com/Viren070/AIOStreams/releases/download/assets/downloading.mp4',
+      })],
+    })
+    const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
+    expect(s[0].processing).toBe(true)
+    expect(s[0].url).toBeUndefined()
+    expect(s[0].seeds).toBe(45)
+  })
+
   it('series usa el sufijo s:e en la URL', async () => {
     safeFetchJson.mockResolvedValue({ streams: [] })
     await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'series', season: 2, episode: 5 })

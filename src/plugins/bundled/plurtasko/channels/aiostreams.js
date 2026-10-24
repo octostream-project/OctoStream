@@ -220,6 +220,11 @@ export const aiostreams = {
 let _processingCount = 0
 export function aioProcessingCount() { return _processingCount }
 
+// La instancia sirve su vídeo placeholder "not cached"/"downloading" como
+// un mp4 alojado en GitHub (release assets del repo AIOStreams). Nunca es
+// la fuente real: cuenta como no lista aunque el tag diga "[AD+]".
+const isPlaceholderUrl = (u) => /^https?:\/\/(?:www\.)?github\.com\//i.test(String(u || ''))
+
 // Disponibilidad real en AllDebrid: el formatter de la instancia puede no
 // marcar el estado de caché — sin este check las fuentes no listas llegan
 // como "reproducibles" y al pulsarlas la instancia sirve su vídeo
@@ -263,8 +268,9 @@ export async function applyDebridAvailability(streams, signal) {
     if (ready === true) {
       // Confirmado instantáneo → chip ⚡ aunque el formatter no lo diga.
       // Si venía marcada "descargando" y guarda la URL de la instancia,
-      // se recupera como reproducible directo.
-      if (s.processing && /^https?:/i.test(String(s._triggerUrl || ''))) {
+      // se recupera como reproducible directo — nunca el placeholder
+      // github (ese seguiría siendo el vídeo "not cached").
+      if (s.processing && /^https?:/i.test(String(s._triggerUrl || '')) && !isPlaceholderUrl(s._triggerUrl)) {
         return { ...s, processing: undefined, url: s._triggerUrl, streamType: inferStreamType(s._triggerUrl, 'mp4'), cached: true }
       }
       return s.processing ? s : { ...s, cached: true }
@@ -399,6 +405,9 @@ function stremioToStream(s) {
   }
   const pageUrl = String(s.url || s.externalUrl || '')
   const okUrl = /^https?:/i.test(pageUrl) ? pageUrl : ''
+  // URL placeholder (vídeo "not cached" alojado en github): no es la fuente
+  // real — cuenta como no lista aunque el tag del name diga "[AD+]".
+  if (isPlaceholderUrl(okUrl)) meta.cached = false
 
   // No cacheado ("⏳ Not Ready"): el debrid aún lo está descargando — no
   // es reproducible pero se muestra atenuado con su título, y pulsarlo
