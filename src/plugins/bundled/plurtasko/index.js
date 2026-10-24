@@ -621,7 +621,7 @@ function normalizeStreamForPlayback(stream) {
 // the same release listed by two torrent sites shows one entry per site
 // (the user picks the source); only true repeats within a site collapse.
 // Debrid-resolved variants dedupe by originalUrl.
-function dedupeTorrentStreams(streams) {
+export function dedupeTorrentStreams(streams) {
   const pos = new Map()
   const keyOf = (s) => {
     const src = String(s.originalUrl || s.url || '')
@@ -645,7 +645,26 @@ function dedupeTorrentStreams(streams) {
     const curIsResolved = !/\.torrent|magnet:/i.test(String(s.url || ''))
     if (curIsResolved && !prevIsResolved) out[prev] = s
   }
-  return out
+
+  // Propagación de seeds por infoHash: las webs de torrent no publican el
+  // dato y el scrape HTTP de trackers está muerto, pero Torrentio/
+  // AIOStreams sí lo traen (MejorTorrent, Wolfmax4k…). Si el mismo btih
+  // aparece en otro canal (pelispanda, dontorrent…), le copiamos el count
+  // para que la ficha muestre 👤N en todos los enlaces del mismo release.
+  const hashOf = (s) => s._infoHash?.toLowerCase()
+    || String(s.originalUrl || s.url || '').match(/btih:([a-zA-Z0-9]{32,40})/i)?.[1]?.toLowerCase()
+    || ''
+  const seedsByHash = new Map()
+  for (const s of out) {
+    const h = hashOf(s)
+    if (h && s.seeds > 0 && (seedsByHash.get(h) || 0) < s.seeds) seedsByHash.set(h, s.seeds)
+  }
+  if (!seedsByHash.size) return out
+  return out.map(s => {
+    if (s.seeds > 0) return s
+    const n = seedsByHash.get(hashOf(s))
+    return n ? { ...s, seeds: n } : s
+  })
 }
 
 async function resolveStreams(streams, onBatch, context = {}) {

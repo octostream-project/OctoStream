@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CONTENT_TYPES } from '../../base.js'
-import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults, titleSeasonMarker, extractPageYear } from './index.js'
+import { CHANNELS, plurtaskoFactory, titleRelevance, rankSearchResults, titleSeasonMarker, extractPageYear, dedupeTorrentStreams } from './index.js'
 
 // fetchHtml se mockea a nivel de módulo: la verificación por año descarga
 // la página del resultado y los tests no deben tocar la red. Por defecto
@@ -454,5 +454,27 @@ describe('verificación por año de la página del resultado', () => {
       movieChannel.getStreams = origGetStreams
       searchStub.restore()
     }
+  })
+})
+
+describe('dedupeTorrentStreams + propagación de seeds', () => {
+  it('copia seeds por infoHash a streams sin dato', () => {
+    const hash = 'b225cee791c84dac9783da48531cc2684d5cdeb3'
+    const streams = [
+      // Torrentio trae seeds para el mismo release
+      { url: `magnet:?xt=urn:btih:${hash}&dn=Dune`, streamType: 'torrent', server: 'Torrentio', seeds: 84 },
+      // PelisPanda no publica seeds
+      { url: `magnet:?xt=urn:btih:${hash.toUpperCase()}&dn=Dune`, streamType: 'torrent', server: 'PelisPanda' },
+      // Otro release sin seeds — no debe tocarlo
+      { url: 'magnet:?xt=urn:btih:aaaa1111bbbb2222cccc3333dddd4444eeee5555', streamType: 'torrent', server: 'PelisPanda' },
+      // Embed no torrent pasa intacto
+      { url: 'https://embed.x/v/1', streamType: 'embed', server: 'voe' },
+    ]
+    const out = dedupeTorrentStreams(streams)
+    expect(out.find(s => s.server === 'Torrentio').seeds).toBe(84)
+    const panda = out.filter(s => s.server === 'PelisPanda')
+    expect(panda.find(s => s.url.includes(hash.toUpperCase())).seeds).toBe(84)
+    expect(panda.find(s => s.url.includes('aaaa1111')).seeds).toBeUndefined()
+    expect(out.find(s => s.streamType === 'embed').seeds).toBeUndefined()
   })
 })
