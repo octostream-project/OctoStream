@@ -1510,12 +1510,18 @@ export const plurtaskoFactory = (config) => {
             if (imdbId === null) imdbId = await imdbIdPromise
             if (!imdbId) return
             const rawStreams = await aiostreams.getStreamsByImdb({ imdbId, type, season, episode })
+            // Estado real de caché en AllDebrid antes de emitir: las
+            // no-listas pasan a "descargando" ya en el primer batch —
+            // si esperábamos al merge final, la UI las mostraba como
+            // reproducibles unos segundos (y reproducían el vídeo
+            // placeholder "not cached" de la instancia).
+            const checked = await applyDebridAvailability(rawStreams)
             // Entradas "processing": magnets que el debrid aún está
             // descargando — se muestran atenuadas con su título (no
             // clicable) y Details re-pide la lista cuando terminen.
             // Sin url: no pasan por resolveStreams.
-            const aioProcessing = rawStreams.filter(s => s.processing)
-            const aioPlayable = rawStreams.filter(s => !s.processing)
+            const aioProcessing = checked.filter(s => s.processing)
+            const aioPlayable = checked.filter(s => !s.processing)
             if (!aioPlayable.length) {
               if (aioProcessing.length) {
                 allStreams = allStreams.filter(s => s._channelId !== 'aiostreams')

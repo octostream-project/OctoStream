@@ -71,6 +71,28 @@ describe('aiostreams (manifest stremio)', () => {
     expect(s[0].seeds).toBe(42)
   })
 
+  it('lee seeders con el emoji 👥 del formatter default/prism', async () => {
+    safeFetchJson.mockResolvedValue({
+      streams: [STREMIO({ description: '📦 2.10 GB 👥 37 🔍 Comet' })],
+    })
+    const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
+    expect(s[0].seeds).toBe(37)
+  })
+
+  it('marca caché desde el emoji ⚡/⏳ del campo name (formatter nuevo)', async () => {
+    safeFetchJson.mockResolvedValue({
+      streams: [
+        STREMIO({ name: 'AD ⚡ 1080p', description: '📦 2 GB', infoHash: 'd'.repeat(40), url: 'https://aio.example/play/abc' }),
+        STREMIO({ name: 'AD ⏳ 1080p', description: '📦 2 GB', infoHash: 'e'.repeat(40), url: 'https://aio.example/play/def' }),
+      ],
+    })
+    const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
+    const cached = s.find(x => !x.processing && x.cached === true)
+    const pending = s.filter(x => x.processing)
+    expect(cached).toBeTruthy()
+    expect(pending.length).toBe(1)
+  })
+
   it('series usa el sufijo s:e en la URL', async () => {
     safeFetchJson.mockResolvedValue({ streams: [] })
     await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'series', season: 2, episode: 5 })

@@ -229,7 +229,9 @@ export async function instantAvailability(hashes) {
   const hs = [...new Set((hashes || []).map(h => String(h || '').toLowerCase()).filter(h => /^[0-9a-f]{32,40}$/.test(h)))]
   if (!hs.length || !isAlldebridEnabled()) return null
   try {
-    try { await waitForVpnTunnel(20000) } catch {}
+    // Sin waitForVpnTunnel: es una consulta de solo lectura (no genera URLs
+    // ligadas a IP como /link/unlock) — esperar al túnel solo retrasaba
+    // el marcado de "descargando" en la lista.
     const body = hs.map(h => `magnets[]=${encodeURIComponent(`magnet:?xt=urn:btih:${h}`)}`).join('&')
     // El endpoint existe en v4 y v4.1 — se prueban ambas por si la
     // instancia de la API cambia de versión.

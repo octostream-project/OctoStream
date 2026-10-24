@@ -228,16 +228,34 @@ export function aioProcessingCount() { return _processingCount }
 // Si la API falla devuelve la lista intacta (mejor no ocultar fuentes).
 export async function applyDebridAvailability(streams, signal) {
   const { isAlldebridEnabled, instantAvailability } = await import('../../alldebrid.js')
-  const { toast } = await import('../../../../components/ui/Toast.jsx')
+  const diag = (m) => console.warn(m)
   if (!isAlldebridEnabled() || signal?.aborted) {
-    toast(`[aio] instant check skip: ad=${isAlldebridEnabled()}`)
+    diag(`[aio] instant check skip: ad=${isAlldebridEnabled()}`)
     return streams
   }
   const hashes = streams.map(s => s._infoHash).filter(Boolean)
-  toast(`[aio] instant check: ${hashes.length}/${streams.length} hashes`)
+  diag(`[aio] instant check: ${hashes.length}/${streams.length} hashes`)
   if (!hashes.length) return streams
+  // Los seeders viajan por infoHash: si otro canal (Torrentio ES sí los
+  // manda) trae el mismo torrent, rellenamos los que no los tienen —
+  // así el popup "descargar en debrid" muestra seeds aunque la instancia
+  // no los envíe en el formatter.
+  const seedsByHash = new Map()
+  for (const s of streams) {
+    const h = s._infoHash
+      || String(s.url || '').match(/btih:([0-9a-f]{32,40})/i)?.[1]?.toLowerCase()
+    if (!h || !(s.seeds > 0)) continue
+    const cur = seedsByHash.get(h) || 0
+    if (s.seeds > cur) seedsByHash.set(h, s.seeds)
+  }
+  if (seedsByHash.size) {
+    streams = streams.map(s => {
+      const h = s._infoHash || String(s.url || '').match(/btih:([0-9a-f]{32,40})/i)?.[1]?.toLowerCase()
+      return (!s.seeds && h && seedsByHash.get(h)) ? { ...s, seeds: seedsByHash.get(h) } : s
+    })
+  }
   const avail = await instantAvailability(hashes)
-  toast(`[aio] instant result: ${avail ? `${[...avail.values()].filter(v => v === false).length} no-listos de ${avail.size}` : 'FALLO API'}`)
+  diag(`[aio] instant result: ${avail ? `${[...avail.values()].filter(v => v === false).length} no-listos de ${avail.size}` : 'FALLO API'}`)
   if (!avail) return streams
   return streams.map(s => {
     if (!s._infoHash) return s
@@ -273,7 +291,14 @@ function parseAioDescription(desc) {
   const addon = (t.match(/🔍\s*([^\n]+)/)?.[1] || '').trim()
   const indexer = (t.match(/📡\s*([^\n]+)/)?.[1] || '').trim()
   const size = (t.match(/📦\s*([\d.,]+\s*[GMTK]i?B)/i)?.[1] || '').trim()
-  const seeds = Number(t.match(/👤\s*(\d+)/)?.[1] || t.match(/(\d+)\s*seeds?\b/i)?.[1] || 0)
+  // Los formatters de AIOStreams usan distintos emojis para seeders:
+  // 👤 (torrentio), 👥 (default/prism/gdrive), 🌱 — también texto plano.
+  const seeds = Number(
+    t.match(/(?:👤|👥|🌱)\s*(\d+)/)?.[1]
+    || t.match(/seeders?\s*[:=]?\s*(\d+)/i)?.[1]
+    || t.match(/(\d+)\s*seeders?\b/i)?.[1]
+    || 0
+  )
   return { cached, addon, indexer, size, seeds }
 }
 
@@ -294,13 +319,26 @@ function stremioToStream(s) {
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
+  // El ⚡/⏳ de caché puede venir en `name` según el formatter (el nuevo
+  // default de AIOStreams lo pone ahí) — se busca solo por emoji para no
+  // confundir títulos tipo "Ready.Player.One" con estado de caché.
+  if (meta.cached === undefined) {
+    const n = String(s.name || '')
+    if (/⏳/.test(n)) meta.cached = false
+    else if (/⚡/.test(n)) meta.cached = true
+  }
   // El 👤/seeders puede venir en title o name según el formatter de la
   // instancia — se busca ahí también. Solo seeds: cached/addon/indexer
   // quedan en description (un título "Ready.Player.One" daría falsos
   // positivos de caché).
   if (!meta.seeds) {
     const extra = `${s.title || ''}\n${s.name || ''}`
-    meta.seeds = Number(extra.match(/👤\s*(\d+)/)?.[1] || extra.match(/(\d+)\s*seeders?\b/i)?.[1] || 0)
+    meta.seeds = Number(
+      extra.match(/(?:👤|👥|🌱)\s*(\d+)/)?.[1]
+      || extra.match(/seeders?\s*[:=]?\s*(\d+)/i)?.[1]
+      || extra.match(/(\d+)\s*seeders?\b/i)?.[1]
+      || 0
+    )
   }
   const lang = detectAioLang(s)
   const quality = extractQualityFromText(info) || 'HD'
@@ -376,7 +414,14 @@ function stremioToStream(s) {
   }
 
   if (!okUrl) return null
-  return {
+  // Invertido respecto a antes: sin confirmación de caché la entrada sale
+  // "descargando" (oscura + reloj) y al pulsarla abre el popup de info del
+  // torrent con Descargar/Cancelar. Las instancias cuyo formatter no marca
+  // ⚡/⏳ devolvían todo como "reproducible" y pulsando servían su vídeo
+  // placeholder "not cached". Solo se muestran directo las que la
+  // instancia confirma listas (cached === true) o que AllDebrid confirme
+  // por /magnet/instant en applyDebridAvailability.
+  const stream = {
     name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
     url: okUrl,
     streamType: inferStreamType(okUrl, 'mp4'),
@@ -396,6 +441,14 @@ function stremioToStream(s) {
     channelName: 'AIOStreams',
     pluginId: 'plurtasko',
   }
+  if (stream.cached === true) return stream
+  // Criterio invertido con matiz: solo se oscurece cuando el texto sugiere
+  // un servicio debrid (⚡/⏳/"download"/tag [AD|RD|TB|PM…]). Si no hay
+  // indicio — directos no-debrid — queda reproducible tal cual.
+  const debridHint = /⏳|⚡|\bdownload(?:ing)?\b|\bnot ready\b|\[(?:ad|rd|tb|pm|dl|ed|oc|ud|nj|sa)\b/i
+  const text = `${s.name || ''} ${s.description || s.title || ''}`
+  if (!debridHint.test(text)) return stream
+  return { ...stream, processing: true, url: undefined, streamType: undefined, cached: false }
 }
 
 // ── Respuesta Search API (self-hosted) ─────────────────────────────────────
