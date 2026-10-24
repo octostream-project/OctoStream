@@ -93,6 +93,41 @@ describe('aiostreams (manifest stremio)', () => {
     expect(pending.length).toBe(1)
   })
 
+  it('preset Torrentio: [AD+]/[AD download] en name, 👤/💾/⚙️ y banderas en description', async () => {
+    safeFetchJson.mockResolvedValue({
+      streams: [
+        STREMIO({
+          name: '[AD+] Comet 1080p',
+          title: 'Movie.Name.1080p',
+          description: 'Movie.Name.1080p.BluRay.x264-GRP.mkv\n💾2.10 GB 👤45 ⚙️PirateBay\n🇪🇸 / 🇬🇧',
+          infoHash: 'f'.repeat(40),
+          url: 'https://aio.example/play/1',
+        }),
+        STREMIO({
+          name: '[AD download] Comet 1080p',
+          title: 'Other.Film.1080p',
+          description: 'Other.Film.1080p.WEB-DL.mkv\n💾3.40 GB 👤12 ⚙️Wolfmax\n🇪🇸',
+          infoHash: '1'.repeat(40),
+          url: 'https://aio.example/play/2',
+          behaviorHints: { filename: 'Other.Film.1080p.WEB-DL.mkv' },
+        }),
+      ],
+    })
+    const s = await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'movie' })
+    const ready = s.find(x => !x.processing)
+    const pending = s.find(x => x.processing)
+    expect(ready.cached).toBe(true)
+    expect(ready.seeds).toBe(45)
+    expect(ready.size).toBe('2.10 GB')
+    expect(ready.server).toBe('PirateBay · Comet')
+    expect(ready.lang).toBe('Dual')
+    expect(pending).toBeTruthy()
+    expect(pending.url).toBeUndefined()
+    expect(pending.seeds).toBe(12)
+    expect(pending.size).toBe('3.40 GB')
+    expect(pending.lang).toBe('Esp')
+  })
+
   it('series usa el sufijo s:e en la URL', async () => {
     safeFetchJson.mockResolvedValue({ streams: [] })
     await aiostreams.getStreamsByImdb({ imdbId: 'tt1', type: 'series', season: 2, episode: 5 })

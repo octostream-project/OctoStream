@@ -190,8 +190,8 @@ export const aiostreams = {
       }
       if (!data) console.warn(`[aiostreams] stream fetch failed or truncated for ${id}`)
       const list = Array.isArray(data?.streams) ? data.streams : []
-      // Diagnóstico del formatter real de la instancia (seeders/cached):
-      // release no pasa console.log a logcat — solo en dev.
+      // Diagnóstico del formatter real de la instancia — solo en dev;
+      // en release los console no llegan a logcat.
       if (import.meta.env?.DEV && list[0]) {
         const s = list[0]
         console.log('[aiostreams] sample:', String(s.description || s.title || s.name || '').slice(0, 300))
@@ -304,6 +304,22 @@ function parseAioDescription(desc) {
   return { cached, addon, indexer, size, seeds }
 }
 
+// Idiomas como banderas (el formatter torrentio pone languageEmojis:
+// "🇪🇸 / 🇬🇧"). Dos o más idiomas distintos → 'Dual'.
+const FLAG_LANG = {
+  '🇪🇸': 'Esp', '🇲🇽': 'Lat', '🇦🇷': 'Lat', '🇨🇴': 'Lat', '🇨🇱': 'Lat', '🇵🇪': 'Lat', '🇻🇪': 'Lat',
+  '🇬🇧': 'Eng', '🇺🇸': 'Eng', '🇫🇷': 'Fra', '🇩🇪': 'Ale', '🇮🇹': 'Ita',
+  '🇵🇹': 'Por', '🇧🇷': 'Por', '🇯🇵': 'Jap', '🇰🇷': 'Cor', '🇨🇳': 'Chi', '🇹🇼': 'Chi',
+  '🇷🇺': 'Rus', '🇮🇳': 'Hin', '🇹🇷': 'Tur', '🇵🇱': 'Pol', '🇳🇱': 'Hol', '🇸🇪': 'Sue',
+  '🇮🇱': 'Heb', '🇬🇷': 'Gre', '🇨🇿': 'Che', '🇭🇺': 'Hun', '🇷🇴': 'Rum', '🇺🇦': 'Ucr',
+  '🇹🇭': 'Tai', '🇻🇳': 'Vie', '🇮🇩': 'Ind', '🇩🇰': 'Dan', '🇳🇴': 'Nor', '🇫🇮': 'Fin',
+}
+function langFromFlags(text) {
+  const flags = String(text || '').match(/[\u{1F1E6}-\u{1F1FF}]{2}/gu) || []
+  const langs = [...new Set(flags.map(f => FLAG_LANG[f]).filter(Boolean))]
+  return langs.length > 1 ? 'Dual' : (langs[0] || '')
+}
+
 // Idioma del archivo real: primero el filename de behaviorHints (lleva los
 // códigos del release, "…ESP.LATINO…"), luego el bingeGroup (nombres en
 // inglés: "Spanish", "English"…) y por último la descripción.
@@ -313,7 +329,7 @@ function detectAioLang(s) {
   const desc = String(s.description || s.title || '')
   // Un archivo con pistas ESP+LATINO no es "Esp" puro: es multi-audio.
   if (/\b(esp|cast|spanish)\b/i.test(`${filename} ${binge}`) && /\b(lat|latino)\b/i.test(`${filename} ${binge}`)) return 'Dual'
-  return detectLangFromText(filename) || detectLangFromText(binge) || detectLangFromText(desc)
+  return detectLangFromText(filename) || detectLangFromText(binge) || langFromFlags(desc) || detectLangFromText(desc)
 }
 
 function stremioToStream(s) {
@@ -321,12 +337,14 @@ function stremioToStream(s) {
   const label = String(s.title || s.description || '').split('\n')[0].trim()
   const info = `${name} ${label}`
   const meta = parseAioDescription(s.description)
-  // El ⚡/⏳ de caché puede venir en `name` según el formatter (el nuevo
-  // default de AIOStreams lo pone ahí) — se busca solo por emoji para no
-  // confundir títulos tipo "Ready.Player.One" con estado de caché.
+  // El estado de caché va en `name` según el formatter: ⚡/⏳ (default) o
+  // el tag de servicio del preset torrentio — "[AD+]" listo,
+  // "[AD download]" bajando.
   if (meta.cached === undefined) {
     const n = String(s.name || '')
-    if (/⏳/.test(n)) meta.cached = false
+    const tag = n.match(/\[[A-Za-z]{1,6}\s*(\+| download)\s*\]/)
+    if (tag) meta.cached = tag[1] === '+'
+    else if (/⏳/.test(n)) meta.cached = false
     else if (/⚡/.test(n)) meta.cached = true
   }
   // El 👤/seeders puede venir en title o name según el formatter de la
@@ -347,6 +365,17 @@ function stremioToStream(s) {
   const headers = s.behaviorHints?.proxyHeaders?.request
     || s.behaviorHints?.proxyHeaders?.response
     || undefined
+  // El addon también puede vivir en `name` (preset torrentio: "[AD+] Comet
+  // 1080p") — se extrae si la description no lo trajo.
+  if (!meta.addon) {
+    const m = String(s.name || '')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/\p{Extended_Pictographic}|‍|️/gu, ' ')
+      .replace(/\b(?:4k|2160p|1440p|1080p|720p|480p|360p|uhd|fhd|hd|sd|cam|unknown)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (m && !/^(aiostreams|ad|rd|tb|pm|dl|ed|oc|ud|nj|sa|p2p)$/i.test(m)) meta.addon = m
+  }
   // "🚀 FHD" como server no dice nada; mejor el addon/indexador real.
   const serverLabel = [meta.indexer, meta.addon].filter(Boolean).join(' · ') || name
   // Título del release real: behaviorHints.filename lleva el nombre del
