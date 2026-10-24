@@ -38,3 +38,4 @@ keystore.properties
 dist-releases/
 
 _logcat_live.txt
+_logcat.txt
