@@ -617,9 +617,17 @@ async function getUserInfo(cfg, signal) {
 // Stream entries del partido ({streamId, siteType, name…}) — los nombres
 // alimentan también las etiquetas de los embeds web.
 async function fetchStreamEntries(cfg, m, signal) {
-  const detBuf = await apiGet(cfg, '/api/match/detail', {
-    matchId: m.matchId, sportType: m.sportType, stream: 'true', usls: 'rbp',
-  }, signal)
+  // Mismo esquema sfver que match/live (firma no verificada, prefijo fijo).
+  let detBuf
+  try {
+    detBuf = await apiGet(cfg, '/sfver000000/api/match/detail', {
+      matchId: m.matchId, language: 4, sportType: m.sportType, stream: 'true',
+    }, signal)
+  } catch {
+    detBuf = await apiGet(cfg, '/api/match/detail', {
+      matchId: m.matchId, sportType: m.sportType, stream: 'true', usls: 'rbp',
+    }, signal)
+  }
   return parseDetailStreams(new Uint8Array(detBuf))
     .filter(e => e.streamId && e.siteType)
 }
@@ -635,7 +643,8 @@ async function resolveDirectStreams(cfg, m, entries, signal) {
     try {
       const { buf, headers } = await apiGetRaw(cfg, '/api/stream/detail', {
         matchId: m.matchId, sportType: m.sportType,
-        streamId: e.streamId, siteType: e.siteType, usls: 'rbp', ...geo,
+        streamId: e.streamId, siteType: e.siteType, usls: 'rbp',
+        withOriginal: 'true', ...geo,
       }, signal)
       const sd = parseStreamDetail(new Uint8Array(buf))
       const rbSession = headers['rb-session']
@@ -735,8 +744,17 @@ async function fetchLive(cfg, sportType, signal) {
 
 async function fetchLiveUncached(cfg, sportType, signal) {
   const cacheKey = `live:${sportType}`
-  // sportType=0 returns all sports; `language` param makes the API 499 — omit it.
-  const buf = await apiGet(cfg, '/api/match/live', { sportType }, signal)
+  // La app oficial firma el path /sfver<md6(qs)[0:6]><ver>/api/match/live —
+  // el prefijo /sfver…/ esquiva el challenge de Cloudflare que devuelve el
+  // path plano (verificado: la firma no se valida server-side). Fallback al
+  // path plano por si el hueco se cierra en algún host.
+  // language=4 (PBLanguage.L_ES) — la app lo manda siempre.
+  let buf
+  try {
+    buf = await apiGet(cfg, '/sfver000000/api/match/live', { language: 4, sportType, stream: 'true' }, signal)
+  } catch {
+    buf = await apiGet(cfg, '/api/match/live', { sportType }, signal)
+  }
   const parsed = parseLiveResponse(new Uint8Array(buf))
   // live list stream markers carry matchId (f50) — a match is streamable
   // when its matchId appears there.
