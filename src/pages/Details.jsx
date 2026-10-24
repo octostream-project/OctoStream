@@ -1744,26 +1744,25 @@ export default function Details() {
       {debridConfirm && (
         <Modal onClose={() => setDebridConfirm(null)} labelledBy="debrid-confirm-title">
           <h2 id="debrid-confirm-title" className="text-xl font-bold text-white mb-1">Descargar en debrid</h2>
-          <p className="text-dark-300 text-sm mb-3 break-all">{debridConfirm.releaseTitle || debridConfirm.name}</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4 text-sm">
-            {debridConfirm.seeds != null && (
-              <p className="text-dark-400">Seeders <span className="text-emerald-400 font-medium">👤 {debridConfirm.seeds}</span></p>
-            )}
-            {debridConfirm.quality && (
-              <p className="text-dark-400">Calidad <span className="text-dark-200">{debridConfirm.quality}</span></p>
-            )}
-            {debridConfirm.size && (
-              <p className="text-dark-400">Tamaño <span className="text-dark-200">{debridConfirm.size}</span></p>
-            )}
-            {debridConfirm.lang && (
-              <p className="text-dark-400">Idioma <span className="text-dark-200">{debridConfirm.lang}</span></p>
-            )}
-            {debridConfirm.server && (
-              <p className="text-dark-400 col-span-2">Origen <span className="text-dark-200">{debridConfirm.server}</span></p>
-            )}
-            {debridConfirm._magnet && (
-              <p className="text-dark-400">Trackers <span className="text-dark-200">{(debridConfirm._magnet.match(/&tr=/g) || []).length}</span></p>
-            )}
+          {/* Layout estilo Torrentio: [AD ⏳] addon · calidad, filename,
+              y la línea de stats 💾 size 👤 seeds ⚙️ indexer 🌎 idioma */}
+          <p className="text-sm mb-2">
+            <span className="text-amber-400 font-bold">[AD ⏳]</span>{' '}
+            <span className="text-dark-200 font-medium">
+              {debridConfirm.server || 'AIOStreams'}{debridConfirm.quality ? ` ${debridConfirm.quality}` : ''}
+            </span>
+          </p>
+          <p className="text-dark-300 text-sm mb-2 break-all">{debridConfirm.releaseTitle || debridConfirm.name}</p>
+          <div className="text-sm text-dark-300 space-y-1.5 mb-2">
+            <p>
+              {debridConfirm.size && <span>💾{debridConfirm.size} </span>}
+              {debridConfirm.seeds > 0 && <span className="text-emerald-400">👤{debridConfirm.seeds} </span>}
+              {debridConfirm._magnet && (
+                <span>📡{(debridConfirm._magnet.match(/&tr=/g) || []).length} trackers </span>
+              )}
+              {debridConfirm.server && <span>⚙️{debridConfirm.server}</span>}
+            </p>
+            {debridConfirm.lang && <p>🌎 {debridConfirm.lang}</p>}
           </div>
           <p className="text-dark-400 text-sm mb-4">
             Esta fuente aún no está cacheada. Se enviará a AllDebrid para descargarla — aparecerá reproducible al terminar.
