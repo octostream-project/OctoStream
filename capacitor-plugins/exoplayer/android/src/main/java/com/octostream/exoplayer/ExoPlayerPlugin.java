@@ -1029,7 +1029,18 @@ public class ExoPlayerPlugin extends Plugin {
     // sonda es una copia pasiva (deduplicada, ≤8KB leídos).
     private final java.util.Set<String> playlistProbed =
         java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    // URLs de media ya promovidas playback→ExoPlayer en este proceso — el
+    // reintento del usuario tras un fallo no debe volver a promover la
+    // misma URL o entraría en bucle embed→player→embed.
+    private final java.util.Set<String> playbackPromoted =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private final ExecutorService playlistProbePool = Executors.newFixedThreadPool(3);
+
+    // Playlists y contenedores que ExoPlayer sabe abrir — los segmentos
+    // sueltos (.ts/.m4s) no: promoverlos daría un stream de un solo chunk.
+    private static boolean isPromotableMedia(String u) {
+        return u != null && u.matches("(?i).*\\.(m3u8|mpd|mp4)([?#].*)?$");
+    }
 
     private void probePlaylist(String u, java.util.Map<String, String> reqHeaders,
                                java.util.Map<String, String> videoHeaders,
@@ -2197,7 +2208,7 @@ public class ExoPlayerPlugin extends Plugin {
             // inicial). Cuando la sonda captura el playlist del iframe, el
             // embed visible entrega el vídeo a ExoPlayer con los headers del
             // request original (Referer/Origin del iframe, no del documento).
-            private void promoteEmbedToPlayer(String videoUrl, java.util.Map<String, String> reqHeaders) {
+            private void promoteEmbedToPlayer(String videoUrl, String st, java.util.Map<String, String> reqHeaders) {
                 resolved[0] = true;
                 Log.d(TAG, "Embed promoted to ExoPlayer: " + hostOf(videoUrl));
                 try {
@@ -2206,7 +2217,7 @@ public class ExoPlayerPlugin extends Plugin {
                 JSObject notify = new JSObject();
                 notify.put("state", "embed_resolved");
                 notify.put("url", videoUrl);
-                notify.put("streamType", "hls");
+                notify.put("streamType", st);
                 notifyListeners("playbackState", notify);
                 String ref = pickHeader(reqHeaders, "Referer");
                 String ua = pickHeader(reqHeaders, "User-Agent");
@@ -2226,7 +2237,7 @@ public class ExoPlayerPlugin extends Plugin {
                     if (cookies != null && !cookies.isEmpty()) headers.put("Cookie", cookies);
                     currentBypassVpn = false;
                     boundToWarp = null;
-                    openPlayer(videoUrl, "hls", false, null, headers, new JSObject(), embedTitle, "live", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
+                    openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "live", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 });
             }
 
@@ -2257,7 +2268,8 @@ public class ExoPlayerPlugin extends Plugin {
 
         // Headers del request del playlist capturado por la sonda playback —
         // se reutilizan al promover el stream a ExoPlayer.
-        final java.util.Map<String, String> promoHeaders = new java.util.HashMap<>();
+        final java.util.Map<String, String> promoHeaders =
+            java.util.Collections.synchronizedMap(new java.util.HashMap<>());
         final VideoResolverInterface videoBridge = new VideoResolverInterface();
         resolverWebView.addJavascriptInterface(videoBridge, "AndroidVideoResolver");
 
@@ -2399,7 +2411,23 @@ public class ExoPlayerPlugin extends Plugin {
                     // La URL del main frame no cuenta: streamtape usa
                     // /e/<id>/001.mp4 como página del embed y se marcaría
                     // playback con una página HTML.
-                    if (!request.isForMainFrame() && isMediaRequest(u)) markEmbedPlaying(mediaStarted);
+                    if (!request.isForMainFrame() && isMediaRequest(u)) {
+                        markEmbedPlaying(mediaStarted);
+                        // Playlists/contenedores reconocibles también se
+                        // promueven a ExoPlayer (mismo mecanismo que la
+                        // sonda): una vez por URL — si ExoPlayer falla y el
+                        // usuario reabre el embed, la misma URL no vuelve a
+                        // promoverse (evita el bucle embed→player→embed).
+                        if (isPromotableMedia(u) && !resolved[0] && playbackPromoted.add(u)) {
+                            java.util.Map<String, String> rh = request.getRequestHeaders();
+                            if (rh != null) promoHeaders.putAll(rh);
+                            String st0 = getStreamType(u);
+                            mainHandler.post(() -> {
+                                if (!resolved[0]) videoBridge.promoteEmbedToPlayer(u, st0, promoHeaders);
+                            });
+                            return emptyAdResponse();
+                        }
+                    }
                     // Sonda de playlist en playback: si la señal aún no
                     // existía durante la fase resolver (FCTV "señal en vivo
                     // procesándose"), el playlist llega tarde — cuando el
@@ -2408,7 +2436,7 @@ public class ExoPlayerPlugin extends Plugin {
                     if (!request.isForMainFrame() && "GET".equalsIgnoreCase(request.getMethod())) {
                         probePlaylist(u, request.getRequestHeaders(), promoHeaders, null,
                             (hit, st) -> mainHandler.post(() -> {
-                                if (!resolved[0]) videoBridge.promoteEmbedToPlayer(hit, promoHeaders);
+                                if (!resolved[0]) videoBridge.promoteEmbedToPlayer(hit, st, promoHeaders);
                             }), resolved);
                     }
                     return null;
