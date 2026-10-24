@@ -14,7 +14,7 @@ import {
 import { enrichLogos } from '../../../utils/sofascore.js'
 import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '../../../utils/httpClient.js'
 import { teamsMatch, canonTeam } from '../../../utils/teamMatch.js'
-import { probeHlsQuality } from '../../../utils/streamProbe.js'
+import { parseMasterQuality } from '../../../utils/streamProbe.js'
 import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 
 // slug → API sportType (values reverse-engineered from the official app)
@@ -666,6 +666,9 @@ async function resolveDirectStreams(cfg, m, entries, signal) {
       const iframeDom = cfg.iframeDomains[streams.length % cfg.iframeDomains.length] || cfg.iframeDomains[0]
       const reqHeaders = { Referer: `https://${iframeDom}/` }
 
+      // _viaRelay: los segmentos del playlist son punteros CDN Smart Link
+      // (_ctump/_ctuph) — el fetch directo da HTTP 487; el relay local los
+      // descifra a hosts espejo firmados (_s2) como hace la app oficial.
       streams.push({
         name: label,
         title: 'FCTV · Directo',
@@ -676,6 +679,7 @@ async function resolveDirectStreams(cfg, m, entries, signal) {
         isLive: true,
         headers: reqHeaders,
         _noCache: true,
+        _viaRelay: true,
       })
       // Backup origins (same token works across their CDN hosts)
       for (const b of sd.backups.slice(0, 2)) {
@@ -692,6 +696,7 @@ async function resolveDirectStreams(cfg, m, entries, signal) {
             isLive: true,
             headers: reqHeaders,
             _noCache: true,
+            _viaRelay: true,
           })
         } catch { /* bad backup origin */ }
       }
@@ -701,12 +706,18 @@ async function resolveDirectStreams(cfg, m, entries, signal) {
     }
   }
   // Resolución real del master .m3u8 (los CDN rotan; sonda paralela con
-  // timeout propio — nunca bloquea la lista si un origen está caído).
+  // timeout propio — nunca bloquea la lista si un origen está caído). Si el
+  // cuerpo no es playlist ("ok rtmp" en hosts play.* cuando la API no da el
+  // endpoint HLS regional) el stream se descarta: ExoPlayer no lo abriría.
   await Promise.allSettled(streams.slice(0, 8).map(async (s) => {
-    const q = await probeHlsQuality(s.url, s.headers, signal)
-    if (q) s.quality = q
+    try {
+      const text = await httpGetText(s.url, s.headers, shortSignal(signal, 6000))
+      if (!text.includes('#EXT')) { s._dead = true; return }
+      const q = parseMasterQuality(text)
+      if (q) s.quality = q
+    } catch { /* sonda fallida — se conserva el stream */ }
   }))
-  return streams
+  return streams.filter(s => !s._dead)
 }
 
 // ─── Plugin ─────────────────────────────────────────────────────────────────

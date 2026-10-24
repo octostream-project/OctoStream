@@ -899,7 +899,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
               setLoadingText('').catch(() => {})
               if (up) {
                 if (currentTimeRef.current > 0) playArgs.startTime = currentTimeRef.current
-                playStream(playArgs, onPlaybackState).catch(e => {
+                launchPlayback().catch(e => {
                   console.warn('[Player] retry tras reconexión WARP falló:', e?.message)
                   if (!cancelled && !closedRef.current) {
                     restoreAppDom()
@@ -935,7 +935,8 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                 // La URL vieja caducó: reanudar en la posición actual, no
                 // en el startTime original (que volvería al inicio).
                 if (currentTimeRef.current > 0) playArgs.startTime = currentTimeRef.current
-                playStream(playArgs, onPlaybackState).catch(e => {
+                // Respeta el camino relay para streams _viaRelay (FCTV CSL).
+                launchPlayback().catch(e => {
                   console.warn('[Player] retry after re-resolve failed:', e?.message)
                   if (!cancelled && !closedRef.current) {
                     restoreAppDom()
@@ -1053,12 +1054,28 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           if (dur > 0) durationRef.current = dur
         }
       }
-      playStream(playArgs, onPlaybackState).catch(e => {
+      const startNative = () => playStream(playArgs, onPlaybackState).catch(e => {
         console.error('[Player] native player error:', e?.message)
         restoreAppDom()
         setPlayerOpen(false)
         setError(`Error al iniciar el reproductor: ${e?.message || 'unknown'}`)
       })
+      // CDN Smart Link (FCTV directo): los segmentos del playlist son
+      // punteros _ctump/_ctuph — el fetch directo devuelve HTTP 487. El
+      // relay local los descifra a hosts espejo firmados como hace la app
+      // oficial; si el relay no arranca se intenta el nativo normal.
+      const launchPlayback = async () => {
+        if (android && stream._viaRelay) {
+          setPlaybackStateListener(onPlaybackState)
+          const rr = await playRelay(
+            playArgs.url, stream.headers?.Referer || stream.referer || '',
+            title || '', mode === 'live' ? 'live' : 'vod').catch(() => null)
+          if (cancelled) return
+          if (rr?.status === 'playing') return
+        }
+        startNative()
+      }
+      await launchPlayback()
 
       // Watchdog: si el player nativo muere sin emitir 'closed' (excepción en
       // el hilo de UI, crash del Activity…), el WebView queda oculto para

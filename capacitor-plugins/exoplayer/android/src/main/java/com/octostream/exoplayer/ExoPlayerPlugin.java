@@ -2967,6 +2967,9 @@ public class ExoPlayerPlugin extends Plugin {
     // Token por sesión del relay: sin él cualquier página embebida (o proceso
     // local) podría usar /relay?u= de proxy abierto hacia hosts de la LAN.
     private volatile String relayToken = null;
+    // Origen del documento que pidió el relay — Referer/UA para las
+    // peticiones Java directas del camino CDN Smart Link (FCTV/RBTV).
+    private volatile String relayReferer = null;
     // openPlayer() llama internamente a closePlayer() → stopEmbedRelay(); este
     // flag protege el relay durante ese openPlayer que precisamente lo usa.
     private boolean relayKeepAlive = false;
@@ -2979,6 +2982,7 @@ public class ExoPlayerPlugin extends Plugin {
         if (relayKeepAlive) return;
         relayReady = false;
         relayToken = null;
+        relayReferer = null;
         // Cerrar los streams, no solo limpiar el mapa: un clear() sin close
         // deja los sockets de ExoPlayer colgados hasta su timeout y fuga fd.
         for (java.io.OutputStream out : relaySinks.values()) {
@@ -3007,6 +3011,10 @@ public class ExoPlayerPlugin extends Plugin {
 
     private void startEmbedRelay(String originUrl, Runnable onReady) {
         stopEmbedRelay();
+        // originUrl es "scheme://host/__relay__": el Referer que el CDN Smart
+        // Link exige es la raíz del origen ("scheme://host/").
+        relayReferer = originUrl != null
+                ? originUrl.replace("/__relay__", "/") : null;
         try {
             relayServer = new java.net.ServerSocket(0, 50,
                     java.net.InetAddress.getByName("127.0.0.1"));
@@ -3194,6 +3202,21 @@ public class ExoPlayerPlugin extends Plugin {
                 return;
             }
             Log.d(TAG, "relay req: " + hostOf(target) + (target.contains(".m3u8") ? " playlist" : " seg"));
+            // CDN Smart Link (FCTV/RBTV): las líneas de segmento del playlist
+            // son punteros cifrados — el host del playlist responde HTTP 487
+            // y los bytes TS reales viven en hosts espejo que se descifran de
+            // _ctump/_ctuph (bruDecode) y se firman con _s2=md5(seg,_ver,00).
+            // La app oficial (com.rblive) hace exactamente esto en
+            // CdnSmartLinkManager. Petición Java directa: solo exige el
+            // Referer del dominio iframe — sin WebView ni CORS de por medio.
+            if (target.contains("_ctump=") || target.contains("_ctuph=")) {
+                if (serveCslTarget(sock, target)) return;
+            } else if (target.contains("/token-")) {
+                // Playlist firmado del mismo proveedor: también via Java
+                // (el WebView tendría problemas de CORS con el host CDN);
+                // las líneas se reescriben al relay igual que en serve().
+                if (serveTokenPlaylist(sock, target)) return;
+            }
             final String reqId = java.util.UUID.randomUUID().toString();
             relaySinks.put(reqId, sock.getOutputStream());
             final String reqIdF = reqId;
@@ -3317,6 +3340,189 @@ public class ExoPlayerPlugin extends Plugin {
             try { sock.close(); } catch (Exception ignored) {}
         }
     }
+
+    // ── CDN Smart Link (FCTV/RBTV) ──────────────────────────────────────────
+    // Port de CdnSmartLinkManager + RBCrypto.bruDecode de la app oficial:
+    // quita 8 chars de prefijo, URL-decode, ROT13 y Base64.
+    private static String bruDecode(String s) {
+        if (s == null || s.length() <= 8) return null;
+        s = s.substring(8);
+        try { s = java.net.URLDecoder.decode(s, "utf-8"); } catch (Exception ignored) {}
+        StringBuilder rot = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 'a' && c <= 'm') || (c >= 'A' && c <= 'M')) rot.append((char) (c + 13));
+            else if ((c >= 'n' && c <= 'z') || (c >= 'N' && c <= 'Z')) rot.append((char) (c - 13));
+            else rot.append(c);
+        }
+        String b64 = rot.toString();
+        byte[] raw;
+        try {
+            raw = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+        } catch (Exception e) {
+            try {
+                raw = android.util.Base64.decode(b64,
+                        android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP);
+            } catch (Exception e2) {
+                return null;
+            }
+        }
+        try { return new String(raw, "utf-8"); } catch (Exception e) { return null; }
+    }
+
+    private static String md5Hex(String s) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] d = md.digest(s.getBytes("utf-8"));
+            StringBuilder h = new StringBuilder(d.length * 2);
+            for (byte b : d) h.append(Character.forDigit((b >> 4) & 15, 16))
+                    .append(Character.forDigit(b & 15, 16));
+            return h.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String rawQueryParam(String url, String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("[?&]" + name + "=([^&#]*)").matcher(url);
+        return m.find() ? m.group(1) : null;
+    }
+
+    // Decodifica un segmento puntero (_ctump/_ctuph) a URLs reales firmadas.
+    // _ctump → "REGION:tipo@host,…" (WW = comodín mundial, va primero);
+    // _ctuph → path real con _ver y _s1 ya incrustados (descarta el prefijo
+    // binario hasta el primer '/'). Cada candidato lleva _s2=md5(file,_ver,00).
+    private java.util.List<String> cslCandidates(String url) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            String mp = bruDecode(rawQueryParam(url, "_ctump"));
+            String ph = bruDecode(rawQueryParam(url, "_ctuph"));
+            if (mp == null || ph == null) return out;
+            int slash = ph.indexOf('/');
+            if (slash < 0) return out;
+            ph = ph.substring(slash);
+            java.util.List<String> ww = new java.util.ArrayList<>();
+            java.util.List<String> rest = new java.util.ArrayList<>();
+            for (String e : mp.split(",")) {
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("([A-Za-z]{2,3}):[a-zA-Z]+@\\s*(\\S+)$").matcher(e.trim());
+                if (!m.find()) continue;
+                String host = m.group(2).trim();
+                if (host.isEmpty()) continue;
+                if ("WW".equalsIgnoreCase(m.group(1))) ww.add(host); else rest.add(host);
+            }
+            ww.addAll(rest);
+            for (String host : ww) {
+                String real = "https://" + host + ph;
+                android.net.Uri ru = android.net.Uri.parse(real);
+                String path = ru.getPath() != null ? ru.getPath() : "";
+                String last = path.contains("/")
+                        ? path.substring(path.lastIndexOf('/') + 1) : path;
+                String ver = ru.getQueryParameter("_ver");
+                String s2 = md5Hex(last + "," + (ver != null ? ver : "") + ",00");
+                out.add(real + (real.contains("?") ? "&" : "?") + "_s2=" + s2);
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    // Sirve un segmento CSL: prueba los hosts candidatos (oficial: máx. 2
+    // reintentos) y vuelca los bytes TS al socket de ExoPlayer.
+    private boolean serveCslTarget(java.net.Socket sock, String target) {
+        java.util.List<String> cands = cslCandidates(target);
+        if (cands.isEmpty()) return false;
+        String ref = relayReferer;
+        for (String cand : cands.subList(0, Math.min(3, cands.size()))) {
+            java.net.HttpURLConnection conn = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(cand).openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(30000);
+                conn.setRequestProperty("User-Agent", RELAY_FETCH_UA);
+                if (ref != null) conn.setRequestProperty("Referer", ref);
+                if (conn.getResponseCode() != 200) continue;
+                java.io.InputStream in = conn.getInputStream();
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+                byte[] body = bos.toByteArray();
+                if (body.length == 0) continue;
+                java.io.OutputStream out = sock.getOutputStream();
+                String hdr = "HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: "
+                        + body.length + "\r\nConnection: close\r\n\r\n";
+                out.write(hdr.getBytes("ISO-8859-1"));
+                out.write(body);
+                out.flush();
+                out.close();
+                Log.d(TAG, "CSL seg served: " + body.length + "B");
+                return true;
+            } catch (Exception e) {
+                Log.d(TAG, "CSL fetch failed: " + e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }
+        return false;
+    }
+
+    // Sirve el playlist firmado /token-… por petición Java y reescribe las
+    // líneas (segmentos y URI="…") a URLs loopback del relay — mismo
+    // resultado que el serve() del WebView pero sin dependencia de CORS.
+    private boolean serveTokenPlaylist(java.net.Socket sock, String target) {
+        java.net.HttpURLConnection conn = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(target).openConnection();
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(20000);
+            conn.setRequestProperty("User-Agent", RELAY_FETCH_UA);
+            if (relayReferer != null) conn.setRequestProperty("Referer", relayReferer);
+            if (conn.getResponseCode() != 200) return false;
+            java.io.InputStream in = conn.getInputStream();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0 && bos.size() < 512 * 1024) bos.write(buf, 0, n);
+            String body = new String(bos.toByteArray(), "utf-8");
+            if (!body.contains("#EXT")) return false;
+            java.net.URL base = new java.net.URL(target);
+            StringBuilder rw = new StringBuilder(body.length() + 1024);
+            for (String line : body.split("\r?\n", -1)) {
+                java.util.regex.Matcher mm = java.util.regex.Pattern
+                        .compile("URI=\"([^\"]+)\"").matcher(line);
+                if (mm.find()) {
+                    String abs = new java.net.URL(base, mm.group(1)).toString();
+                    String rel = relayUrlFor(abs);
+                    rw.append(line.replace(mm.group(1), rel != null ? rel : abs)).append('\n');
+                } else if (!line.isEmpty() && line.charAt(0) != '#') {
+                    String abs = new java.net.URL(base, line.trim()).toString();
+                    String rel = relayUrlFor(abs);
+                    rw.append(rel != null ? rel : abs).append('\n');
+                } else {
+                    rw.append(line).append('\n');
+                }
+            }
+            byte[] b = rw.toString().getBytes("utf-8");
+            java.io.OutputStream out = sock.getOutputStream();
+            String hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: "
+                    + b.length + "\r\nConnection: close\r\n\r\n";
+            out.write(hdr.getBytes("ISO-8859-1"));
+            out.write(b);
+            out.flush();
+            out.close();
+            Log.d(TAG, "token playlist served: " + b.length + "B");
+            return true;
+        } catch (Exception e) {
+            Log.d(TAG, "token playlist fetch failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static final String RELAY_FETCH_UA =
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
     private String relayUrlFor(String mediaUrl) {
         if (relayPort <= 0) return null;
