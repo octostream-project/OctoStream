@@ -6,7 +6,7 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { useTranslation } from '../i18n/index.js'
-import { Trophy, AlertCircle, ExternalLink, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
+import { Trophy, AlertCircle, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
 import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
 import { fetchMarcaCalendar, MARCA_SLUGS } from '../utils/marcaLive.js'
 import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
@@ -379,9 +379,6 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
           <span className="flex items-center gap-1.5">
             {(item._fctvItem || item._dliveItem || item.type !== 'marca') && (
               <Play size={14} className="text-primary-400" aria-label="Streams disponibles" />
-            )}
-            {item.link && (
-              <ExternalLink size={14} className="text-primary-400" aria-label="Enlace Marca" />
             )}
           </span>
         </div>
@@ -860,10 +857,6 @@ export default function Sports() {
             flush()
           })))
       if (requestId !== playRequestRef.current || ctrl.signal.aborted) return
-      // Página del directo en Marca para partidos del calendario.
-      if (item.link) {
-        acc.push({ name: 'Marca · Directo', title: 'Página del partido', _external: item.link })
-      }
       const final = order(acc)
       if (final.length) {
         setStreamPicker({ item, streams: final, loading: false })
@@ -884,10 +877,6 @@ export default function Sports() {
   const playStream = (stream, item) => {
     // Click residual del OK que abrió el picker (keyup tras refocus).
     if (Date.now() - pickerOpenedAtRef.current < 400) return
-    if (stream._external) {
-      window.open(stream._external, '_blank', 'noopener,noreferrer')
-      return
-    }
     setStreamPicker(null)
     // Marca items resuelven el partido FCTV equivalente: reproducir con los
     // metadatos del item real para que el historial quede consistente.
@@ -1328,11 +1317,7 @@ export default function Sports() {
                   onClick={() => playStream(s, streamPicker.item)}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-dark-800 hover:bg-dark-700 text-left transition-colors"
                 >
-                  {s._external ? (
-                    <ExternalLink size={16} className="text-primary-400 flex-shrink-0" />
-                  ) : (
-                    <Play size={16} className="text-primary-400 flex-shrink-0" />
-                  )}
+                  <Play size={16} className="text-primary-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className="block text-sm font-medium text-white truncate">{s.name}</span>
                     <span className="block text-xs text-dark-400 truncate">{s.title}{s.streamType ? ` · ${s.streamType}` : ''}{s.quality ? ` · ${s.quality}` : ''}</span>
