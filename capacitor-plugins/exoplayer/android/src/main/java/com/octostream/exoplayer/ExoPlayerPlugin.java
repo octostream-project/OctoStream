@@ -1120,12 +1120,17 @@ public class ExoPlayerPlugin extends Plugin {
             "  }" +
             // jwplayer (VOE y otros): leer la URL del playlist directamente y
             // forzar play — con autostart:false nunca llega petición de red.
+            // El file de la config va DESNUDO (sin ?t=/firma que el loader del
+            // player añade por petición — p.ej. dembed.st playlist-token). Se
+            // reporta con retardo: si la petición real con token llega antes,
+            // shouldInterceptRequest gana con la URL firmada.
             "  try{if(window.jwplayer){var jp=jwplayer();" +
             "    var pl=jp.getPlaylist&&jp.getPlaylist();" +
             "    if(pl&&pl[0]){var jf=pl[0].file||(pl[0].sources&&pl[0].sources[0]&&pl[0].sources[0].file);" +
-            "      if(jf&&window.AndroidVideoResolver){" +
+            "      if(jf&&window.AndroidVideoResolver&&!window.__jfQueued){window.__jfQueued=1;" +
             "        try{jf=new URL(jf,location.href).href;}catch(e){}" +
-            "        window.AndroidVideoResolver.onVideoFound(jf);}}" +
+            "        var jfD=jf;setTimeout(function(){" +
+            "          if(window.AndroidVideoResolver)window.AndroidVideoResolver.onVideoFound(jfD);},2500);}}" +
             "    if(jp.getState&&jp.getState()!=='playing'){jp.play(true);}" +
             "  }}catch(e){}" +
             // ALTCHA gate (VOE): try the widget's checkbox first, fall back to
@@ -2914,18 +2919,34 @@ public class ExoPlayerPlugin extends Plugin {
                 // fetch dentro del origen del embed. Si la respuesta parece un
                 // playlist se reescriben las URIs a este relay; si viene en
                 // base64 (algunos CDN ofuscan el playlist) se decodifica.
+                // CDNs estilo DLive/dembed protegen el playlist con un token
+                // corto ligado a la IP (param t=): si el fetch devuelve 4xx con
+                // un cuerpo que no es playlist, se pide uno a
+                // /api/playlist-token?slug=<primer segmento del path> en el
+                // mismo edge y se reintenta una vez. Esto además renueva el
+                // token cuando caduca a mitad de sesión (TTL ~120s) — cada
+                // reload del playlist de ExoPlayer pasa por aquí.
                 String js = "(function(){var T=" + org.json.JSONObject.quote(targetF)
                         + ",P=" + relayPort + ",K=" + org.json.JSONObject.quote(relayToken != null ? relayToken : "")
                         + ",R='" + reqIdF + "';"
+                        + "function serve(u){"
                         + "var sig=(typeof AbortSignal!=='undefined'&&AbortSignal.timeout)?AbortSignal.timeout(45000):undefined;"
-                        + "fetch(T,{signal:sig}).then(function(r){var ct=r.headers.get('content-type')||'';"
-                        + "var isList=/mpegurl|m3u8/i.test(ct)||/\\.m3u8(\\?|$)/i.test(T);"
+                        + "fetch(u,{signal:sig}).then(function(r){var ct=r.headers.get('content-type')||'';"
+                        + "var isList=/mpegurl|m3u8/i.test(ct)||/\\.m3u8(\\?|$)/i.test(u);"
                         + "if(isList){return r.text().then(function(t){"
+                        + "if(t.indexOf('#EXT')<0&&r.status>=400&&!serve.retry){"
+                        + "var m=u.match(/^(https?:\\/\\/[^/]+)\\/([^/?#]+)\\//);"
+                        + "if(m){serve.retry=1;return fetch(m[1]+'/api/playlist-token?slug='+encodeURIComponent(m[2]))"
+                        + ".then(function(r2){return r2.json()}).then(function(j){"
+                        + "if(!j||!j.token){AndroidRelay.relayFail(R,'http '+r.status);return;}"
+                        + "var u2=u.replace(/([?&])t=[^&]*&?/g,'$1').replace(/[?&]$/,'');"
+                        + "u2+=(u2.indexOf('?')<0?'?':'&')+'t='+encodeURIComponent(j.token)+'&_='+Date.now();"
+                        + "serve(u2);}).catch(function(){AndroidRelay.relayFail(R,'http '+r.status);});}}"
                         + "if(t.indexOf('#EXT')<0){try{t=atob(t.replace(/\\s/g,''))}catch(e){}}"
                         + "var lines=t.split(/\\r?\\n/).map(function(l){"
                         + "var mm=l.match(/URI=\"([^\"]+)\"/);"
-                        + "if(mm){l=l.replace(mm[1],'http://127.0.0.1:'+P+'/relay?u='+btoa(new URL(mm[1],T).href).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'&k='+K);}"
-                        + "else if(l.length&&l.charAt(0)!=='#'){l='http://127.0.0.1:'+P+'/relay?u='+btoa(new URL(l,T).href).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'&k='+K;}"
+                        + "if(mm){l=l.replace(mm[1],'http://127.0.0.1:'+P+'/relay?u='+btoa(new URL(mm[1],u).href).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'&k='+K);}"
+                        + "else if(l.length&&l.charAt(0)!=='#'){l='http://127.0.0.1:'+P+'/relay?u='+btoa(new URL(l,u).href).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'&k='+K;}"
                         + "return l;});"
                         + "AndroidRelay.relayData(R,btoa(lines.join('\\n')),'application/vnd.apple.mpegurl');"
                         + "});}"
@@ -2941,7 +2962,8 @@ public class ExoPlayerPlugin extends Plugin {
                         + "return r.arrayBuffer().then(function(b){var u8=new Uint8Array(b),bin='';"
                         + "for(var i=0;i<u8.length;i+=32768){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+32768));}"
                         + "AndroidRelay.relayData(R,btoa(bin),ct||'video/mp2t');});"
-                        + "}).catch(function(e){AndroidRelay.relayFail(R,''+e);});})()";
+                        + "}).catch(function(e){AndroidRelay.relayFail(R,''+e);});}"
+                        + "serve(T);})()";
                 wv.evaluateJavascript(js, null);
             });
         } catch (Exception e) {

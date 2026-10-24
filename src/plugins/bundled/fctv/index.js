@@ -50,9 +50,9 @@ const API_HOST_CANDIDATES = [
 
 // Web-domain fallbacks if both params and hub page fail
 const WEB_DOMAIN_FALLBACKS = [
+  'https://www.fctv33hd.cv',
+  'https://www.fctv33go.sbs',
   'https://www.fctv33hd.host',
-  'https://www.fctv33hd.digital',
-  'https://www.fctv33hd.icu',
 ]
 
 // Player-iframe domain fallbacks (g_player_domains.foth)
