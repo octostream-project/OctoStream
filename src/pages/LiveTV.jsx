@@ -287,6 +287,22 @@ export default function LiveTV() {
   const playRequestRef = useRef(0)
   const playAbortRef = useRef(null)
 
+  // URL fresca del canal que esté sonando en ese momento (currentChannelRef
+  // sigue los zaps). Los enlaces de directo caducan a mitad de sesión —
+  // VideoPlayer la pide al fallar la fuente en vez de morir con el error.
+  const attachStreamRefresh = (stream) => {
+    if (!stream) return stream
+    stream._refreshUrl = async () => {
+      const ch = currentChannelRef.current
+      if (!ch) return null
+      try {
+        const fresh = await pluginManager.getStreams(ch.type, ch.id, ch.name)
+        return fresh?.[0]?.url || null
+      } catch { return null }
+    }
+    return stream
+  }
+
   useEffect(() => () => {
     playRequestRef.current++
     playAbortRef.current?.abort()
@@ -321,7 +337,7 @@ export default function LiveTV() {
       if (stream) {
         // No guardar en historial aquí — solo se guarda al cerrar el player.
         console.log('[LiveTV] setPlaying called for:', channel.name)
-        setPlaying({ stream, channel, isU7d: channel.id?.startsWith('u7d-') || !!channel.isU7d })
+        setPlaying({ stream: attachStreamRefresh(stream), channel, isU7d: channel.id?.startsWith('u7d-') || !!channel.isU7d })
         currentChannelRef.current = channel
       } else {
         setError(t('live.load_error') + ': sin stream')
@@ -349,7 +365,14 @@ export default function LiveTV() {
   const pendingZapRef = useRef(null)
   const handleZapChannel = useCallback(async (event) => {
     console.log('[LiveTV] channelZap event:', event.index, event.name)
-    const ch = channelsRef.current[event.index]
+    // El índice viene de la lista que tiene el nativo — si el refresco de
+    // EPG reordenó el array JS justo antes del zap, el índice apunta a otro
+    // canal. event.name delata el desfase: en ese caso se busca por nombre.
+    let ch = channelsRef.current[event.index]
+    if (event.name && ch && (ch.name || ch.title) !== event.name) {
+      const byName = channelsRef.current.find(c => (c.name || c.title) === event.name)
+      if (byName) ch = byName
+    }
     if (!ch) {
       console.warn('[LiveTV] No channel at index', event.index, 'channels:', channelsRef.current.length)
       return
@@ -366,9 +389,6 @@ export default function LiveTV() {
       while (pendingZapRef.current) {
         const { ch: target, index } = pendingZapRef.current
         pendingZapRef.current = null
-        // No guardar al historial en cada zap — solo se guarda el último canal
-        // al cerrar el player (onClose abajo).
-        currentChannelRef.current = target
         const ctrl = new AbortController()
         zapAbortRef.current = ctrl
         try {
@@ -378,6 +398,9 @@ export default function LiveTV() {
           const stream = streams?.[0]
           if (stream?.url) {
             if (isAndroidNative()) {
+              // channelIndex en el array JS actual — tras un desfase de
+              // orden puede diferir del índice nativo del evento.
+              const resolvedIdx = channelsRef.current.indexOf(target)
               console.log('[LiveTV] switchChannel to:', urlHost(stream.url))
               await switchChannel({
                 url: stream.url,
@@ -386,17 +409,21 @@ export default function LiveTV() {
                 bypassVpn: stream.bypassVpn === true,
                 headers: stream.headers || {},
                 title: target.name,
-                channelIndex: index,
+                channelIndex: resolvedIdx >= 0 ? resolvedIdx : index,
                 epgNow: target.nowPlaying || '',
                 epgNext: target.nextPlaying || '',
                 epgStart: target.nowPlayingStart || 0,
                 epgEnd: target.nowPlayingEnd || 0,
               })
+              // El canal que suena solo se actualiza tras un switch OK: un
+              // zap fallido no debe mover el índice ni quedar en historial.
+              currentChannelRef.current = target
             } else {
               // Player web/Electron: switchChannel no existe — se recarga el
               // stream cambiando el estado (mismo efecto que elegir el canal).
               console.log('[LiveTV] web zap to:', target.name, urlHost(stream.url))
-              setPlaying(prev => ({ stream, channel: target, isU7d: prev?.isU7d }))
+              setPlaying(prev => ({ stream: attachStreamRefresh(stream), channel: target, isU7d: prev?.isU7d }))
+              currentChannelRef.current = target
             }
           } else {
             console.warn('[LiveTV] No stream found for channel:', target.name)
@@ -478,7 +505,7 @@ export default function LiveTV() {
           title={playing.channel.name}
           meta={{ id: playing.channel.id, type: 'live', name: playing.channel.name, poster: playing.channel.logo, epgNow: playing.channel.nowPlaying || '', epgNext: playing.channel.nextPlaying || '', epgStart: playing.channel.nowPlayingStart || 0, epgEnd: playing.channel.nowPlayingEnd || 0 }}
           channels={playing.isU7d ? null : channels}
-          channelIndex={playing.isU7d ? -1 : channels.findIndex(c => c.id === playing.channel.id)}
+          channelIndex={playing.isU7d ? -1 : channels.findIndex(c => c.id === (currentChannelRef.current?.id || playing.channel.id))}
           onZapChannel={playing.isU7d ? null : handleZapChannel}
           onClose={() => {
             // Save last channel to "Continuar viendo" on close — this is
