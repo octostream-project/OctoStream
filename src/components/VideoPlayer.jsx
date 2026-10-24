@@ -480,6 +480,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           if (embedCancelled) return
           if (res?.status === 'resolved' && res.url) {
             console.log('[Player] Headless embed resolved:', urlHost(res.url))
+            // Si la reproducción directa falla (CDN ligado al documento),
+            // el error cae al relay local antes del WebView visible.
+            if (res.referer) relayCtx = { url: res.url, referer: res.referer }
             // Los headers originales de la petición del player (UA, Referer,
             // Origin, Cookie) los exige el CDN firmado — se aplican primero.
             const headers = { ...(res.requestHeaders || {}), ...(stream.headers || {}) }
