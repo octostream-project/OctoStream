@@ -47,13 +47,15 @@ import { bloghorror } from './channels/bloghorror.js'
 import { torrentio } from './channels/torrentio.js'
 import { estrenoscinesaa } from './channels/estrenoscinesaa.js'
 import { cinemitas } from './channels/cinemitas.js'
+import { pelispanda } from './channels/pelispanda.js'
+import { magistv24 } from './channels/magistv24.js'
 import { aiostreams, aiostreamsConfig, applyDebridAvailability } from './channels/aiostreams.js'
 import { getItemSync } from '../../../utils/storage.js'
 
 // Registry of all available channels.
 // doramedplay excluido: el sitio pasó a ser 100% VIP (páginas de contenido
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
-const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas]
+const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas, pelispanda, magistv24]
 
 // Canales caídos (auditoría feb/2026): fuera del registro activo para que no
 // consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
@@ -73,7 +75,7 @@ const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyse
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
 // de torrents ni se emiten streams .torrent/magnet.
-const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror'])
+const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror', 'pelispanda'])
 export const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
 const activeChannels = () => {
   const alive = CHANNELS.filter(ch => !DEAD_CHANNEL_IDS.has(ch.id))
