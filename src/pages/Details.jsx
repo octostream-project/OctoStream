@@ -13,7 +13,7 @@ import StreamList from '../components/StreamList.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
-import { isAlldebridEnabled, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
+import { isAlldebridEnabled, hasAnyDebrid, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
 import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob } from '../utils/debridJobs.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
@@ -527,7 +527,7 @@ export default function Details() {
           }, 45000)
         }
         processingRefetchRef.current = refetchProcessing
-        if (s?.some(st => st.processing)) {
+        if (hasAnyDebrid() && s?.some(st => st.processing)) {
           adoptDebridMagnets(s)
           refetchProcessing()
         }
@@ -651,6 +651,13 @@ export default function Details() {
     // instancia AIOStreams, que es lo que dispara el procesamiento allí.
     // No reproduce nada; la ficha re-pide y aparece lista cuando termine.
     if (stream?.processing) {
+      // Sin debrid ni AIOStreams configurado las entradas procesándose
+      // ni se muestran (StreamList las filtra) — si aun así llega una
+      // (config quitada a mitad de sesión), no hay acción posible.
+      if (!hasAnyDebrid()) {
+        toast.error('Esta fuente necesita debrid — configura AllDebrid o AIOStreams en Ajustes → Debrid')
+        return
+      }
       // Magnet ya listo en AllDebrid (job tracked) → resolver el enlace
       // restringido a URL directa y reproducir sin esperar al re-poll.
       const job = stream._infoHash ? getDebridJob(stream._infoHash) : null
@@ -1103,7 +1110,7 @@ export default function Details() {
       // El marcador "processing" no es reproducible — solo cuenta para el
       // aviso y el auto-refresh; el autoplay usa las fuentes reales.
       const playableEp = (epStreams || []).filter(st => !st.processing)
-      if (epStreams?.some(st => st.processing)) {
+      if (hasAnyDebrid() && epStreams?.some(st => st.processing)) {
         setEpisodeStreams(epStreams)
         setEpisodeLoading(false)
         adoptDebridMagnets(epStreams)

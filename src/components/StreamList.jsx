@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
+import { isAlldebridEnabled, hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
 
 // Re-render cuando cambia el progreso de los magnets en cola de AllDebrid.
 function useDebridJobsTick() {
@@ -22,8 +23,15 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   // Orden: más seeders primero (sort estable — los que no traen el dato
   // quedan al final en su orden de llegada).
   const bySeeds = (a, b) => (b.seeds || 0) - (a.seeds || 0)
-  const playable = streams.filter(s => !s.processing).sort(bySeeds)
-  const processing = streams.filter(s => s.processing).sort(bySeeds)
+  // Sin debrid configurado ni AIOStreams, nada de su mundo aparece:
+  // entradas "procesándose" (no se pueden descargar) y enlaces
+  // streamType 'debrid' (no se pueden desbloquear sin clave AllDebrid).
+  const canDebrid = hasAnyDebrid()
+  const canUnlock = isAlldebridEnabled()
+  const playable = streams
+    .filter(s => !s.processing && (canUnlock || s.streamType !== 'debrid'))
+    .sort(bySeeds)
+  const processing = canDebrid ? streams.filter(s => s.processing).sort(bySeeds) : []
   // Progreso real de AllDebrid cuando el magnet está en la cola (subido
   // por la app o por la propia instancia AIOStreams).
   const procStatus = (s) => {

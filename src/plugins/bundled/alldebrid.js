@@ -76,6 +76,19 @@ export function isAlldebridEnabled() {
   return !!getAlldebridApiKey()
 }
 
+// ¿Hay algún servicio debrid usable? La clave local de AllDebrid o una
+// instancia AIOStreams configurada (su cuenta lleva el debrid dentro del
+// manifest). Sin ninguna, toda la UI relacionada (entradas procesándose,
+// popup de descarga, streams streamType 'debrid') se oculta.
+export function hasAnyDebrid() {
+  try {
+    if (getItemSync('octostream_alldebrid_key')) return true
+    if (getItemSync('octostream_aiostreams_manifest')) return true
+    if (getItemSync('octostream_aiostreams_uuid')) return true
+  } catch { /* storage inaccesible */ }
+  return false
+}
+
 // --- PIN flow (device code authentication) ---
 // 1. Get a PIN code from AllDebrid
 // 2. User enters PIN at https://alldebrid.com/pin/?pin=XXXX
