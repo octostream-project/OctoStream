@@ -19,8 +19,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   // su título, pero PULSABLES — tocar una envía el magnet al debrid para
   // ponerla a descargar. Pasan a reproducibles cuando termina (Details
   // re-pide la lista periódicamente).
-  const playable = streams.filter(s => !s.processing)
-  const processing = streams.filter(s => s.processing)
+  // Orden: más seeders primero (sort estable — los que no traen el dato
+  // quedan al final en su orden de llegada).
+  const bySeeds = (a, b) => (b.seeds || 0) - (a.seeds || 0)
+  const playable = streams.filter(s => !s.processing).sort(bySeeds)
+  const processing = streams.filter(s => s.processing).sort(bySeeds)
   // Progreso real de AllDebrid cuando el magnet está en la cola (subido
   // por la app o por la propia instancia AIOStreams).
   const procStatus = (s) => {
