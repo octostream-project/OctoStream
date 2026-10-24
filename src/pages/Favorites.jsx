@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import ContentCard from '../components/ContentCard.jsx'
 import DownloadsList from '../components/DownloadsList.jsx'
+import DebridJobsList from '../components/DebridJobsList.jsx'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
-import { Bookmark, CheckCircle2, Clock, Heart, Download } from 'lucide-react'
+import { isAlldebridEnabled } from '../plugins/bundled/alldebrid.js'
+import { Bookmark, CheckCircle2, Clock, Heart, Download, CloudDownload } from 'lucide-react'
 
 // Mi lista solo recoge contenido con principio y fin — la TV en directo y
 // canales no se pueden "terminar" y ensucian Pendientes sin sentido.
@@ -63,10 +65,12 @@ export default function Favorites() {
       : 'Los títulos aparecerán aquí cuando termines de verlos.'
 
   const canDownload = isAndroidNative() || isElectron()
+  const hasDebrid = isAlldebridEnabled()
   const tabs = [
     { key: 'pending', label: 'Pendientes', icon: Clock, count: pending.length, active: 'border-primary-500 bg-primary-600/20' },
     { key: 'favorites', label: 'Favoritos', icon: Heart, count: favorites.length, active: 'border-red-500 bg-red-600/15' },
     { key: 'completed', label: 'Finalizadas', icon: CheckCircle2, count: completed.length, active: 'border-green-500 bg-green-600/15' },
+    ...(hasDebrid ? [{ key: 'debrid', label: 'Debrid', icon: CloudDownload, count: null, active: 'border-amber-500 bg-amber-600/15' }] : []),
     ...(canDownload ? [{ key: 'downloads', label: 'Descargas', icon: Download, count: null, active: 'border-sky-500 bg-sky-600/15' }] : []),
   ]
 
@@ -96,6 +100,10 @@ export default function Favorites() {
       {category === 'downloads' ? (
         <div className="rounded-2xl border border-dark-800 bg-dark-900/50 p-5">
           <DownloadsList />
+        </div>
+      ) : category === 'debrid' ? (
+        <div className="rounded-2xl border border-dark-800 bg-dark-900/50 p-5">
+          <DebridJobsList />
         </div>
       ) : items.length === 0 ? (
         <EmptyState icon={category === 'completed' ? CheckCircle2 : Bookmark}>{empty}</EmptyState>
