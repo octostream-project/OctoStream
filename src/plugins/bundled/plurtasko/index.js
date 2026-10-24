@@ -721,6 +721,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
 
   const expanded = []
   const debridEnabled = anyDebridEnabled()
+  const { withDefaultTrackers } = await import('../../../utils/torrentFile.js')
 
   // Resolve all embed streams in parallel (much faster than sequential)
   const directStreams = limited.filter(s =>
@@ -786,7 +787,13 @@ async function resolveStreams(streams, onBatch, context = {}) {
       continue
     }
 
-    expanded.push(s.quality ? s : { ...s, quality: urlQuality })
+    // Magnet sin trackers (Torrentio/Wolfmax4k los emiten pelados) → el
+    // motor P2P depende solo de DHT: el metadata fetch puede tardar
+    // minutos o no arrancar nunca ("resolviendo" infinito). Enriquecer
+    // con trackers públicos igual que hace el path debrid.
+    const url = s.streamType === 'torrent' && /^magnet:/i.test(s.url)
+      ? withDefaultTrackers(s.url) : s.url
+    expanded.push(s.quality ? { ...s, url } : { ...s, url, quality: urlQuality })
   }
   // Emit direct streams immediately (they're already playable) — ANTES de
   // esperar a debrid: cada magnet puede tardar ~30s de poll y retenerlos
