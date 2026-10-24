@@ -10,7 +10,7 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
-import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails } from '../utils/warpStatus.js'
+import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails, warpStrictEnabled, checkIpLeak } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
 import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
@@ -153,6 +153,9 @@ export default function Settings() {
   const [vpnStatus, setVpnStatus] = useState('disconnected') // disconnected | connecting | connected
   const [vpnError, setVpnError] = useState('')
   const [vpnAutoConnect, setVpnAutoConnect] = useState(localStorage.getItem('octostream_warp_autoconnect') !== 'false')
+  const [warpStrict, setWarpStrict] = useState(warpStrictEnabled())
+  const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
+  const [leakBusy, setLeakBusy] = useState(false)
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
   const [ssSaved, setSsSaved] = useState(false)
 
@@ -471,6 +474,23 @@ export default function Settings() {
     localStorage.setItem('octostream_warp_autoconnect', next ? 'true' : 'false')
     // Al desactivar la auto-conexión con el túnel activo, también se apaga.
     if (!next && vpnStatus !== 'disconnected') toggleVpn()
+  }
+
+  const toggleWarpStrict = () => {
+    const next = !warpStrict
+    setWarpStrict(next)
+    localStorage.setItem('octostream_warp_strict', next ? 'true' : 'false')
+    CloudProxy.setStrictMode(next).catch(() => {})
+  }
+
+  const runLeakTest = async () => {
+    setLeakBusy(true)
+    try {
+      setLeakTest(await checkIpLeak())
+    } catch (e) {
+      setLeakTest({ error: e?.message || 'falló la prueba' })
+    }
+    setLeakBusy(false)
   }
 
   const toggleRiseup = async () => {
@@ -1662,6 +1682,8 @@ export default function Settings() {
                     : 'Transporte: —'}
                   {warpDetails.guard ? ' · guardián activo' : ''}
                   {warpDetails.tunnelFails > 0 ? ` · inestable (${warpDetails.tunnelFails} caídas)` : ''}
+                  {warpDetails.reconnects > 0 ? ` · ${warpDetails.reconnects} reconexión${warpDetails.reconnects > 1 ? 'es' : ''}` : ''}
+                  {warpDetails.uptimeMs > 0 ? ` · arriba ${Math.round(warpDetails.uptimeMs / 60000)} min` : ''}
                 </p>
               )}
               <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">
@@ -1675,6 +1697,60 @@ export default function Settings() {
                   color="green"
                 />
               </label>
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm text-dark-300">
+                  Kill-switch estricto
+                  <span className="block text-xs text-dark-500">
+                    Si el túnel cae, toda la red se corta en vez de salir por tu IP real
+                  </span>
+                </span>
+                <Toggle
+                  checked={warpStrict}
+                  onChange={toggleWarpStrict}
+                  label="Kill-switch estricto WARP"
+                  color="yellow"
+                />
+              </label>
+              {isAndroidNative() && (
+                <div className="pt-1">
+                  <button
+                    onClick={runLeakTest}
+                    disabled={leakBusy}
+                    className="text-xs bg-dark-700 hover:bg-dark-600 disabled:opacity-50 text-dark-200 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    {leakBusy ? 'Comprobando…' : 'Comprobar fugas de IP'}
+                  </button>
+                  {leakTest && !leakBusy && (
+                    <div className="mt-2 text-xs space-y-1">
+                      {leakTest.error ? (
+                        <p className="text-red-400">{leakTest.error}</p>
+                      ) : (
+                        <>
+                          <p className="text-dark-300">
+                            Por el túnel: {leakTest.tunnel?.ip || '—'}
+                            {leakTest.tunnel?.colo ? ` (${leakTest.tunnel.colo})` : ''}
+                            {leakTest.tunnel?.warp ? ` · warp=${leakTest.tunnel.warp}` : ''}
+                            {leakTest.tunnel?.error ? ` · ${leakTest.tunnel.error}` : ''}
+                          </p>
+                          {leakTest.direct && (
+                            <p className="text-dark-300">
+                              Tu red real: {leakTest.direct.ip || '—'}
+                              {leakTest.direct.loc ? ` (${leakTest.direct.loc})` : ''}
+                            </p>
+                          )}
+                          {leakTest.tunnel?.ip && leakTest.direct?.ip && (
+                            <p className={leakTest.tunnel.ip !== leakTest.direct.ip ? 'text-green-400' : 'text-red-400'}>
+                              {leakTest.tunnel.ip !== leakTest.direct.ip
+                                ? 'Sin fuga: la app sale por una IP distinta a la tuya'
+                                : 'FUGA: el tráfico sale por tu IP real'}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

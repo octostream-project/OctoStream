@@ -23,6 +23,21 @@ export function warpAutoConnectEnabled() {
   try { return localStorage.getItem('octostream_warp_autoconnect') !== 'false' } catch { return true }
 }
 
+// Kill-switch estricto (ajuste): si el túnel cae, el proxy muerto se
+// conserva y TODA petición falla en vez de salir por la IP real.
+export function warpStrictEnabled() {
+  try { return localStorage.getItem('octostream_warp_strict') === 'true' } catch { return false }
+}
+
+let _strictApplied = null
+async function applyStrictSetting() {
+  if (!isAndroidNative()) return
+  const want = warpStrictEnabled()
+  if (_strictApplied === want) return
+  _strictApplied = want
+  try { await CloudProxy.setStrictMode(want) } catch {}
+}
+
 // On non-Android (Electron/desktop), the Electron main process routes
 // renderer traffic through the Aether SOCKS5 proxy (127.0.0.1:1819) when it
 // is present. We detect "WARP connected" by probing a Cloudflare endpoint
@@ -82,6 +97,7 @@ async function refresh() {
   // Fachada estática (import dinámico en frío = regresión del "Conectando
   // WARP" eterno de la 1.61 en WebViews de TV antiguos).
   _refreshing = Promise.resolve()
+    .then(() => applyStrictSetting())
     .then(() => CloudProxy.getStatus())
     .then(status => {
       _connecting = !!status.connecting
@@ -198,9 +214,51 @@ export async function getWarpDetails() {
       protocol: st?.protocol || '',
       guard: !!st?.guard,
       tunnelFails: st?.tunnelFails || 0,
+      strict: !!st?.strict,
+      reconnects: st?.reconnects || 0,
+      uptimeMs: st?.uptimeMs || 0,
       error: st?.error || '',
     }
   } catch {
     return null
   }
+}
+
+// ─── Test de fuga de IP ─────────────────────────────────────────────────
+// Compara la IP que sale por la ruta normal de la app (proxy WARP) con la
+// de la red física. Es la prueba honesta de "sin fugas": si ambas
+// coinciden, el tráfico sale por la IP real aunque WARP diga conectado.
+export async function checkIpLeak() {
+  const parseTrace = text => ({
+    ip: (String(text).match(/(?:^|\n)ip=([^\n]+)/) || [])[1] || '',
+    loc: (String(text).match(/(?:^|\n)loc=([^\n]+)/) || [])[1] || '',
+    colo: (String(text).match(/(?:^|\n)colo=([^\n]+)/) || [])[1] || '',
+    warp: (String(text).match(/(?:^|\n)warp=([^\n]+)/) || [])[1] || '',
+  })
+  const URL = 'https://cloudflare.com/cdn-cgi/trace'
+  const result = { tunnel: null, direct: null }
+  // Ruta normal de la app (CapacitorHttp → proxy WARP en Android).
+  try {
+    if (isAndroidNative()) {
+      const { CapacitorHttp } = await import('@capacitor/core')
+      const r = await CapacitorHttp.get({ url: URL, responseType: 'text', connectTimeout: 8000, readTimeout: 8000 })
+      result.tunnel = parseTrace(r.data || '')
+    } else {
+      const r = await fetch(URL, { cache: 'no-store' })
+      result.tunnel = parseTrace(await r.text())
+    }
+  } catch (e) {
+    result.tunnel = { error: e?.message || 'sin respuesta' }
+  }
+  // Red física (directFetch con bypass — solo Android; en escritorio la
+  // sesión entera va por el proxy y no hay ruta directa separada).
+  if (isAndroidNative()) {
+    try {
+      const r = await CloudProxy.directFetch({ url: URL, bypassVpn: true, responseType: 'text' })
+      result.direct = parseTrace(r.data || '')
+    } catch (e) {
+      result.direct = { error: e?.message || 'sin respuesta' }
+    }
+  }
+  return result
 }

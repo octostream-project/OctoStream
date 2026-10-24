@@ -57,11 +57,22 @@ public class CloudProxyPlugin extends Plugin {
     private volatile long lastTunnelFailAt = 0;
     private volatile boolean protocolSwitching = false;
     private static volatile String lastError = null;
+    // Kill-switch estricto (ajuste del usuario): en vez de abrir la red al
+    // detectar el túnel caído, el proxy se queda apuntando al puerto muerto
+    // y TODA petición falla hasta reconectar — cero fugas a costa de que la
+    // app se quede "sin internet" esos segundos (como disconnectBackground).
+    private static volatile boolean strictKill = false;
+    // Métricas de sesión para el indicador WARP de Ajustes.
+    private static volatile int sessionReconnects = 0;
+    private static volatile long connectedSince = 0;
     private static long connectionGeneration = 0;
     private static final Object PROCESS_LOCK = new Object();
     private static final Executor DIRECT_EXECUTOR = Runnable::run;
     private boolean antiLeakScriptInstalled = false;
     private androidx.webkit.ScriptHandler antiLeakScriptHandler = null;
+    // Foreground real de la app (handleOnResume/Pause) — el guardián solo
+    // se arranca con la app en background o al entrar en él.
+    private volatile boolean appInForeground = true;
 
     // ─── RiseupVPN vía API remota de OpenVPN for Android ────────────────────
     // La app oficial (de.blinkt.openvpn) expone IOpenVPNAPIService por bind:
@@ -300,6 +311,28 @@ public class CloudProxyPlugin extends Plugin {
         Log.i(TAG, "CloudProxyPlugin loaded");
     }
 
+    // Guardián FGS solo en segundo plano: el phantom process killer mata a
+    // los hijos que queman CPU cuando la app está cacheada — en foreground
+    // la app ya tiene prioridad y el servicio solo gastaba batería y dejaba
+    // una notificación permanente mientras el usuario navega.
+    @Override
+    protected void handleOnPause() {
+        appInForeground = false;
+        if (connected || connecting) startAetherGuard();
+        super.handleOnPause();
+    }
+
+    @Override
+    protected void handleOnResume() {
+        appInForeground = true;
+        // En foreground el proceso de la app ya tiene prioridad — el
+        // guardián solo hace falta contra el phantom kill en background.
+        // Pararlo aquí quita la notificación permanente y el gasto de
+        // batería mientras el usuario usa la app.
+        stopAetherGuard();
+        super.handleOnResume();
+    }
+
     @Override
     protected void handleOnDestroy() {
         // NO apagar el túnel Riseup aquí: handleOnDestroy dispara también en
@@ -361,7 +394,7 @@ public class CloudProxyPlugin extends Plugin {
         // Fast-path: no basta con que el proceso viva — verifica que el
         // túnel responde, si no un túnel medio muerto devolvería
         // "connected" sin reconectar nada.
-        if (fastAlive && isSocksProxyUp()) {
+        if (fastAlive && isSocksProxyUp() && isTunnelAlive()) {
             call.resolve(new JSObject().put("status", "connected"));
             return;
         }
@@ -396,12 +429,16 @@ public class CloudProxyPlugin extends Plugin {
             statusMisses = 0;
             lastError = null;
             generation = ++connectionGeneration;
+            if (needsStop) sessionReconnects++; // reconexión sobre sesión viva
         }
 
         // Guardián foreground: el proceso de la app pasa a estado
         // foreground ANTES del scan de gateways — es ahí donde aether
         // quema CPU y el phantom killer lo liquidaba (~2s tras arrancar).
-        startAetherGuard();
+        // Solo si la app está en background (o se va durante el scan —
+        // handleOnPause lo cubre por connecting=true); en foreground no
+        // hace falta y solo dejaba notificación permanente.
+        if (!appInForeground) startAetherGuard();
 
         new Thread(() -> {
             try {
@@ -470,6 +507,7 @@ public class CloudProxyPlugin extends Plugin {
                         }
                         connected = aetherProcess != null && aetherProcess.isAlive();
                         connecting = false;
+                        if (connected) connectedSince = System.currentTimeMillis();
                     }
                     if (connected) {
                         call.resolve(new JSObject()
@@ -497,7 +535,10 @@ public class CloudProxyPlugin extends Plugin {
                 // connect() y las sondas de ExoPlayer.
                 if (own) {
                     stopAether();
-                    clearAppProxy();
+                    // Con kill-switch estricto el proxy muerto se conserva
+                    // (fail-closed) — sin él se abre la red para no dejar
+                    // la app colgada si el usuario decide seguir sin WARP.
+                    if (!strictKill) clearAppProxy();
                     stopAetherGuard();
                 }
                 call.reject("Failed to start WARP proxy: " + e.getMessage());
@@ -625,7 +666,9 @@ public class CloudProxyPlugin extends Plugin {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }
         boolean processAlive = aetherProcess != null && aetherProcess.isAlive();
-        boolean probeUp = connected && processAlive && isSocksProxyUp();
+        // Puerto + data-plane: un aether zombi escucha en 1819/1820 con el
+        // túnel muerto — solo el handshake SOCKS real distingue ambos casos.
+        boolean probeUp = connected && processAlive && isSocksProxyUp() && isTunnelAlive();
         // Un fallo transitorio de la sonda no debe tumbar la sesión: en
         // hardware lento el socket de 500ms falla a veces y un solo miss
         // antes dejaba connected=false para siempre aunque el túnel siguiera
@@ -661,6 +704,10 @@ public class CloudProxyPlugin extends Plugin {
         result.put("protocol", currentProtocol != null ? currentProtocol : "");
         result.put("guard", AetherGuardService.isRunning());
         result.put("tunnelFails", tunnelFailStreak);
+        result.put("strict", strictKill);
+        result.put("reconnects", sessionReconnects);
+        result.put("uptimeMs", isConnected && connectedSince > 0
+                ? System.currentTimeMillis() - connectedSince : 0);
         call.resolve(result);
     }
 
@@ -694,7 +741,10 @@ public class CloudProxyPlugin extends Plugin {
         for (int attempt = 0; attempt < 2; attempt++) {
             try (java.net.Socket s = new java.net.Socket()) {
                 s.connect(new java.net.InetSocketAddress("127.0.0.1", HTTP_PROXY_PORT), 400);
-                return true;
+                // Puerto arriba no basta: túnel zombi (acepta CONNECT que
+                // nunca salen). El handshake SOCKS e2e es la prueba real —
+                // un stream enrutado a un túnel muerto colgaba ~15s.
+                return isTunnelAlive();
             } catch (Exception e) {
                 if (attempt == 0) {
                     try { Thread.sleep(200); } catch (InterruptedException ie) {
@@ -707,11 +757,75 @@ public class CloudProxyPlugin extends Plugin {
         return false;
     }
 
+    /**
+     * Sonda end-to-end del data-plane: handshake SOCKS5 REAL a través de
+     * aether hacia cloudflare.com:443 (DNS remoto en el extremo WARP — sin
+     * fuga DNS local). Los puertos locales de un aether zombi siguen
+     * aceptando conexiones con el túnel muerto; solo una conexión que
+     * atraviesa el túnel prueba que sigue vivo. Es el port del
+     * isAetherTunnelAlive() de electron/main.cjs — hasta ahora Android
+     * solo miraba puertos y un túnel colgado se reportaba "connected".
+     */
+    public static boolean isTunnelAlive() {
+        java.net.Socket s = null;
+        try {
+            s = new java.net.Socket();
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", SOCKS_PORT), 1200);
+            s.setSoTimeout(1800);
+            java.io.OutputStream out = s.getOutputStream();
+            java.io.InputStream in = s.getInputStream();
+            // SOCKS5 greeting: versión 5, 1 método, sin auth.
+            out.write(new byte[] { 0x05, 0x01, 0x00 });
+            out.flush();
+            if (in.read() != 0x05 || in.read() != 0x00) return false;
+            // CONNECT cloudflare.com:443 — ATYP dominio (0x03).
+            byte[] host = "cloudflare.com".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            java.io.ByteArrayOutputStream req = new java.io.ByteArrayOutputStream();
+            req.write(new byte[] { 0x05, 0x01, 0x00, 0x03, (byte) host.length });
+            req.write(host);
+            req.write(new byte[] { 0x01, (byte) 0xBB });
+            out.write(req.toByteArray());
+            out.flush();
+            // Respuesta: VER REP RSV ATYP BND.ADDR BND.PORT — REP 0x00 = éxito.
+            if (in.read() != 0x05) return false;
+            int rep = in.read();
+            if (in.read() < 0) return false; // RSV
+            int atyp = in.read();
+            int skip = atyp == 0x01 ? 4
+                    : atyp == 0x03 ? (in.read() & 0xff)
+                    : atyp == 0x04 ? 16 : -1;
+            if (skip < 0) return false;
+            for (int i = 0; i < skip + 2; i++) {
+                if (in.read() < 0) return false;
+            }
+            return rep == 0x00;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            try { if (s != null) s.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Activa/desactiva el kill-switch estricto (fail-closed total). */
+    @PluginMethod
+    public void setStrictMode(PluginCall call) {
+        strictKill = call.getBoolean("enabled", false);
+        Log.i(TAG, "strict kill-switch: " + strictKill);
+        call.resolve(new JSObject().put("enabled", strictKill));
+    }
+
     /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
     public static void markDisconnected() {
         synchronized (PROCESS_LOCK) {
             connected = false;
             statusMisses = 0;
+        }
+        if (strictKill) {
+            // Fail-closed: el proxy sigue apuntando al puerto muerto — las
+            // peticiones FALLAN en vez de salir por la IP real hasta que
+            // el túnel reconecte.
+            Log.i(TAG, "markDisconnected: kill-switch estricto — proxy muerto conservado");
+            return;
         }
         // CRÍTICO: también limpiar el proxy del sistema. Si solo se cambia el
         // flag, http.proxyHost sigue apuntando al listener muerto y TODA la
@@ -1213,6 +1327,8 @@ public class CloudProxyPlugin extends Plugin {
                     connecting = false;
                 }
                 if (connected) {
+                    connectedSince = System.currentTimeMillis();
+                    sessionReconnects++;
                     Log.i(TAG, "Aether restarted with " + next + " after tunnel storm");
                 } else {
                     markDisconnected();
@@ -1296,26 +1412,39 @@ public class CloudProxyPlugin extends Plugin {
             java.net.HttpURLConnection c = null;
             try {
                 android.net.Network net = physicalNetwork(getContext());
-                java.net.URL u = new java.net.URL(url);
-                c = (java.net.HttpURLConnection) (net != null ? net.openConnection(u) : u.openConnection());
                 int ct = call.getInt("connectTimeout", 15000);
                 int rt = call.getInt("readTimeout", 20000);
-                c.setConnectTimeout(ct); c.setReadTimeout(rt);
-                c.setInstanceFollowRedirects(true);
-                c.setRequestMethod(method);
-                if (headers != null) {
-                    java.util.Iterator<String> it = headers.keys();
-                    while (it.hasNext()) {
-                        String k = it.next();
-                        try { c.setRequestProperty(k, headers.getString(k)); } catch (Exception ignored) {}
+                // Redirects manuales acotados: instanceFollowRedirects no
+                // tiene límite y un bucle 301/302 colgaba el hilo. Máx. 5
+                // saltos; cada Location se re-abre en la misma red física.
+                String current = url;
+                int hops = 0;
+                int code;
+                for (;;) {
+                    java.net.URL u = new java.net.URL(current);
+                    if (c != null) c.disconnect();
+                    c = (java.net.HttpURLConnection) (net != null ? net.openConnection(u) : u.openConnection());
+                    c.setConnectTimeout(ct); c.setReadTimeout(rt);
+                    c.setInstanceFollowRedirects(false);
+                    c.setRequestMethod(method);
+                    if (headers != null) {
+                        java.util.Iterator<String> it = headers.keys();
+                        while (it.hasNext()) {
+                            String k = it.next();
+                            try { c.setRequestProperty(k, headers.getString(k)); } catch (Exception ignored) {}
+                        }
                     }
+                    if (data != null && !"GET".equalsIgnoreCase(method)) {
+                        byte[] bytes = String.valueOf(data).getBytes("UTF-8");
+                        c.setDoOutput(true);
+                        c.getOutputStream().write(bytes);
+                    }
+                    code = c.getResponseCode();
+                    if (code < 300 || code >= 400 || ++hops > 5) break;
+                    String loc = c.getHeaderField("Location");
+                    if (loc == null || loc.isEmpty()) break;
+                    current = new java.net.URL(u, loc).toString();
                 }
-                if (data != null && !"GET".equalsIgnoreCase(method)) {
-                    byte[] bytes = String.valueOf(data).getBytes("UTF-8");
-                    c.setDoOutput(true);
-                    c.getOutputStream().write(bytes);
-                }
-                int code = c.getResponseCode();
                 java.io.InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
                 try {

@@ -237,6 +237,16 @@ public class OctoVpnService extends VpnService {
             // allowBypass solo existe en API 29+ — en 24-28 crashea con
             // NoSuchMethodError y el túnel no sube nunca.
             if (Build.VERSION.SDK_INT >= 29) b.allowBypass();
+            // Declarar la red física subyacente: el sistema rebinds el tun
+            // antes al cambiar wifi↔datos — sin esto openvpn nota la caída
+            // más tarde y el túnel pasa unos segundos enmascarado.
+            if (Build.VERSION.SDK_INT >= 22) {
+                android.net.Network phys = CloudProxyPlugin.physicalNetwork(this);
+                if (phys != null) {
+                    try { b.setUnderlyingNetworks(new android.net.Network[]{ phys }); }
+                    catch (Exception ignored) {}
+                }
+            }
             mTun = b.establish();
             return mTun;
         } catch (Exception e) {

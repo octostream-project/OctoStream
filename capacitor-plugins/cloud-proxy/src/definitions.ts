@@ -3,6 +3,18 @@ export interface CloudProxyStatus {
   /** True while the Aether tunnel handshake is in progress. */
   connecting?: boolean;
   error: string;
+  /** Active transport protocol: masque | masque-h2 | wg. */
+  protocol?: string;
+  /** Foreground guard service running (anti phantom-kill, background only). */
+  guard?: boolean;
+  /** Tunnel death streak before protocol escalation. */
+  tunnelFails?: number;
+  /** Strict kill-switch: dead proxy kept on tunnel loss (fail-closed). */
+  strict?: boolean;
+  /** Reconnections during this app session. */
+  reconnects?: number;
+  /** Milliseconds the tunnel has been continuously up. */
+  uptimeMs?: number;
 }
 
 export interface CloudProxyPlugin {
@@ -28,6 +40,13 @@ export interface CloudProxyPlugin {
    * Get the current proxy connection status.
    */
   getStatus(): Promise<CloudProxyStatus>;
+
+  /**
+   * Strict kill-switch: when enabled, a detected tunnel loss keeps the
+   * proxy pointing at the dead port so every request FAILS instead of
+   * leaking the real IP (same semantics as disconnectBackground).
+   */
+  setStrictMode(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
 
   /**
    * Write an OpenVPN profile to the app cache and open it with the

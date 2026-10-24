@@ -10,10 +10,10 @@ import { waitForWarp, warpAutoConnectEnabled } from './warpStatus.js'
 
 // Solo directos/servicios de TV con restricción geográfica evitan WARP.
 // El resto del tráfico de la app usa Aether/WARP.
-const GEO_HOST_RE = /(^|\.)(tdtspain\.com|tdtchannels\.com|rtve\.es|mediaset\.net|mediasetinfinity\.es|atresplayer\.com|atresmedia\.com|dai\.google\.com|doubleclick\.net)$/i
-function isGeoHost(url) {
-  try { return GEO_HOST_RE.test(new URL(url).hostname) } catch { return false }
-}
+// Lista canónica en geoBypass.js (compartida con Java/Electron — el test
+// geoBypass.test.js detecta si alguna copia deriva).
+import { isGeoBypassHost } from './geoBypass.js'
+const isGeoHost = isGeoBypassHost
 async function requireWarpForNativeTraffic(url) {
   if (!isAndroidNative() || isGeoHost(url) || !warpAutoConnectEnabled()) return
   if (await waitForWarp(30000)) return
@@ -61,13 +61,13 @@ async function nativeRequest(opts) {
       if (r && typeof r.status === 'number') return r
     } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
   }
-  // Riseup tiene prioridad sobre WARP cuando está en autoconnect.
-  try {
-    if (!isVpnBootstrapHost(opts.url) && !isGeoHost(opts.url)
-        && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
-      await waitForVpnTunnel(30000, { required: true })
-    }
-  } catch {}
+  // Riseup tiene prioridad sobre WARP cuando está en autoconnect — y el
+  // gate es FAIL-CLOSED: con el túnel obligatorio caído la petición no
+  // puede salir directa por la IP real (el error se propaga).
+  if (!isVpnBootstrapHost(opts.url) && !isGeoHost(opts.url)
+      && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
+    await waitForVpnTunnel(30000, { required: true })
+  }
   // Con autoconexión activa, no se permite que CapacitorHttp salga en claro
   // si el proxy Aether todavía no está arriba.
   await requireWarpForNativeTraffic(opts.url)

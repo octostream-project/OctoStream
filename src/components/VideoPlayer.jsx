@@ -31,6 +31,9 @@ const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown'
 const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`
 const fmtRate = b => b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB/s` : `${Math.round(b / 1e3)} KB/s`
 
+// Aviso P2P↔WARP mostrado una sola vez por sesión de app.
+let _p2pWarned = false
+
 // Texto de progreso del motor P2P — compartido entre el overlay de carga y
 // el overlay nativo (vía setLoadingText).
 function torrentStatusText(ev) {
@@ -689,6 +692,14 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       // HTTP local que el player nativo lee con Range requests.
       const isTorrent = stream.streamType === 'torrent'
       if (isTorrent) {
+        // El tráfico P2P sale siempre por la red física — WARP no transporta
+        // UDP ni conexiones entrantes. Con el túnel activo avisar una vez:
+        // el swarm ve tu IP real aunque el resto de la app vaya protegida.
+        if (isWarpConnected() && !_p2pWarned) {
+          _p2pWarned = true
+          setLoadingText('⚠ Torrent P2P: el swarm ve tu IP real — WARP no cubre P2P').catch(() => {})
+          setTimeout(() => setLoadingText('').catch(() => {}), 5000)
+        }
         try {
           const res = await startTorrentEngine()
           if (!res) return
