@@ -592,6 +592,7 @@ export default function Details() {
   }, [])
 
   const [resolvingStream, setResolvingStream] = useState(false)
+  const [resolvingText, setResolvingText] = useState('')
 
   // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
@@ -643,6 +644,12 @@ export default function Details() {
     processingRefetchRef.current?.()
   }
 
+  // Overlay de resolución con texto de estado: un magnet sin peers tarda
+  // hasta ~90s en dar metadatos — sin pista parece colgado ("resolviendo
+  // video y nada más").
+  const beginResolving = (text = '') => { setResolvingText(text); setResolvingStream(true) }
+  const endResolving = () => { setResolvingStream(false); setResolvingText('') }
+
   const handlePlay = async (stream, skipResume = false, candidatesPool = null) => {
     // El usuario eligió manualmente: cancelar autoplay diferido
     cancelAutoplay()
@@ -663,9 +670,9 @@ export default function Details() {
       const job = stream._infoHash ? getDebridJob(stream._infoHash) : null
       if (job?.status === 'ready') {
         try {
-          setResolvingStream(true)
+          beginResolving('Desbloqueando enlace debrid…')
           const directUrl = await resolveDebridJob(job, { season: stream.season, episode: stream.episode })
-          setResolvingStream(false)
+          endResolving()
           if (directUrl) {
             stream = { ...stream, processing: undefined, url: directUrl, streamType: 'mp4', server: `${stream.server || 'AIOStreams'} (Debrid)`, viaDebrid: 'AllDebrid' }
           } else {
@@ -673,7 +680,7 @@ export default function Details() {
             return
           }
         } catch (e) {
-          setResolvingStream(false)
+          endResolving()
           toast.error(`No se pudo desbloquear: ${e?.message || e}`)
           return
         }
@@ -692,10 +699,19 @@ export default function Details() {
     // directo con el auto-pick de siempre.
     if (stream.streamType === 'torrent' && stream.torrentFileIndex == null && stream.url) {
       try {
-        setResolvingStream(true)
+        beginResolving('Buscando metadatos del torrent…')
         const engine = await getTorrentEngine()
-        const list = engine?.listFiles ? await engine.listFiles({ url: stream.url }) : null
-        setResolvingStream(false)
+        // Timeout propio: un magnet sin peers puede quedarse largo en el
+        // fetch de metadata (90s nativo) y el overlay genérico parecía
+        // colgado. Al expirar se sigue con el auto-pick — start() enseña
+        // su propio progreso dentro del player.
+        const list = engine?.listFiles
+          ? await Promise.race([
+              engine.listFiles({ url: stream.url }),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('listFiles timeout')), 45000)),
+            ])
+          : null
+        endResolving()
         const files = list?.files || []
         if (files.length > 1) {
           setTorrentPick({ stream, files, skipResume, candidatesPool })
@@ -703,7 +719,7 @@ export default function Details() {
         }
         if (files.length === 1) stream = { ...stream, torrentFileIndex: files[0].index }
       } catch (e) {
-        setResolvingStream(false)
+        endResolving()
         console.warn('[Details] listFiles falló, reproduciendo con auto-pick:', e?.message)
       }
     }
@@ -715,7 +731,7 @@ export default function Details() {
         return
       }
       setEpisodeError(null)
-      setResolvingStream(true)
+      beginResolving('Desbloqueando con debrid…')
       // Muchos enlaces 1fichier están bloqueados (DMCA) o caídos: se prueban
       // varios candidatos EN PARALELO y gana el primero que desbloquee. En
       // serie, un enlace remoto puede tardar y
@@ -753,7 +769,7 @@ export default function Details() {
         ])
       } catch { /* todos fallaron o timeout */ }
       const lastError = errors[errors.length - 1]
-      setResolvingStream(false)
+      endResolving()
       if (!resolved) {
         console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
         setEpisodeError(debridErrorMessage(lastError)
@@ -793,7 +809,7 @@ export default function Details() {
       /fastream|streamwish|filemoon|vidhide|waaw/i.test(stream.originalUrl)
     )
     if (needsFreshResolve) {
-      setResolvingStream(true)
+      beginResolving('Re-resolviendo enlace…')
       try {
         const freshUrl = await Promise.race([
           resolveEmbed(stream.originalUrl),
@@ -824,7 +840,7 @@ export default function Details() {
       } catch (e) {
         console.warn('[Details] Failed to resolve fresh stream, using cached URL:', e?.message)
       }
-      setResolvingStream(false)
+      endResolving()
     } else {
       console.log(`[Details] Using already-resolved direct URL: ${urlHost(stream.url || '')}`)
     }
@@ -1650,7 +1666,7 @@ export default function Details() {
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
           <LogoLoader size={80} />
           <p className="text-white text-base">
-            {'Resolviendo vídeo…'}
+            {resolvingText || 'Resolviendo vídeo…'}
           </p>
         </div>
       )}
