@@ -766,7 +766,10 @@ public class ExoPlayerPlugin extends Plugin {
             // stream (el iframe del player, p.ej. tiestep.top/e/…), no la
             // página top — se captura del header de la propia petición.
             final String[] videoReferer = {null};
-            final java.util.Map<String, String> videoHeaders = new java.util.HashMap<>();
+            // Cross-thread: shouldInterceptRequest escribe desde el hilo IO
+            // del WebView y foundRaw lee desde el hilo del bridge JS.
+            final java.util.Map<String, String> videoHeaders =
+                new java.util.concurrent.ConcurrentHashMap<>();
             // foundRaw resuelve sin pasar por isVideoUrl: el sniffer de
             // respuestas reporta URLs sin extensión que ya SABE que sirvieron
             // un playlist (#EXTM3U) — p.ej. APIs tipo /api/stream de FCTV.
@@ -2247,22 +2250,31 @@ public class ExoPlayerPlugin extends Plugin {
                     if (needsCslRelay(videoUrl)) {
                         String embOrigin = originOf(url);
                         if (embOrigin != null) {
-                            relayKeepAlive = true;
+                            // relayKeepAlive dentro del onReady: activarlo antes
+                            // haría que el stopEmbedRelay() inicial de
+                            // startEmbedRelay se saltara la limpieza del relay
+                            // anterior (fuga de socket+WebView).
                             startEmbedRelay(embOrigin, () -> {
                                 String relayUrl = relayUrlFor(videoUrl);
-                                try {
-                                    if (relayUrl != null) {
+                                if (relayUrl != null) {
+                                    relayKeepAlive = true;
+                                    try {
                                         currentBypassVpn = false;
                                         boundToWarp = null;
                                         openPlayer(relayUrl, "hls", false, null,
                                                 new JSObject(), new JSObject(), embedTitle, "live",
                                                 null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
+                                    } finally {
+                                        relayKeepAlive = false;
                                     }
-                                } finally {
-                                    relayKeepAlive = false;
                                 }
                             });
-                            return;
+                            // Si el bind falló startEmbedRelay sale sin llamar
+                            // onReady — no dejar al usuario en pantalla negra.
+                            if (relayPort > 0) {
+                                return;
+                            }
+                            Log.w(TAG, "relay bind failed — direct fallback");
                         }
                     }
                     JSObject headers = new JSObject();
@@ -2303,9 +2315,12 @@ public class ExoPlayerPlugin extends Plugin {
         }
 
         // Headers del request del playlist capturado por la sonda playback —
-        // se reutilizan al promover el stream a ExoPlayer.
+        // se reutilizan al promover el stream a ExoPlayer. ConcurrentHashMap:
+        // pickHeader() itera entrySet() desde el hilo del bridge mientras
+        // shouldInterceptRequest escribe — con synchronizedMap la iteración
+        // no es atómica (ConcurrentModificationException).
         final java.util.Map<String, String> promoHeaders =
-            java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+            new java.util.concurrent.ConcurrentHashMap<>();
         final VideoResolverInterface videoBridge = new VideoResolverInterface();
         resolverWebView.addJavascriptInterface(videoBridge, "AndroidVideoResolver");
 
@@ -3087,6 +3102,10 @@ public class ExoPlayerPlugin extends Plugin {
         // blindaje WebRTC que el resto de WebViews.
         com.octostream.cloudproxy.CloudProxyPlugin.applyAntiLeak(relayWebView, true);
 
+        // mime/clen vienen del JS de la página embebida y van interpolados en
+        // la cabecera HTTP — sin sanitizar un \r\n partiría la respuesta.
+        final java.util.function.Function<String, String> safeHdr = v ->
+                v == null ? null : v.replaceAll("[\\r\\n]", "");
         relayWebView.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
             public void relayData(String reqId, String b64, String mime) {
@@ -3094,6 +3113,7 @@ public class ExoPlayerPlugin extends Plugin {
                 if (out == null) { Log.w(TAG, "relayData: unknown reqId"); return; }
                 try {
                     byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                    mime = safeHdr.apply(mime);
                     Log.d(TAG, "relayData: " + bytes.length + "B mime=" + mime);
                     String hdr = "HTTP/1.1 200 OK\r\nContent-Type: "
                             + (mime != null && !mime.isEmpty() ? mime : "application/octet-stream")
@@ -3117,10 +3137,11 @@ public class ExoPlayerPlugin extends Plugin {
                 if (out == null) { Log.w(TAG, "relayBegin: unknown reqId"); return; }
                 relayBegun.add(reqId);
                 try {
+                    mime = safeHdr.apply(mime);
+                    clen = clen != null && clen.matches("\\d{1,12}") ? clen : null;
                     String hdr = "HTTP/1.1 200 OK\r\nContent-Type: "
                             + (mime != null && !mime.isEmpty() ? mime : "application/octet-stream")
-                            + (clen != null && !clen.isEmpty()
-                                    ? "\r\nContent-Length: " + clen : "")
+                            + (clen != null ? "\r\nContent-Length: " + clen : "")
                             + "\r\nConnection: close\r\n\r\n";
                     out.write(hdr.getBytes("ISO-8859-1"));
                     out.flush();
@@ -3215,8 +3236,11 @@ public class ExoPlayerPlugin extends Plugin {
                     matched = 0;
                 }
             }
+            // Origin-form ("GET /relay?u=…") y absolute-form
+            // ("GET http://127.0.0.1:port/relay?u=…") — algunos clientes
+            // (mpv/curl con proxy) mandan la URL completa en la request line.
             java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("GET /relay\\?u=([^\\s&]+)")
+                    .compile("GET\\s+(?:\\w+://[^/\\s]+)?/relay\\?u=([^\\s&]+)")
                     .matcher(sb.toString());
             if (!m.find()) { sock.close(); return; }
             // Token obligatorio: peticiones sin él (páginas ajenas que hayan
@@ -3833,15 +3857,18 @@ public class ExoPlayerPlugin extends Plugin {
             "  return origOpen.apply(this,arguments);" +
             "};" +
             // Override video.src setter
+            // origGet/origSet se capturan ANTES de defineProperty: si el get
+            // se toma después, devuelve nuestro propio getter y cada lectura
+            // de video.src recursa hasta RangeError (página del embed rota).
             "try{" +
-            "  var origSet=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src').set;" +
+            "  var srcDesc=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');" +
+            "  var origSet=srcDesc&&srcDesc.set, origGet=srcDesc&&srcDesc.get;" +
             "  Object.defineProperty(HTMLMediaElement.prototype,'src',{" +
-            "    set:function(v){origSet.call(this,v);if(v&&v.indexOf('blob:')===-1&&v.length>0)" +
+            "    set:function(v){if(origSet)origSet.call(this,v);if(v&&v.indexOf('blob:')===-1&&v.length>0)" +
             "      window.AndroidVideoResolver.onVideoFound(v);}," +
             "    get:function(){return origGet?origGet.call(this):'';}," +
             "    configurable:true" +
             "  });" +
-            "  var origGet=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src').get;" +
             "}catch(e){}" +
             "})();";
         view.evaluateJavascript(css, null);

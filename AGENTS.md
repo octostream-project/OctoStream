@@ -7,7 +7,10 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 ## Comandos de verificación
 
 - `npm run build` — compila el bundle web para producción (`dist/`).
-- `npm test` — ejecuta la suite de Vitest.
+- `npm test` — ejecuta la suite de Vitest. En Windows: si un test falla con
+  `UNKNOWN: unknown error, open '…\Temp\<hash>\client\…'` es un bloqueo del
+  antivirus/Controlled Folder Access sobre %TEMP% (no un fallo del test) —
+  reintenta con un TEMP local: `$env:TEMP="$PWD\.tmpcache"; $env:TMP=$env:TEMP; npm test`.
 - `vite build && cap sync && cap run android` — flujo completo para probar en Android.
 - `./gradlew :app:assembleDebug` — compilar el APK de debug desde `android/`.
 - HDFull no contiene credenciales integradas: para probarlo se requieren
