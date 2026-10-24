@@ -12,8 +12,9 @@
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../../base.js'
 import { logWarn } from '../../../utils/logger.js'
 import { httpGetText, httpGetJson, shortSignal } from '../../../utils/httpClient.js'
-import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, eventKeyNoLeague, sofaSportFor, sortLinks, isGenericLabel } from './parse.js'
+import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, eventKeyNoLeague, sofaSportFor, sortLinks, isGenericLabel, usableLinks, stripIcons } from './parse.js'
 import { probeHlsQuality } from '../../../utils/streamProbe.js'
+import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 
 // Candidate domains — the service rotates often; first one answering with
@@ -168,7 +169,10 @@ function toItem(e, catId) {
 // resuelve con el WebView headless). El picker de Sports prefiere siempre los
 // directos; los embeds quedan como fallback cuando no hay HLS.
 async function resolveEventStreams(item, signal) {
-  const links = item._links || []
+  // Solo canales con nombre real: los códigos genéricos de respaldo
+  // (admin/delta/foxtrot… Stream) se ocultan cuando hay al menos un canal
+  // nombrado — usableLinks los conserva solo si TODOS lo son.
+  const links = usableLinks(item._links)
   // Los jobs corren en paralelo pero el resultado se coloca en el índice
   // original: sortLinks ya puso los canales con nombre real antes que los
   // códigos genéricos de respaldo (admin/delta/foxtrot…) — si se empujara al
@@ -176,6 +180,10 @@ async function resolveEventStreams(item, signal) {
   const slots = new Array(links.length)
   let genericIdx = 0
   const jobs = links.map(async (link, i) => {
+    // Idioma declarado en la etiqueta (bandera 🇪🇸, "(ES)", "… Arabic")
+    // antes de limpiarla; el nombre visible va sin emojis.
+    const lang = langFromChannelLabel(link.label) || undefined
+    const cleanLabel = stripIcons(link.label) || link.label
     if (/watchlivelive\.php/.test(link.url)) {
       try {
         const html = await httpGetText(link.url, UA, shortSignal(signal, 8000))
@@ -184,13 +192,14 @@ async function resolveEventStreams(item, signal) {
           const quality = await probeHlsQuality(r.url,
             r.referer ? { Referer: r.referer } : UA, signal)
           slots[i] = {
-            name: `DLive ${link.label}`,
+            name: cleanLabel,
             title: 'Directo',
             url: r.url,
             referer: r.referer,
             headers: r.referer ? { Referer: r.referer } : undefined,
             streamType: 'hls',
             quality: quality || undefined,
+            lang,
             isLive: true,
             _noCache: true,
           }
@@ -208,13 +217,14 @@ async function resolveEventStreams(item, signal) {
     // Códigos genéricos de respaldo (isGenericLabel) sin nombre real: el
     // proveedor ya no da el canal, así que se numeran en vez de mostrar la
     // palabra en crudo ("admin Stream" → "DLive · Enlace 1").
-    const name = isGenericLabel(link.label) ? null : link.label
+    const name = isGenericLabel(link.label) ? null : cleanLabel
     slots[i] = {
       name,
       title: 'DLive · Web',
       url: link.url,
       referer: baseCache?.base ? baseCache.base + '/' : undefined,
       streamType: 'embed',
+      lang,
       isLive: true,
       _noCache: true,
       _wvPlayback: wvPlayback || undefined,

@@ -15,6 +15,7 @@ import { enrichLogos } from '../../../utils/sofascore.js'
 import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '../../../utils/httpClient.js'
 import { teamsMatch, canonTeam } from '../../../utils/teamMatch.js'
 import { probeHlsQuality } from '../../../utils/streamProbe.js'
+import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 
 // slug → API sportType (values reverse-engineered from the official app)
 const SPORT_TYPES = {
@@ -632,7 +633,11 @@ async function resolveDirectStreams(cfg, m, signal) {
       const token = await signRbSession(rbSession)
       const u = new URL(decUrl)
       const sign = (origin) => `${origin}/token-${token}${u.pathname}${u.search}`
-      const label = sd.name || e.name || 'Live'
+      // e.name (match/detail) es el nombre del canal/emisora ("Tod Arabic",
+      // "beIN Sports") — sd.name (stream/detail) suele ser un codename
+      // interno tipo "SKA", solo sirve de respaldo.
+      const label = e.name || sd.name || 'Live'
+      const lang = langFromChannelLabel(label) || undefined
       // The segment CDN 302-redirects to an edge host that requires the
       // iframe-player Referer — ExoPlayer must send it on every request.
       // Rotar el dominio de iframe por entrada: si uno muere, los siguientes
@@ -646,6 +651,7 @@ async function resolveDirectStreams(cfg, m, signal) {
         url: sign(u.origin),
         streamType: 'hls',
         quality: 'LIVE',
+        lang,
         isLive: true,
         headers: reqHeaders,
         _noCache: true,
@@ -661,6 +667,7 @@ async function resolveDirectStreams(cfg, m, signal) {
             url: sign(new URL(bd).origin),
             streamType: 'hls',
             quality: 'LIVE',
+            lang,
             isLive: true,
             headers: reqHeaders,
             _noCache: true,

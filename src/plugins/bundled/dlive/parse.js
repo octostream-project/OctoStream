@@ -188,6 +188,15 @@ export function sortLinks(links) {
   return [...links].sort((a, b) => (isGenericLabel(a.label) ? 1 : 0) - (isGenericLabel(b.label) ? 1 : 0))
 }
 
+// Solo enlaces con nombre de canal real: cuando hay al menos uno, los
+// códigos genéricos de respaldo (admin/delta/foxtrot… Stream) se descartan.
+// Si TODOS son genéricos se conservan — un "Enlace 1" es mejor que dejar
+// el partido sin fuentes.
+export function usableLinks(links) {
+  const named = (links || []).filter(l => !isGenericLabel(l.label))
+  return named.length ? named : (links || [])
+}
+
 // djb2 — id estable y corto (mismo id en getCatalog/getStreams).
 export const eventId = (e) => {
   const k = eventKey(e)

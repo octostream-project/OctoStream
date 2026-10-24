@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseSchedule, parseEventTitle, extractLiveLiveUrl, catalogFor, eventId, stripIcons,
-  eventKeyNoLeague, isGenericLabel, sortLinks,
+  eventKeyNoLeague, isGenericLabel, sortLinks, usableLinks,
 } from './parse.js'
 
 const BASE = 'https://dlive.sx'
@@ -179,5 +179,28 @@ describe('sortLinks', () => {
       { label: 'HD', url: 'd' },
     ]
     expect(sortLinks(links).map(l => l.label)).toEqual(['Sky Sports+', 'HD', 'admin Stream', 'delta Stream'])
+  })
+})
+
+describe('usableLinks', () => {
+  it('drops generic codenames when real channel names exist', () => {
+    const links = [
+      { label: 'admin Stream', url: 'a' },
+      { label: 'Sky Sports+', url: 'b' },
+      { label: 'delta Stream', url: 'c' },
+      { label: 'HD', url: 'd' },
+    ]
+    expect(usableLinks(links).map(l => l.label)).toEqual(['Sky Sports+', 'HD'])
+  })
+  it('keeps generics when every link is generic', () => {
+    const links = [
+      { label: 'admin Stream', url: 'a' },
+      { label: 'delta Stream', url: 'c' },
+    ]
+    expect(usableLinks(links)).toHaveLength(2)
+  })
+  it('handles empty input', () => {
+    expect(usableLinks([])).toEqual([])
+    expect(usableLinks(null)).toEqual([])
   })
 })

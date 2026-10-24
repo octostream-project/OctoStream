@@ -114,6 +114,75 @@ export function sortByLangPriority(streams) {
   return [...streams].sort((a, b) => langRank(a) - langRank(b))
 }
 
+// ─── Idioma por nombre de canal/emisora ─────────────────────────────────────
+// Los agregadores deportivos (FCTV, DLive…) etiquetan sus fuentes con el
+// nombre del canal — "Tod Arabic", "beIN Sports 🇫🇷", "Sky Sports (IT)".
+// detectLangFromText solo conoce Esp/Lat/Eng/Jap/Cat; este mapa cubre los
+// idiomas habituales de las retransmisiones internacionales.
+
+const CHANNEL_FLAG_LANG = {
+  '🇪🇸': 'Esp', '🇲🇽': 'Lat', '🇦🇷': 'Lat', '🇨🇴': 'Lat', '🇨🇱': 'Lat',
+  '🇵🇪': 'Lat', '🇻🇪': 'Lat', '🇬🇧': 'Eng', '🇺🇸': 'Eng', '🇫🇷': 'Fra',
+  '🇩🇪': 'Ale', '🇮🇹': 'Ita', '🇵🇹': 'Por', '🇧🇷': 'Por', '🇹🇷': 'Tur',
+  '🇷🇺': 'Rus', '🇸🇦': 'Ara', '🇦🇪': 'Ara', '🇶🇦': 'Ara', '🇪🇬': 'Ara',
+  '🇲🇦': 'Ara', '🇩🇿': 'Ara', '🇮🇳': 'Hin', '🇵🇱': 'Pol', '🇳🇱': 'Hol',
+  '🇬🇷': 'Gre', '🇮🇱': 'Heb', '🇨🇳': 'Chi', '🇹🇼': 'Chi', '🇯🇵': 'Jap',
+  '🇰🇷': 'Cor', '🇹🇭': 'Tai', '🇻🇳': 'Vie', '🇮🇩': 'Ind', '🇷🇴': 'Rum',
+  '🇺🇦': 'Ucr', '🇨🇿': 'Che', '🇭🇺': 'Hun', '🇸🇪': 'Sue', '🇩🇰': 'Dan',
+  '🇳🇴': 'Nor', '🇫🇮': 'Fin',
+}
+const CHANNEL_CC_LANG = {
+  ES: 'Esp', MX: 'Lat', AR: 'Lat', CO: 'Lat', CL: 'Lat', PE: 'Lat',
+  VE: 'Lat', US: 'Eng', GB: 'Eng', UK: 'Eng', EN: 'Eng', FR: 'Fra',
+  DE: 'Ale', AT: 'Ale', CH: 'Ale', IT: 'Ita', PT: 'Por', BR: 'Por',
+  TR: 'Tur', RU: 'Rus', SA: 'Ara', AE: 'Ara', QA: 'Ara', EG: 'Ara',
+  MA: 'Ara', DZ: 'Ara', IN: 'Hin', PL: 'Pol', NL: 'Hol', GR: 'Gre',
+  IL: 'Heb', CN: 'Chi', TW: 'Chi', JP: 'Jap', KR: 'Cor', TH: 'Tai',
+  VN: 'Vie', ID: 'Ind', RO: 'Rum', UA: 'Ucr', CZ: 'Che', HU: 'Hun',
+  SE: 'Sue', DK: 'Dan', NO: 'Nor', FI: 'Fin',
+}
+const CHANNEL_LANG_WORDS = [
+  [/\b(spanish|español|espanol|castellano)\b/i, 'Esp'],
+  [/\b(latino|latam)\b/i, 'Lat'],
+  [/\b(english|ingles|ingl[eé]s)\b/i, 'Eng'],
+  [/\b(french|fran[cç]ais)\b/i, 'Fra'],
+  [/\b(arabic|[aá]rabe)\b/i, 'Ara'],
+  [/\b(german|deutsch|alem[aá]n)\b/i, 'Ale'],
+  [/\bitalian[oa]?\b/i, 'Ita'],
+  [/\bportugu[eé]se?s?\b/i, 'Por'],
+  [/\b(turkish|turco)\b/i, 'Tur'],
+  [/\b(russian|ruso)\b/i, 'Rus'],
+  [/\bhindi\b/i, 'Hin'],
+  [/\b(polish|polaco)\b/i, 'Pol'],
+  [/\b(dutch|holand[eé]s)\b/i, 'Hol'],
+  [/\b(greek|griego)\b/i, 'Gre'],
+  [/\b(hebrew|hebreo)\b/i, 'Heb'],
+  [/\b(chinese|mandarin|chino)\b/i, 'Chi'],
+  [/\b(korean|coreano)\b/i, 'Cor'],
+  [/\b(japanese|japon[eé]s)\b/i, 'Jap'],
+  [/\bvietnamese\b/i, 'Vie'],
+  [/\bthai\b/i, 'Tai'],
+  [/\bindonesian\b/i, 'Ind'],
+  [/\b(romanian|rumano)\b/i, 'Rum'],
+  [/\bukrainian\b/i, 'Ucr'],
+]
+
+// Idioma declarado por el propio nombre del canal/emisora. Orden: banderas
+// emoji (dos distintas → Dual) → palabra de idioma → código de país al
+// final "(ES)", "- IT". '' si no se puede saber.
+export function langFromChannelLabel(text) {
+  const t = String(text || '')
+  if (!t) return ''
+  const flags = t.match(/[\u{1F1E6}-\u{1F1FF}]{2}/gu) || []
+  const flangs = [...new Set(flags.map(f => CHANNEL_FLAG_LANG[f]).filter(Boolean))]
+  if (flangs.length > 1) return 'Dual'
+  if (flangs.length) return flangs[0]
+  for (const [re, lang] of CHANNEL_LANG_WORDS) if (re.test(t)) return lang
+  const cc = t.match(/\(([A-Za-z]{2})\)\s*$/) || t.match(/[\s\-|]([A-Z]{2})\s*$/)
+  if (cc) return CHANNEL_CC_LANG[cc[1].toUpperCase()] || ''
+  return ''
+}
+
 // Directo descargable: mp4/mkv progresivo o enlace debrid (se desbloquea a
 // directo). HLS/DASH/embed/torrent no son descarga de archivo simple.
 export function isDownloadableDirect(stream) {
