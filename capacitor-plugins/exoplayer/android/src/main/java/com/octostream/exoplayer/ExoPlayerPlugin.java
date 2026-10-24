@@ -1039,7 +1039,19 @@ public class ExoPlayerPlugin extends Plugin {
     // Playlists y contenedores que ExoPlayer sabe abrir — los segmentos
     // sueltos (.ts/.m4s) no: promoverlos daría un stream de un solo chunk.
     private static boolean isPromotableMedia(String u) {
-        return u != null && u.matches("(?i).*\\.(m3u8|mpd|mp4)([?#].*)?$");
+        if (u == null) return false;
+        if (u.matches("(?i).*\\.(m3u8|mpd|mp4)([?#].*)?$")) return true;
+        // FCTV/RBTV: playlist firmado "/token-<b64>/<canal>/index.m3u8W" —
+        // el sufijo W rompe el patrón de extensión.
+        return u.contains("/token-") && u.toLowerCase().contains("m3u8");
+    }
+
+    // Playlists que solo son reproducibles a través del relay CSL: sus
+    // líneas de segmento son punteros _ctump/_ctuph que el CDN rechaza en
+    // fetch directo con HTTP 487.
+    private static boolean needsCslRelay(String u) {
+        return u != null && (u.contains("/token-")
+                || u.contains("_ctump=") || u.contains("_ctuph="));
     }
 
     private void probePlaylist(String u, java.util.Map<String, String> reqHeaders,
@@ -2229,6 +2241,30 @@ public class ExoPlayerPlugin extends Plugin {
                         embedDialog = null;
                     }
                     cleanupResolver();
+                    // CDN Smart Link (FCTV): el playlist tokenizado solo es
+                    // reproducible por el relay — sus segmentos son punteros
+                    // _ctump/_ctuph que el CDN rechaza en directo con 487.
+                    if (needsCslRelay(videoUrl)) {
+                        String embOrigin = originOf(url);
+                        if (embOrigin != null) {
+                            relayKeepAlive = true;
+                            startEmbedRelay(embOrigin, () -> {
+                                String relayUrl = relayUrlFor(videoUrl);
+                                try {
+                                    if (relayUrl != null) {
+                                        currentBypassVpn = false;
+                                        boundToWarp = null;
+                                        openPlayer(relayUrl, "hls", false, null,
+                                                new JSObject(), new JSObject(), embedTitle, "live",
+                                                null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
+                                    }
+                                } finally {
+                                    relayKeepAlive = false;
+                                }
+                            });
+                            return;
+                        }
+                    }
                     JSObject headers = new JSObject();
                     headers.put("User-Agent", ua != null ? ua
                         : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
