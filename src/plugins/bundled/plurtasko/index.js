@@ -59,12 +59,16 @@ const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelispl
 // consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
 // código para reactivarlos cuando el sitio reviva:
 // - gnulatv: todos los TLDs conocidos (gnulahd.nu, gnula.nu, ww3/ww4…) muertos.
-// - doramaexpress: 503 permanente en todos los TLDs conocidos.
+// - doramaexpress: 503 directo; por proxy responde a veces (~8-20s) pero
+//   queda por encima del timeout por canal → entradas sin streams.
 // - entrepeliculasyseries: .nz y .to sin respuesta, .mx/.store/.in muertos.
-// - pelisgratishd: .zip devuelve 0 bytes, .to 404, .io/.lat aparcados.
-// - pelisplushd: .la muerto, .nz secuestrado, .to tras Cloudflare total.
+// - pelisgratishd: .zip DNS-poisoned en ES; la búsqueda responde por proxy
+//   pero las páginas internas devuelven 0 streams — entradas muertas.
+// - pelisplushd: .to 301→.la; .la corta TLS desde ES (bloqueo judicial).
+// - grantorrent: .zip/.foo/.mov/.net/.one sin DNS; los .lol/.wf actuales
+//   son dominios aparcados (parklogic).
 // RepelisHD se reactivó migrando a CineHDPlus (cinehdplus.work + playlatinsrc).
-const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd'])
+const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd', 'grantorrent'])
 
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios

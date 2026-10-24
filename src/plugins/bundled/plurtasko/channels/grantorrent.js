@@ -8,12 +8,16 @@ import { fetchHtml, absoluteUrl, decodeEntities, makeHostRotator, makeHtmlFetche
 import { findSingleMatch, findMultipleMatches, baseTitle, makeTorrentStream, isSerieUrl } from '../scraper.js'
 import { extractQualityFromText } from '../meta.js'
 
+// Rotación publicada por el canal oficial de Telegram (@grantorrent1).
+// Los .zip/.foo/.mov/.net/.one ya no resuelven; los .lol/.wf pueden estar
+// aparcados (parklogic) entre migraciones — el canal está en
+// DEAD_CHANNEL_IDS mientras no haya ninguno vivo.
 const HOSTS = [
-  'https://grantorrent.zip/',
-  'https://grantorrent.foo/',
-  'https://grantorrent.mov/',
-  'https://grantorrent.net/',
-  'https://grantorrent.one/',
+  'https://www3.grantorrent.lol/',
+  'https://www2.grantorrent.lol/',
+  'https://www1.grantorrent.lol/',
+  'https://www4.grantorrent.wf/',
+  'https://grantorrent.lol/',
 ]
 const rotator = makeHostRotator(HOSTS, 'octostream_host_grantorrent')
 

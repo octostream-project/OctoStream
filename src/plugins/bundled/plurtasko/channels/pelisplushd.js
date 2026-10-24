@@ -6,7 +6,9 @@ import { fetchHtml, decodeEntities, absoluteUrl } from '../http.js'
 import { findSingleMatch, findMultipleMatches, detectType, normalizeServer, detectServerFromUrl } from '../scraper.js'
 import { detectLangFromText } from '../meta.js'
 
-const HOST = 'https://pelisplushd.to/'
+// El sitio vive ahora en .la (301 desde .to); .la corta TLS desde ES —
+// el canal sigue en DEAD_CHANNEL_IDS mientras el host no responda.
+const HOST = 'https://pelisplushd.la/'
 
 export const pelisplushd = {
   id: 'pelisplushd',
