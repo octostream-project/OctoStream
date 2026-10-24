@@ -904,7 +904,7 @@ public class ExoPlayerPlugin extends Plugin {
                         if (done[0] || headlessWebView == null) return;
                         view.evaluateJavascript(
                             "(function(){return document.querySelector('iframe[src*=captcha],iframe[src*=turnstile],"
-                            + "iframe[src*=recaptcha],iframe[src*=hcaptcha],iframe[src*=challenges.cloudflare],"
+                            + "iframe[src*=recaptcha],iframe[src*=hcaptcha],iframe[src*=\"challenges.cloudflare\"],"
                             + "iframe[src*=datadome],.g-recaptcha,.h-captcha,.cf-turnstile,#challenge-stage,"
                             + "form[action*=verify],form[action*=check]')?1:0})()",
                             v -> {
@@ -2929,6 +2929,57 @@ public class ExoPlayerPlugin extends Plugin {
                 String js = "(function(){var T=" + org.json.JSONObject.quote(targetF)
                         + ",P=" + relayPort + ",K=" + org.json.JSONObject.quote(relayToken != null ? relayToken : "")
                         + ",R='" + reqIdF + "';"
+                        // Los segmentos de algunos CDN (DLive/dembed → edge.*)
+                        // viajan envueltos como imagen u objeto binario para
+                        // eludir filtros: PNG con TS tras IEND, WebP con EXIF,
+                        // píxeles PNG (TPIX) o marcadores TIKTIKRAW/TSGZ. El
+                        // player de la página los desenvuelve en JS — aquí va
+                        // el mismo decoder; si el cuerpo ya es TS (0x47) o no
+                        // es reconocible se sirve tal cual.
+                        + "function gunz(g){var ds=new DecompressionStream('gzip');return new Response(new Blob([g]).stream().pipeThrough(ds)).arrayBuffer();}"
+                        + "function inflz(b){var ds=new DecompressionStream('deflate');return new Response(new Blob([b]).stream().pipeThrough(ds)).arrayBuffer().then(function(o){return new Uint8Array(o)});}"
+                        + "function paeth(a,b,c){var p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);return pa<=pb&&pa<=pc?a:pb<=pc?b:c;}"
+                        + "var TSGZ=[84,73,75,84,73,75,84,83,71,90],TRAW=[84,73,75,84,73,75,82,65,87],TPIX=[84,73,75,84,73,75,80,88];"
+                        + "function webpTs(b){if(b.length<16)return null;var A=function(i,n){return String.fromCharCode.apply(null,b.subarray(i,i+n))};"
+                        + "if(A(0,4)!=='RIFF'||A(8,4)!=='WEBP')return null;var dv=new DataView(b.buffer,b.byteOffset,b.byteLength),off=12;"
+                        + "while(off+8<=b.length){var tg=A(off,4),n=dv.getUint32(off+4,true);off+=8;if(n<0||off+n>b.length)return null;"
+                        + "if(tg==='EXIF'){var d=b.subarray(off,off+n);return d.length>=188&&d[0]===0x47&&d[188]===0x47?d:null;}off+=n+(n&1);}return null;}"
+                        + "function iendTs(b){if(b.length<16||b[0]!==0x89||b[1]!==0x50)return null;var dv=new DataView(b.buffer,b.byteOffset,b.byteLength),off=8;"
+                        + "while(off+8<=b.length){var len=dv.getUint32(off);if(len>b.length-off-12)return null;"
+                        + "var ty=String.fromCharCode(b[off+4],b[off+5],b[off+6],b[off+7]);off+=8+len+4;"
+                        + "if(ty==='IEND'){return off<b.length&&b[off]===0x47&&off+188<b.length&&b[off+188]===0x47?b.subarray(off):null;}}return null;}"
+                        + "function pngRGB(b){var dv=new DataView(b.buffer,b.byteOffset,b.byteLength),off=8,w=0,h=0,ct=0,il=0,dep=0,ids=[],i;"
+                        + "while(off+8<=b.length){var len=dv.getUint32(off);if(len>b.length-off-12)return Promise.resolve(null);"
+                        + "var ty=String.fromCharCode(b[off+4],b[off+5],b[off+6],b[off+7]),d=b.subarray(off+8,off+8+len);"
+                        + "if(ty==='IHDR'){var hd=new DataView(d.buffer,d.byteOffset,d.byteLength);w=hd.getUint32(0);h=hd.getUint32(4);dep=d[8];ct=d[9];il=d[12];}"
+                        + "else if(ty==='IDAT')ids.push(d);else if(ty==='IEND')break;off+=12+len;}"
+                        + "if(!w||!h||dep!==8||il||(ct!==2&&ct!==6))return Promise.resolve(null);"
+                        + "var zl=0;for(i=0;i<ids.length;i++)zl+=ids[i].length;var zb=new Uint8Array(zl),zo=0;"
+                        + "for(i=0;i<ids.length;i++){zb.set(ids[i],zo);zo+=ids[i].length;}"
+                        + "return inflz(zb).then(function(raw){var bpp=ct===6?4:3,stride=w*bpp,rgb=new Uint8Array(w*h*3),src=0,dst=0;"
+                        + "var prev=new Uint8Array(stride);"
+                        + "for(var y=0;y<h;y++){if(src+1+stride>raw.length)return null;var f=raw[src++],row=raw.subarray(src,src+stride);src+=stride;"
+                        + "if(f===0){if(ct===2)rgb.set(row,dst);else for(var i2=0,o=dst;i2<stride;i2+=4){rgb[o++]=row[i2];rgb[o++]=row[i2+1];rgb[o++]=row[i2+2];}dst+=w*3;prev=row.slice(0,stride);continue;}"
+                        + "var rec=new Uint8Array(stride);"
+                        + "for(var i2=0;i2<stride;i2++){var a=i2>=bpp?rec[i2-bpp]:0,bb=prev[i2],c=i2>=bpp?prev[i2-bpp]:0,v=row[i2];"
+                        + "if(f===1)v+=a;else if(f===2)v+=bb;else if(f===3)v+=(a+bb)>>1;else if(f===4)v+=paeth(a,bb,c);else return null;rec[i2]=v&255;}"
+                        + "if(ct===2){rgb.set(rec,dst);dst+=stride;}else{for(i2=0;i2<stride;i2+=4){rgb[dst++]=rec[i2];rgb[dst++]=rec[i2+1];rgb[dst++]=rec[i2+2];}}prev=rec;}"
+                        + "return rgb;});}"
+                        + "function pxTs(b){return pngRGB(b).then(function(rgb){if(!rgb||rgb.length<12)return null;"
+                        + "for(var k=0;k<8;k++)if(rgb[k]!==TPIX[k])return null;"
+                        + "var n=new DataView(rgb.buffer,rgb.byteOffset+8,4).getUint32(0);if(n<=0||12+n>rgb.length)return null;"
+                        + "var gz=rgb.subarray(12,12+n);if(gz.length<2||gz[0]!==0x1f||gz[1]!==0x8b)return null;"
+                        + "return gunz(gz).then(function(o){var ts=new Uint8Array(o);return ts.length&&ts[0]===0x47?ts:null;});});}"
+                        + "function unwrapSeg(b){try{"
+                        + "var r=webpTs(b);if(r)return Promise.resolve(r);"
+                        + "r=iendTs(b);if(r)return Promise.resolve(r);"
+                        + "if(b.length>=8&&b[0]===0x89&&b[1]===0x50)return pxTs(b).then(function(t){return t?t:Promise.reject('px');});"
+                        + "for(var i=0;i+TRAW.length<b.length;i++){var hit=1;for(var j=0;j<TRAW.length;j++)if(b[i+j]!==TRAW[j]){hit=0;break}"
+                        + "if(hit){var t=b.subarray(i+TRAW.length);if(t.length&&t[0]===0x47)return Promise.resolve(t);}}"
+                        + "for(i=0;i+TSGZ.length<b.length;i++){hit=1;for(j=0;j<TSGZ.length;j++)if(b[i+j]!==TSGZ[j]){hit=0;break}"
+                        + "if(hit)return gunz(b.subarray(i+TSGZ.length)).then(function(o){return new Uint8Array(o)});}"
+                        + "if(b.length&&b[0]===0x47)return Promise.resolve(b);"
+                        + "}catch(e){}return Promise.reject('raw');}"
                         + "function serve(u){"
                         + "var sig=(typeof AbortSignal!=='undefined'&&AbortSignal.timeout)?AbortSignal.timeout(45000):undefined;"
                         + "fetch(u,{signal:sig}).then(function(r){var ct=r.headers.get('content-type')||'';"
@@ -2950,18 +3001,12 @@ public class ExoPlayerPlugin extends Plugin {
                         + "return l;});"
                         + "AndroidRelay.relayData(R,btoa(lines.join('\\n')),'application/vnd.apple.mpegurl');"
                         + "});}"
-                        + "var cl=r.headers.get('content-length')||'';"
-                        + "if(r.body&&r.body.getReader){var rd=r.body.getReader();"
-                        + "AndroidRelay.relayBegin(R,ct||'video/mp2t',cl);"
-                        + "var pump=function(){rd.read().then(function(x){"
-                        + "if(x.done){AndroidRelay.relayEnd(R);return;}"
-                        + "var u8=x.value,bin='';"
-                        + "for(var i=0;i<u8.length;i+=8192){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+8192));}"
-                        + "AndroidRelay.relayChunk(R,btoa(bin));pump();"
-                        + "}).catch(function(e){try{rd.cancel()}catch(_){}AndroidRelay.relayFail(R,''+e);});};pump();return;}"
-                        + "return r.arrayBuffer().then(function(b){var u8=new Uint8Array(b),bin='';"
-                        + "for(var i=0;i<u8.length;i+=32768){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+32768));}"
-                        + "AndroidRelay.relayData(R,btoa(bin),ct||'video/mp2t');});"
+                        + "return r.arrayBuffer().then(function(b){var u8=new Uint8Array(b);"
+                        + "return unwrapSeg(u8).then(function(ts){"
+                        + "var bin='';for(var i=0;i<ts.length;i+=32768){bin+=String.fromCharCode.apply(null,ts.subarray(i,i+32768));}"
+                        + "AndroidRelay.relayData(R,btoa(bin),ct||'video/mp2t');}"
+                        + ",function(){var bin='';for(var i=0;i<u8.length;i+=32768){bin+=String.fromCharCode.apply(null,u8.subarray(i,i+32768));}"
+                        + "AndroidRelay.relayData(R,btoa(bin),ct||'video/mp2t');});});"
                         + "}).catch(function(e){AndroidRelay.relayFail(R,''+e);});}"
                         + "serve(T);})()";
                 wv.evaluateJavascript(js, null);
