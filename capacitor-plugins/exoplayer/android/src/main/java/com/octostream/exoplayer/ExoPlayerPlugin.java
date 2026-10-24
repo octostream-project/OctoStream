@@ -767,8 +767,11 @@ public class ExoPlayerPlugin extends Plugin {
             // página top — se captura del header de la propia petición.
             final String[] videoReferer = {null};
             final java.util.Map<String, String> videoHeaders = new java.util.HashMap<>();
-            java.util.function.Consumer<String> found = u -> {
-                if (done[0] || u == null || !isVideoUrl(u)) return;
+            // foundRaw resuelve sin pasar por isVideoUrl: el sniffer de
+            // respuestas reporta URLs sin extensión que ya SABE que sirvieron
+            // un playlist (#EXTM3U) — p.ej. APIs tipo /api/stream de FCTV.
+            java.util.function.BiConsumer<String, String> foundRaw = (u, forcedType) -> {
+                if (done[0] || u == null) return;
                 done[0] = true;
                 Log.d(TAG, "Headless resolved: " + hostOf(u));
                 String cookies = null;
@@ -777,7 +780,7 @@ public class ExoPlayerPlugin extends Plugin {
                 JSObject out = new JSObject()
                     .put("status", "resolved")
                     .put("url", u)
-                    .put("streamType", getStreamType(u))
+                    .put("streamType", forcedType != null ? forcedType : getStreamType(u))
                     .put("referer", ref);
                 // Headers originales de la petición (Cookie/UA/Origin) — los
                 // CDN firmados los exigen de vuelta en ExoPlayer.
@@ -797,11 +800,19 @@ public class ExoPlayerPlugin extends Plugin {
                     call.resolve(out);
                 });
             };
+            java.util.function.Consumer<String> found = u -> {
+                if (u == null || !isVideoUrl(u)) return;
+                foundRaw.accept(u, null);
+            };
 
             headlessWebView.addJavascriptInterface(new Object() {
                 @android.webkit.JavascriptInterface
                 public void onVideoFound(String u) {
                     mainHandler.post(() -> found.accept(u));
+                }
+                @android.webkit.JavascriptInterface
+                public void onPlaylistFound(String u) {
+                    mainHandler.post(() -> foundRaw.accept(u, "hls"));
                 }
             }, "AndroidVideoResolver");
 
@@ -897,6 +908,7 @@ public class ExoPlayerPlugin extends Plugin {
                     Log.d(TAG, "Headless page finished: " + hostOf(pageUrl));
                     lastPageUrl[0] = pageUrl;
                     injectHeadlessAutoplay(view);
+                    injectResponseSniffer(view);
                     // Si la página es un captcha no hay nada que resolver en
                     // headless — terminar ya para que el caller abra el
                     // WebView visible al instante en vez de esperar el timeout.
@@ -1070,6 +1082,49 @@ public class ExoPlayerPlugin extends Plugin {
             if (conn != null) conn.disconnect();
             return null;
         }
+    }
+
+    // Sniffer de respuestas fetch/XHR: players SPA (FCTV Nuxt, etc.) piden el
+    // playlist a una API SIN extensión .m3u8 — shouldInterceptRequest no ve el
+    // cuerpo. Esto envuelve fetch/XHR: si la respuesta empieza por #EXTM3U la
+    // URL ES el playlist (onPlaylistFound, bypass de isVideoUrl), y si es un
+    // JSON/texto con una URL .m3u8 dentro se reporta esa.
+    private void injectResponseSniffer(WebView view) {
+        view.evaluateJavascript(
+            "(function(){"
+            + "if(window.__sniff)return;window.__sniff=1;"
+            + "function abs(u){try{return new URL(u,location.href).href;}catch(e){return u;}}"
+            + "function rep(u){if(!u)return;u=abs(String(u));try{"
+            + "if(window.AndroidVideoResolver){"
+            + "if(window.AndroidVideoResolver.onPlaylistFound)window.AndroidVideoResolver.onPlaylistFound(u);"
+            + "else if(window.AndroidVideoResolver.onVideoFound)window.AndroidVideoResolver.onVideoFound(u);}"
+            + "}catch(e){}}"
+            + "function sniffText(t,u){try{"
+            + "if(!t||t.length>3000000)return;"
+            + "var tr=t.replace(/^\\s+/,'');"
+            + "if(tr.indexOf('#EXTM3U')===0){rep(u);return;}"
+            + "var m=t.match(/https?:\\/\\/[^\"'\\\\\\s<>]+\\.m3u8[^\"'\\\\\\s<>]*/);"
+            + "if(m)rep(m[0]);}catch(e){}}"
+            + "var of=window.fetch;"
+            + "if(of){window.fetch=function(){var args=arguments,u='';"
+            + "try{u=String(args[0]&&(args[0].url||args[0]));}catch(e){}"
+            + "return of.apply(this,args).then(function(r){"
+            + "try{var ct=r.headers.get('content-type')||'';"
+            + "if(/mpegurl|vnd\\.apple/i.test(ct))rep(u);"
+            + "else if(/\\.m3u8([?#]|$)/i.test(u))rep(u);"
+            + "else if(/json|text|xml|javascript|html/i.test(ct))r.clone().text().then(function(t){sniffText(t,u);}).catch(function(){});"
+            + "}catch(e){}return r;});};}"
+            + "var OX=XMLHttpRequest.prototype.open,OS=XMLHttpRequest.prototype.send;"
+            + "XMLHttpRequest.prototype.open=function(m,u){this.__snUrl=u;return OX.apply(this,arguments);};"
+            + "XMLHttpRequest.prototype.send=function(){var x=this;"
+            + "x.addEventListener('load',function(){try{"
+            + "var ct=x.getResponseHeader('content-type')||'';"
+            + "if(/mpegurl|vnd\\.apple/i.test(ct)){rep(x.__snUrl||x.responseURL);return;}"
+            + "if((x.responseType===''||x.responseType==='text')&&typeof x.responseText==='string'){"
+            + "sniffText(x.responseText,x.__snUrl||x.responseURL);}"
+            + "}catch(e){}});"
+            + "return OS.apply(this,arguments);};"
+            + "})();", null);
     }
 
     // Modo playback: igual que el autoplay headless pero sin reportar URLs —
@@ -1987,13 +2042,9 @@ public class ExoPlayerPlugin extends Plugin {
 
         // JS bridge - called from injected JavaScript when a video URL is found
         class VideoResolverInterface {
-            @android.webkit.JavascriptInterface
-            public void onVideoFound(String videoUrl) {
-                if (videoUrl != null && !videoUrl.isEmpty() && !resolved[0]) {
-                    if (isVideoUrl(videoUrl)) {
-                        resolved[0] = true;
-                        Log.d(TAG, "Embed resolved (JS bridge): " + hostOf(videoUrl));
-                        String st = getStreamType(videoUrl);
+            private void resolveEmbedVideo(String videoUrl, String st) {
+                resolved[0] = true;
+                Log.d(TAG, "Embed resolved (JS bridge): " + hostOf(videoUrl));
                         // Extract cookies from the WebView for the video URL's domain
                         try {
                             embedCookies = android.webkit.CookieManager.getInstance().getCookie(videoUrl);
@@ -2038,7 +2089,21 @@ public class ExoPlayerPlugin extends Plugin {
                             boundToWarp = null;
                             openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
-                    }
+            }
+
+            @android.webkit.JavascriptInterface
+            public void onVideoFound(String videoUrl) {
+                if (videoUrl != null && !videoUrl.isEmpty() && !resolved[0] && isVideoUrl(videoUrl)) {
+                    resolveEmbedVideo(videoUrl, getStreamType(videoUrl));
+                }
+            }
+
+            // El sniffer de respuestas reporta URLs sin extensión que ya
+            // sirvieron un playlist (#EXTM3U) — bypass de isVideoUrl.
+            @android.webkit.JavascriptInterface
+            public void onPlaylistFound(String videoUrl) {
+                if (videoUrl != null && !videoUrl.isEmpty() && !resolved[0]) {
+                    resolveEmbedVideo(videoUrl, "hls");
                 }
             }
 
@@ -2211,6 +2276,7 @@ public class ExoPlayerPlugin extends Plugin {
                 pageLoaded[0] = true;
                 embedReferer = pageUrl;
                 injectPlaybackAutoplay(view);
+                if (!playbackMode) injectResponseSniffer(view);
                 // Detect error pages (503, 404, file deleted) and close immediately
                 view.evaluateJavascript(
                     "(function(){var t=document.body?document.body.innerText||'':'';" +
