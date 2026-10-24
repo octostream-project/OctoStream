@@ -1072,6 +1072,32 @@ public class ExoPlayerPlugin extends Plugin {
         }
     }
 
+    // Modo playback: igual que el autoplay headless pero sin reportar URLs —
+    // solo fuerza el arranque del player embebido (players que exigen gesto:
+    // big play button, video.play() silenciado, jwplayer play).
+    private void injectPlaybackAutoplay(WebView view) {
+        view.evaluateJavascript(
+            "(function(){"
+            + "if(window.__pb)return;window.__pb=1;"
+            + "var sels=['.jw-icon-playback','.vjs-big-play-button','#play','.play','button.play',"
+            + "'[id*=playbtn]','[class*=playbtn]','button[class*=play]','a[class*=play]',"
+            + "'.plyr__control--overlaid','.plyr__control','[class*=play-button]'];"
+            + "var n=0;"
+            + "function tickPb(){"
+            + "  try{if(window.jwplayer){var jp=jwplayer();if(jp.getState&&jp.getState()!=='playing')jp.play(true);}}catch(e){}"
+            + "  var v=document.querySelector('video');"
+            + "  if(v&&v.paused){try{v.muted=true;v.play();}catch(e){}}"
+            + "  for(var i=0;i<sels.length;i++){"
+            + "    var els=document.querySelectorAll(sels[i]);"
+            + "    for(var j=0;j<els.length;j++){var b=els[j];var r=b.getBoundingClientRect();"
+            + "      if(r.width>0&&r.height>0){try{b.click();}catch(e){}}}"
+            + "  }"
+            + "  if(++n<60)setTimeout(tickPb,1500);"
+            + "}"
+            + "tickPb();"
+            + "})();", null);
+    }
+
     // Inyecta clicks automáticos en botones de play, detectores de <video> y un
     // solver ALTCHA (proof-of-work PBKDF2 — se auto-resuelve sin usuario).
     private void injectHeadlessAutoplay(WebView view) {
@@ -1114,7 +1140,9 @@ public class ExoPlayerPlugin extends Plugin {
             "function tick(){" +
             "  var v=document.querySelector('video');" +
             "  var vsrc=v&&(v.currentSrc||v.src);" +
-            "  if(vsrc&&vsrc.indexOf('blob:')!==0){" +
+            // Un <video> esqueleto sin src tiene currentSrc === location.href:
+            // reportarlo "resuelve" la propia página (HTML) como media.
+            "  if(vsrc&&vsrc.indexOf('blob:')!==0&&vsrc!==location.href){" +
             // Report src of a playing video element as a last resort
             "    if(window.AndroidVideoResolver)window.AndroidVideoResolver.onVideoFound(vsrc);" +
             "  }" +
@@ -1811,6 +1839,13 @@ public class ExoPlayerPlugin extends Plugin {
             + "[class*=timer],[id*=timer],[class*=clock],[id*=clock],[class*=cuenta],"
             + "[id*=cuenta],[class*=t-minus],[id*=t-minus],[data-countdown],[data-timer]');"
             + "if(cd)return 'countdown';"
+            // La cuenta atrás puede vivir en un iframe same-origin (el player
+            // embebido) — los cross-origin lanzan y se ignoran.
+            + "var fr=document.querySelectorAll('iframe');"
+            + "for(var fi=0;fi<fr.length;fi++){try{var fd=fr[fi].contentDocument;"
+            + "if(fd&&fd.querySelector&&fd.querySelector('[class*=countdown],[id*=countdown],"
+            + "[class*=timer],[id*=timer],[class*=clock],[id*=clock],[data-countdown],[data-timer]'))"
+            + "return 'countdown';}catch(e){}}"
             + "var b=document.body?document.body.innerText||'':'';"
             + "var els=document.querySelectorAll('div,span,p,time');"
             + "var timer=false;"
@@ -2175,6 +2210,7 @@ public class ExoPlayerPlugin extends Plugin {
                 Log.d(TAG, "Embed page finished: " + hostOf(pageUrl));
                 pageLoaded[0] = true;
                 embedReferer = pageUrl;
+                injectPlaybackAutoplay(view);
                 // Detect error pages (503, 404, file deleted) and close immediately
                 view.evaluateJavascript(
                     "(function(){var t=document.body?document.body.innerText||'':'';" +
@@ -2386,38 +2422,48 @@ public class ExoPlayerPlugin extends Plugin {
         // (FCTV): se mantiene el embed abierto hasta waitUntilMs, y cuando el
         // contador desaparece hay ~10 min de gracia para que arranque el
         // vídeo.
+        final Runnable startWatch = () -> {
+            final long deadline = waitUntilMs > 0
+                ? waitUntilMs : System.currentTimeMillis() + 4L * 3600 * 1000;
+            final int[] misses = {0};
+            final Runnable[] watch = new Runnable[1];
+            watch[0] = () -> {
+                if (resolved[0] || mediaStarted[0]) return;
+                if (System.currentTimeMillis() > deadline
+                    || resolverWebView == null) {
+                    closeWithTimeout.run();
+                    return;
+                }
+                resolverWebView.evaluateJavascript(detectJs, r -> {
+                    if (resolved[0] || mediaStarted[0]) return;
+                    // 'none' = el contador/challenge ya no está — cuenta
+                    // como fallo; 10 fallos (~10 min) sin vídeo → cerrar.
+                    if (r != null && !r.contains("none")) {
+                        misses[0] = 0;
+                    } else if (++misses[0] >= 10) {
+                        closeWithTimeout.run();
+                        return;
+                    }
+                    mainHandler.postDelayed(watch[0], 60000);
+                });
+            };
+            mainHandler.postDelayed(watch[0], 30000);
+        };
         mainHandler.postDelayed(() -> {
             if (resolved[0] || mediaStarted[0]) return;
             if (challengeRevealed[0]) {
                 mainHandler.postDelayed(closeWithTimeout, 60000);
             } else if (countdownSeen[0]) {
-                final long deadline = waitUntilMs > 0
-                    ? waitUntilMs : System.currentTimeMillis() + 4L * 3600 * 1000;
-                final int[] misses = {0};
-                final Runnable[] watch = new Runnable[1];
-                watch[0] = () -> {
-                    if (resolved[0] || mediaStarted[0]) return;
-                    if (System.currentTimeMillis() > deadline
-                        || resolverWebView == null) {
-                        closeWithTimeout.run();
-                        return;
-                    }
-                    resolverWebView.evaluateJavascript(detectJs, r -> {
-                        if (resolved[0] || mediaStarted[0]) return;
-                        // 'none' = el contador/challenge ya no está — cuenta
-                        // como fallo; 10 fallos (~10 min) sin vídeo → cerrar.
-                        if (r != null && !r.contains("none")) {
-                            misses[0] = 0;
-                        } else if (++misses[0] >= 10) {
-                            closeWithTimeout.run();
-                            return;
-                        }
-                        mainHandler.postDelayed(watch[0], 60000);
-                    });
-                };
-                mainHandler.postDelayed(watch[0], 30000);
+                startWatch.run();
             } else {
-                closeWithTimeout.run();
+                // Nada detectado: la cuenta atrás puede estar dentro de un
+                // iframe cross-origin (invisible para detectJs) o el player
+                // espera un gesto — mostrar la página real en vez de cerrar
+                // a ciegas. El usuario la ve (con su cuenta atrás/ads) y la
+                // vigila el mismo watch de arriba.
+                Log.d(TAG, "Embed: nothing detected — revealing page");
+                revealPage.run();
+                startWatch.run();
             }
         }, 30000);
 
@@ -3433,6 +3479,12 @@ public class ExoPlayerPlugin extends Plugin {
         int q = path.indexOf('?');
         if (q >= 0) path = path.substring(0, q);
         String lowerPath = path.toLowerCase();
+        // Document pages are never media — provider page URLs like
+        // thedaddy.pk/stream/stream-N.php otherwise pass the "/stream/ +
+        // long path" rule below and the resolver reports HTML as video.
+        if (lowerPath.endsWith(".php") || lowerPath.endsWith(".html")
+            || lowerPath.endsWith(".htm") || lowerPath.endsWith(".asp")
+            || lowerPath.endsWith(".aspx") || lowerPath.endsWith(".jsp")) return false;
         // Direct video extensions in the PATH (not query params)
         if (lowerPath.endsWith(".m3u8") || lowerPath.endsWith(".mp4") || lowerPath.endsWith(".mkv")) return true;
         if (lowerPath.contains(".m3u8?") || lowerPath.contains(".mp4?")) return true;
