@@ -289,8 +289,10 @@ function parseAioDescription(desc) {
   const cached = /not ready|⏳|downloading/i.test(t) ? false
     : /ready|cached|⚡/i.test(t) ? true : undefined
   const addon = (t.match(/🔍\s*([^\n]+)/)?.[1] || '').trim()
-  const indexer = (t.match(/📡\s*([^\n]+)/)?.[1] || '').trim()
-  const size = (t.match(/📦\s*([\d.,]+\s*[GMTK]i?B)/i)?.[1] || '').trim()
+  // Indexador/tamaño: cada formatter usa su emoji — 📡/⚙️/🧲 para el
+  // origen, 📦/💾 para el tamaño (Torrentio pone 💾 y ⚙️).
+  const indexer = (t.match(/(?:📡|⚙️|🧲)\s*([^\n]+)/)?.[1] || '').trim()
+  const size = (t.match(/(?:📦|💾)\s*([\d.,]+\s*[GMTK]i?B)/i)?.[1] || '').trim()
   // Los formatters de AIOStreams usan distintos emojis para seeders:
   // 👤 (torrentio), 👥 (default/prism/gdrive), 🌱 — también texto plano.
   const seeds = Number(
