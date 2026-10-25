@@ -88,6 +88,54 @@ public class CloudProxyPlugin extends Plugin {
     // "XX" → AETHER_EXIT_LOC=XX (allowlist de aether).
     private boolean exitMode() { return !"auto".equals(warpExitLoc()); }
     private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
+
+    // Exit pegajoso: el edge interior que usó el último gool bueno. Al
+    // fijarlo con AETHER_WIW_INNER_PEER la salida vuelve al mismo colo/
+    // pool — la IP visible se mantiene entre sesiones en vez de rotar.
+    private static volatile String wiwInner = null;
+    private String wiwInner() {
+        if (wiwInner != null) return wiwInner;
+        try {
+            wiwInner = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("wiw_inner", "");
+        } catch (Throwable t) { wiwInner = ""; }
+        return wiwInner;
+    }
+    private void setWiwInner(String v) {
+        wiwInner = v == null ? "" : v;
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("wiw_inner", wiwInner).apply();
+        } catch (Throwable ignored) {}
+    }
+    // Tras un gool bueno, aether persiste "assigned_endpoint" en su
+    // *gool*.toml — lo memorizamos para fijarlo en el próximo arranque.
+    private void learnInnerPeer() {
+        try {
+            File dir = getContext().getFilesDir();
+            File[] files = dir.listFiles((d, n) -> n.contains("gool") && n.endsWith(".toml"));
+            if (files == null) return;
+            for (File f : files) {
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("assigned_endpoint")) {
+                        String v = line.substring(line.indexOf('=') + 1)
+                                .trim().replace("\"", "");
+                        if (!v.isEmpty()) {
+                            setWiwInner(v.contains(":") ? v : v + ":2408");
+                            Log.i(TAG, "sticky exit: inner peer " + wiwInner());
+                        }
+                        break;
+                    }
+                }
+                br.close();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "learnInnerPeer: " + t.getMessage());
+        }
+    }
     // Kill-switch estricto (ajuste del usuario): en vez de abrir la red al
     // detectar el túnel caído, el proxy se queda apuntando al puerto muerto
     // y TODA petición falla hasta reconectar — cero fugas a costa de que la
@@ -501,16 +549,32 @@ public class CloudProxyPlugin extends Plugin {
                 boolean started = false;
                 for (int i = 0; i < chain.length && !started; i++) {
                     String proto = chain[(startIdx + i) % chain.length];
-                    try {
-                        startAether(proto);
-                        started = true;
-                        preferredProtocol = proto;
-                    } catch (Exception err) {
-                        lastErr = err;
-                        Log.w(TAG, "Aether " + proto + " failed (" + err.getMessage() + ") — trying next");
-                        stopAether();
+                    boolean unpinnedRetry = false;
+                    while (true) {
+                        try {
+                            startAether(proto);
+                            started = true;
+                            preferredProtocol = proto;
+                            break;
+                        } catch (Exception err) {
+                            lastErr = err;
+                            Log.w(TAG, "Aether " + proto + " failed (" + err.getMessage() + ") — trying next");
+                            stopAether();
+                            // Sticky exit: si el edge interior fijado murió,
+                            // una segunda oportunidad sin él antes de caer
+                            // al siguiente protocolo de la cadena.
+                            if ("gool".equals(proto) && !unpinnedRetry && !wiwInner().isEmpty()) {
+                                Log.w(TAG, "pinned inner peer dead — retrying gool unpinned");
+                                setWiwInner("");
+                                unpinnedRetry = true;
+                                continue;
+                            }
+                            break;
+                        }
                     }
                 }
+                // Memoria del edge interior que funcionó (salida pegajosa).
+                if (started && "gool".equals(preferredProtocol)) learnInnerPeer();
                 if (!started) throw lastErr != null ? lastErr
                         : new RuntimeException("no aether protocol worked");
                 Process startedProcess = aetherProcess;
@@ -1143,7 +1207,10 @@ public class CloudProxyPlugin extends Plugin {
             // Con país fijado, aether valida el exit contra cdn-cgi/trace y
             // rechaza/reintenta salidas que no coincidan (DE, DE,NL, !ES).
             if (!spec.isEmpty()) env.put("AETHER_EXIT_LOC", spec);
-            // Código de país → etiqueta de status (DE,NL,FR,IS,GB,US,CH).
+            // Exit pegajoso: reutilizar el edge interior que funcionó la
+            // última vez → mismo colo/pool de salida entre sesiones.
+            String inner = wiwInner();
+            if (!inner.isEmpty()) env.put("AETHER_WIW_INNER_PEER", inner);
             sessionExitCountry = "";
             sessionExitIp = "";
             sessionExitColo = "";
@@ -1436,6 +1503,7 @@ public class CloudProxyPlugin extends Plugin {
                     connectedSince = System.currentTimeMillis();
                     sessionReconnects++;
                     refreshExitInfo();
+                    if ("gool".equals(next)) learnInnerPeer();
                     Log.i(TAG, "Aether restarted with " + next + " after tunnel storm");
                 } else {
                     markDisconnected();

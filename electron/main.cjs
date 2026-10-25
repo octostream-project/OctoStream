@@ -61,17 +61,52 @@ const aetherState = { proc: null, connected: false, connecting: false, error: ''
 // Ubicación de salida WARP ("auto"|"random"|ISO code) — paridad con el
 // pref warp_exit_loc del plugin Android: persiste en userData para que
 // los auto-connect y las escaladas mantengan el modo elegido.
-function warpExitLoc() {
-  if (aetherState.exitLoc) return aetherState.exitLoc
-  try {
-    aetherState.exitLoc = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), 'utf8')).exitLoc || 'auto'
-  } catch { aetherState.exitLoc = 'auto' }
-  return aetherState.exitLoc
-}
 function setWarpExitLoc(v) {
   aetherState.exitLoc = v || 'auto'
+  saveWarpPrefs()
+}
+function saveWarpPrefs() {
   try {
-    fs.writeFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), JSON.stringify({ exitLoc: aetherState.exitLoc }))
+    fs.writeFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'),
+      JSON.stringify({ exitLoc: aetherState.exitLoc, wiwInner: aetherState.wiwInner || '' }))
+  } catch {}
+}
+function loadWarpPrefs() {
+  try {
+    const p = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), 'utf8'))
+    aetherState.exitLoc = p.exitLoc || 'auto'
+    aetherState.wiwInner = p.wiwInner || ''
+  } catch { aetherState.exitLoc = 'auto' }
+}
+function warpExitLoc() {
+  if (!aetherState.exitLoc) loadWarpPrefs()
+  return aetherState.exitLoc
+}
+// Exit pegajoso: el edge interior que usó el último gool bueno — fijarlo
+// con AETHER_WIW_INNER_PEER devuelve la salida al mismo colo/pool entre
+// sesiones (IP visible estable en vez de rotar dentro de Cloudflare).
+function wiwInner() {
+  if (aetherState.wiwInner === undefined) loadWarpPrefs()
+  return aetherState.wiwInner || ''
+}
+function setWiwInner(v) {
+  aetherState.wiwInner = v || ''
+  saveWarpPrefs()
+}
+// aether persiste "assigned_endpoint" en su *gool*.toml tras un gool
+// bueno — se memoriza para fijarlo como AETHER_WIW_INNER_PEER luego.
+function learnInnerPeer() {
+  try {
+    const dir = app.getPath('userData')
+    for (const n of fs.readdirSync(dir)) {
+      if (!n.includes('gool') || !n.endsWith('.toml')) continue
+      const m = fs.readFileSync(path.join(dir, n), 'utf8').match(/assigned_endpoint\s*=\s*"?([^"\s]+)"?/)
+      if (m && m[1]) {
+        setWiwInner(m[1].includes(':') ? m[1] : m[1] + ':2408')
+        console.log('[Aether] sticky exit: inner peer', aetherState.wiwInner)
+        return
+      }
+    }
   } catch {}
 }
 const warpExitMode = () => warpExitLoc() !== 'auto'
@@ -274,6 +309,9 @@ async function aetherConnect(preferred, exitLoc) {
         // fijado, aether valida el exit contra cdn-cgi/trace y reintenta.
         const spec = warpExitSpec()
         if (spec) env.AETHER_EXIT_LOC = spec
+        // Exit pegajoso: edge interior memorizado → misma salida.
+        const inner = wiwInner()
+        if (inner && protocol === 'gool') env.AETHER_WIW_INNER_PEER = inner
       } else if (protocol === 'masque-h2') {
         // MASQUE sobre HTTP/2 (TCP 443): parece HTTPS normal y sobrevive a
         // redes que bloquean o ahogan UDP/QUIC. El binario sigue en
@@ -340,9 +378,19 @@ async function aetherConnect(preferred, exitLoc) {
       const proto = chain[(startIdx + i) % chain.length]
       // gool/mim = dos provisiones + scan exterior + dial interior — hasta
       // ~3min en frío (el quick-reconnect recorta las siguientes veces).
-      const r = await spawnAndWait(proto,
+      let r = await spawnAndWait(proto,
         proto === 'gool' || proto === 'mim' ? 180000 : proto === 'wg' ? 60000 : 35000)
-      if (r.status === 'connected') return r
+      // Sticky exit: si el inner fijado murió, una segunda oportunidad
+      // sin pin antes de caer al siguiente protocolo.
+      if (!r.status && proto === 'gool' && wiwInner()) {
+        console.warn('[Aether] pinned inner peer dead — retrying gool unpinned')
+        setWiwInner('')
+        r = await spawnAndWait(proto, 180000)
+      }
+      if (r.status === 'connected') {
+        if (proto === 'gool') learnInnerPeer()
+        return r
+      }
       lastErr = r
       console.warn(`[Aether] ${proto} falló — probando siguiente`)
     }
