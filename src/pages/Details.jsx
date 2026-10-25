@@ -700,7 +700,16 @@ export default function Details() {
     if (stream.streamType === 'torrent' && stream.torrentFileIndex == null && stream.url) {
       try {
         beginResolving('Buscando metadatos del torrent…')
-        const engine = await getTorrentEngine()
+        console.log('[Details] torrent: obteniendo motor…')
+        // El motor también va con timeout: getTorrentEngine hace un
+        // import() dinámico del chunk del plugin — si esa carga cuelga
+        // (asset loader del WebView) el overlay se quedaba girando
+        // para siempre sin llegar ni siquiera al listFiles.
+        const engine = await Promise.race([
+          getTorrentEngine(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('motor torrent no responde')), 15000)),
+        ])
+        console.log('[Details] torrent: motor', engine ? 'ok' : 'null', '— listFiles…')
         // Timeout propio: un magnet sin peers puede quedarse largo en el
         // fetch de metadata (90s nativo) y el overlay genérico parecía
         // colgado. Al expirar se sigue con el auto-pick — start() enseña

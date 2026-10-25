@@ -40,6 +40,19 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   mueren: el sync LAN `http://:8765`, el servidor local de torrents
   `127.0.0.1`, el relay Palantir y cualquier stream `http://` scrapeado).
   Si se regenera `android/` con `cap add android` hay que volver a añadirlo.
+- `MainActivity` pone `FLAG_KEEP_SCREEN_ON` en `onCreate` (app de TV: la
+  pantalla no se apaga ni salta el salvapantallas con la app abierta).
+  Si se regenera `android/` hay que reescribir la clase con ese flag.
+- Torrent nativo Android: **libtorrent4j 2.1.0-39** (`org.libtorrent4j`,
+  sucesor de jlibtorrent — el jlibtorrent 1.2.0.18 de 2020 no bindeaba
+  ningún socket en Android 11+ por la prohibición de netlink; la sesión
+  arrancaba sin endpoints y fetchMagnet siempre expiraba). API casi 1:1:
+  paquete `org.libtorrent4j.*`, `Priority.NORMAL→DEFAULT`/`SEVEN→TOP_PRIORITY`,
+  `download()` lleva `torrent_flags_t` extra y `fetchMagnet(uri, s, tempDir)`
+  exige directorio no nulo. El caché de streaming vive en `getCacheDir()`
+  (`/data/data`, interno) — **nunca `externalCacheDir`**: `Android/data` va
+  por FUSE y cuando MediaProvider/SAF abre el archivo que el torrent escribe,
+  vold mata el proceso ("Sending Interrupt to pid").
 
 ## Mejoras aplicadas recientemente
 

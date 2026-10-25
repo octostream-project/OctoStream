@@ -595,7 +595,13 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     // WebTorrent en el main de Electron — misma superficie vía fachada.
     const startTorrentEngine = async () => {
       setTorrentProgress({ state: 'metadata', progress: 0, peers: 0 })
-      const TorrentEngine = await getTorrentEngine()
+      // Timeout al obtener el motor: el import() dinámico del chunk del
+      // plugin puede quedarse pendiente (asset loader del WebView) y sin
+      // él el overlay de "Conectando a peers" nunca avanzaba ni fallaba.
+      const TorrentEngine = await Promise.race([
+        getTorrentEngine(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('motor torrent no responde')), 15000)),
+      ])
       if (!TorrentEngine) throw new Error('Motor torrent no disponible')
       torrentListenerRef.current = await TorrentEngine.addListener('torrentProgress', ev => {
         if (!cancelled) setTorrentProgress(ev)

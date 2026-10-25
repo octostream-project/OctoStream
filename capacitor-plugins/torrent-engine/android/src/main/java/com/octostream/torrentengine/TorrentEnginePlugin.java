@@ -11,16 +11,16 @@ import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.util.Log;
 
-import com.frostwire.jlibtorrent.FileStorage;
-import com.frostwire.jlibtorrent.Priority;
-import com.frostwire.jlibtorrent.SessionHandle;
-import com.frostwire.jlibtorrent.SessionManager;
-import com.frostwire.jlibtorrent.SessionParams;
-import com.frostwire.jlibtorrent.SettingsPack;
-import com.frostwire.jlibtorrent.TorrentHandle;
-import com.frostwire.jlibtorrent.TorrentInfo;
-import com.frostwire.jlibtorrent.TorrentStatus;
-import com.frostwire.jlibtorrent.swig.settings_pack;
+import org.libtorrent4j.FileStorage;
+import org.libtorrent4j.Priority;
+import org.libtorrent4j.SessionManager;
+import org.libtorrent4j.SessionParams;
+import org.libtorrent4j.SettingsPack;
+import org.libtorrent4j.TorrentHandle;
+import org.libtorrent4j.TorrentInfo;
+import org.libtorrent4j.TorrentStatus;
+import org.libtorrent4j.swig.settings_pack;
+import org.libtorrent4j.swig.torrent_flags_t;
 
 import androidx.activity.result.ActivityResult;
 
@@ -124,7 +124,27 @@ public class TorrentEnginePlugin extends Plugin {
         TorrentInfo ti;
         if (url.startsWith("magnet:")) {
             Log.i(TAG, "fetching magnet metadata…");
-            byte[] data = sm.fetchMagnet(url, METADATA_TIMEOUT_S);
+            // Diagnóstico del swarm durante el fetch: si dhtNodes se queda
+            // en 0 la UDP del dispositivo está muerta (VPN/ISP) y ni
+            // trackers ni DHT van a responder.
+            Thread dbg = new Thread(() -> {
+                try {
+                    for (int i = 0; i < 9; i++) {
+                        Thread.sleep(10000);
+                        Log.i(TAG, "fetchMagnet dbg: dhtNodes=" + sm.dhtNodes()
+                                + " dhtRunning=" + sm.isDhtRunning()
+                                + " listen=" + sm.listenEndpoints());
+                    }
+                } catch (Throwable ignored) {}
+            }, "torrent-dbg");
+            dbg.setDaemon(true);
+            dbg.start();
+            // tempDir es obligatorio en libtorrent4j (hace getAbsolutePath()
+            // sin null-check y el fetch muere al instante con NPE silencioso).
+            File magnetDir = new File(getContext().getCacheDir(), "magnet-meta");
+            magnetDir.mkdirs();
+            byte[] data = sm.fetchMagnet(url, METADATA_TIMEOUT_S, magnetDir);
+            dbg.interrupt();
             if (data == null || data.length == 0) throw new Exception("Timeout obteniendo metadatos del magnet");
             ti = TorrentInfo.bdecode(data);
         } else {
@@ -148,6 +168,7 @@ public class TorrentEnginePlugin extends Plugin {
             call.reject("url is required");
             return;
         }
+        Log.i(TAG, "listFiles: " + (url.startsWith("magnet") ? "magnet" : url.substring(0, Math.min(60, url.length()))));
         new Thread(() -> {
             try {
                 SessionManager sm = ensureSession();
@@ -176,7 +197,10 @@ public class TorrentEnginePlugin extends Plugin {
     }
 
     private synchronized SessionManager ensureSession() {
-        if (session == null) session = new SessionManager();
+        // logging=false: con true el alert_mask deja pasar session_log/
+        // dht_log/peer_log/pkt — útil para diagnosticar binds, pero en
+        // producción inunda logcat con miles de líneas por segundo.
+        if (session == null) session = new SessionManager(false);
         if (!session.isRunning()) {
             SettingsPack sp = new SettingsPack();
             // Streaming en TV: suficiente subida para reciprocidad tit-for-tat
@@ -184,12 +208,38 @@ public class TorrentEnginePlugin extends Plugin {
             // secuencial y ahorran CPU/memoria frente al default.
             sp.uploadRateLimit(256 * 1024);
             sp.connectionsLimit(128);
+            // Sin listen_interfaces la sesión arranca SIN sockets UDP:
+            // listenEndpoints() queda vacío, el DHT no bootstrappea
+            // (dhtNodes=0) y los trackers udp:// ni siquiera emiten el
+            // announce — fetchMagnet expiraba siempre a los 90s.
+            sp.listenInterfaces("0.0.0.0:6881,[::]:6881");
             sp.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true);
             sp.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), false);
             sp.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), false);
             session.start(new SessionParams(sp));
-            Log.i(TAG, "torrent session started");
+            // Si el SettingsPack no aplicó (listenEndpoints vacío), forzar el
+            // rebinding directo sobre la sesión viva.
+            if (session.listenEndpoints().isEmpty()) {
+                session.listenInterfaces("0.0.0.0:6881,[::]:6881");
+            }
+            if (session.isPaused()) session.resume();
+            Log.i(TAG, "torrent session started — listenIf=" + session.listenInterfaces()
+                    + " endpoints=" + session.listenEndpoints()
+                    + " paused=" + session.isPaused()
+                    + " dht=" + session.isDhtRunning());
+            // Diagnóstico: alerts de libtorrent (listen failed, udp errors,
+            // tracker replies…) — sin ellos el fetchMagnet es una caja negra.
+            session.addListener(new org.libtorrent4j.AlertListener() {
+                @Override public int[] types() { return null; }
+                @Override public void alert(org.libtorrent4j.alerts.Alert<?> a) {
+                    String t = String.valueOf(a.type());
+                    if (t.contains("STATS") || t.contains("PROGRESS") || t.contains("PIECE")
+                            || t.contains("BLOCK") || t.contains("PERFORMANCE")
+                            || t.contains("LOG") || t.contains("PKT")) return;
+                    Log.i(TAG, "alert " + t + ": " + a);
+                }
+            });
         }
         return session;
     }
@@ -205,6 +255,7 @@ public class TorrentEnginePlugin extends Plugin {
         final Integer episode = call.getInt("episode");
         final Integer fileIndexArg = call.getInt("fileIndex");
         final String torrentUrl = url;
+        Log.i(TAG, "start: " + (url.startsWith("magnet") ? "magnet" : url.substring(0, Math.min(60, url.length()))));
 
         new Thread(() -> {
             try {
@@ -234,13 +285,17 @@ public class TorrentEnginePlugin extends Plugin {
                 // 3. Add torrent with file priorities (only selected file)
                 Priority[] pri = new Priority[fs.numFiles()];
                 Arrays.fill(pri, Priority.IGNORE);
-                pri[idx] = Priority.NORMAL;
-                saveDir = new File(getContext().getExternalCacheDir() != null
-                        ? getContext().getExternalCacheDir() : getContext().getCacheDir(), "torrents");
+                pri[idx] = Priority.DEFAULT;
+                // Caché de streaming en /data/data (interno, sin FUSE).
+                // NO usar externalCacheDir: en Android 11+ Android/data va
+                // por FUSE y cuando MediaProvider abre el .avi/.mkv que el
+                // torrent tiene abierto, vold mata el proceso para romper
+                // el deadlock ("vold: Sending Interrupt to pid").
+                saveDir = new File(getContext().getCacheDir(), "torrents");
                 saveDir.mkdirs();
                 evictSaveDir(saveDir);
 
-                sm.download(ti, saveDir, null, pri, null);
+                sm.download(ti, saveDir, null, pri, null, new torrent_flags_t());
 
                 // Wait for the handle to appear
                 th = null;
@@ -819,8 +874,8 @@ public class TorrentEnginePlugin extends Plugin {
 
                 Priority[] pri = new Priority[fs.numFiles()];
                 Arrays.fill(pri, Priority.IGNORE);
-                pri[idx] = Priority.NORMAL;
-                sm.download(ti, dir, null, pri, null);
+                pri[idx] = Priority.DEFAULT;
+                sm.download(ti, dir, null, pri, null, new torrent_flags_t());
 
                 th = null;
                 for (int i = 0; i < 100 && th == null; i++) {
@@ -1413,7 +1468,7 @@ public class TorrentEnginePlugin extends Plugin {
                 if (p < startPiece || p >= startPiece + windowPieces) {
                     try {
                         th.resetPieceDeadline(p);
-                        th.piecePriority(p, Priority.NORMAL);
+                        th.piecePriority(p, Priority.DEFAULT);
                     } catch (Throwable ignored) {}
                 }
             }
@@ -1423,7 +1478,7 @@ public class TorrentEnginePlugin extends Plugin {
                 if (p > lastFilePiece) break;
                 try {
                     if (!th.havePiece(p)) {
-                        th.piecePriority(p, Priority.SEVEN);
+                        th.piecePriority(p, Priority.TOP_PRIORITY);
                         th.setPieceDeadline(p, i * 100);
                         deadlinePieces.add(p);
                     }

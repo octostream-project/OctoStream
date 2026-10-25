@@ -35,7 +35,33 @@ export async function getTorrentEngine() {
   if (!isAndroidNative()) return null
   try {
     const { TorrentEngine } = await import('@octostream/torrent-engine')
-    return TorrentEngine
+    // El proxy de registerPlugin intercepta TODOS los nombres de método —
+    // incluido `then`. Devolverlo crudo hace que `await getTorrentEngine()`
+    // lo trate como thenable: el resolver llama proxy.then() → la llamada
+    // nativa "TorrentEngine.then()" rechaza ("not implemented") y la
+    // promesa exterior queda pendiente para siempre ("Buscando metadatos…"
+    // infinito, sin una sola llamada nativa). Se envuelve en un objeto
+    // plano: las arrow functions no son thenables.
+    const t = TorrentEngine
+    return {
+      start: (o) => t.start(o),
+      listFiles: (o) => t.listFiles(o),
+      download: (o) => t.download(o),
+      downloadHttp: (o) => t.downloadHttp(o),
+      listDownloads: () => t.listDownloads(),
+      deleteDownload: (o) => t.deleteDownload(o),
+      getDownloadDir: () => t.getDownloadDir(),
+      getStorageAccess: () => t.getStorageAccess(),
+      pickDownloadDir: () => t.pickDownloadDir(),
+      setDownloadDir: (o) => t.setDownloadDir(o),
+      setDownloadDirPath: (o) => t.setDownloadDirPath(o),
+      downloadVolumes: () => t.downloadVolumes(),
+      requestStorageAccess: () => t.requestStorageAccess(),
+      resetDownloadDir: () => t.resetDownloadDir(),
+      stop: () => t.stop(),
+      status: () => t.status(),
+      addListener: (name, cb) => t.addListener(name, cb),
+    }
   } catch (e) {
     console.warn('[Torrent] motor no disponible:', e?.message)
     return null

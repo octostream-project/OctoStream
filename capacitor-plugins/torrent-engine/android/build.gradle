@@ -37,10 +37,13 @@ dependencies {
     // AppCompat+Activity: getActivity() y el ActivityResult del picker SAF
     // (misma dependencia que usa el plugin exoplayer).
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    // jlibtorrent: Java API + native libtorrent binaries per Android ABI
-    implementation 'com.frostwire:jlibtorrent:1.2.0.18'
-    implementation 'com.frostwire:jlibtorrent-android-arm:1.2.0.18'
-    implementation 'com.frostwire:jlibtorrent-android-arm64:1.2.0.18'
-    implementation 'com.frostwire:jlibtorrent-android-x86:1.2.0.18'
-    implementation 'com.frostwire:jlibtorrent-android-x86_64:1.2.0.18'
+    // libtorrent4j (sucesor mantenido de jlibtorrent, aldenml): Java API +
+    // nativos por ABI. jlibtorrent 1.2.0.18 (2020) no bindeaba ningún socket
+    // en Android 11+ (netlink prohibido, enum de interfaces vacío) — la
+    // sesión arrancaba sin escucha y fetchMagnet siempre expiraba.
+    // Esta build 2.1.0-39 además viene alineada a 16KB (Pixel/Android 15+).
+    implementation 'org.libtorrent4j:libtorrent4j:2.1.0-39'
+    implementation 'org.libtorrent4j:libtorrent4j-android-arm:2.1.0-39'
+    implementation 'org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-39'
+    implementation 'org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-39'
 }
