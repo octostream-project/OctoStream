@@ -205,7 +205,7 @@ export async function getWarpDetails() {
     if (!isAndroidNative()) {
       const bridge = window.octostream?.cloudProxy
       const st = bridge ? await bridge.getStatus().catch(() => ({})) : {}
-      return { connected: !!st.connected, connecting: !!st.connecting, protocol: st.protocol || '', guard: false, tunnelFails: 0, exitLoc: st.exitLoc || '' }
+      return { connected: !!st.connected, connecting: !!st.connecting, protocol: st.protocol || '', guard: false, tunnelFails: 0, exitLoc: st.exitLoc || '', remote: st.remote || '', shareLan: !!st.shareLan }
     }
     const st = await CloudProxy.getStatus()
     return {
@@ -222,6 +222,8 @@ export async function getWarpDetails() {
       exitIp: st?.exitIp || '',
       exitCountry: st?.exitCountry || '',
       exitColo: st?.exitColo || '',
+      remote: st?.remote || '',
+      shareLan: !!st?.shareLan,
     }
   } catch {
     return null

@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('octostream', {
     disconnect: () => ipcRenderer.invoke('cloud:disconnect'),
     disconnectBackground: () => ipcRenderer.invoke('cloud:disconnect-background'),
     getStatus: () => ipcRenderer.invoke('cloud:status'),
+    setRemoteHost: (opts) => ipcRenderer.invoke('cloud:set-remote', opts),
+    setShareLan: (opts) => ipcRenderer.invoke('cloud:set-share-lan', opts),
   },
   // RiseupVPN — guardar el .ovpn generado / importarlo a NetworkManager /
   // levantar el túnel con openvpn del sistema (Linux).

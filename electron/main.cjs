@@ -68,7 +68,7 @@ function setWarpExitLoc(v) {
 function saveWarpPrefs() {
   try {
     fs.writeFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'),
-      JSON.stringify({ exitLoc: aetherState.exitLoc, wiwInner: aetherState.wiwInner || '' }))
+      JSON.stringify({ exitLoc: aetherState.exitLoc, wiwInner: aetherState.wiwInner || '', remote: aetherState.remote || '', shareLan: !!aetherState.shareLan }))
   } catch {}
 }
 function loadWarpPrefs() {
@@ -76,6 +76,8 @@ function loadWarpPrefs() {
     const p = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), 'utf8'))
     aetherState.exitLoc = p.exitLoc || 'auto'
     aetherState.wiwInner = p.wiwInner || ''
+    aetherState.remote = p.remote || ''
+    aetherState.shareLan = !!p.shareLan
   } catch { aetherState.exitLoc = 'auto' }
 }
 function warpExitLoc() {
@@ -111,16 +113,34 @@ function learnInnerPeer() {
 }
 const warpExitMode = () => warpExitLoc() !== 'auto'
 const warpExitSpec = () => warpExitLoc() === 'random' ? '' : warpExitLoc()
+
+// WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
+// dispositivos salen por la misma IP a la vez (cuentas que bloquean
+// multi-IP simultánea como AllDebrid). '' = aether local propio.
+function warpRemote() {
+  if (aetherState.remote === undefined) loadWarpPrefs()
+  return aetherState.remote || ''
+}
+function setWarpRemote(v) { aetherState.remote = (v || '').trim(); saveWarpPrefs() }
+// Compartir el túnel local en la LAN: aether bindea 0.0.0.0 para que
+// otros OctoStream lo usen como proxy.
+function shareLan() {
+  if (aetherState.shareLan === undefined) loadWarpPrefs()
+  return !!aetherState.shareLan
+}
+function setShareLan(v) { aetherState.shareLan = !!v; saveWarpPrefs() }
+// Host del proxy efectivo: el remoto si hay uno, localhost si no.
+const proxyHost = () => warpRemote() || AETHER_SOCKS_HOST
 let mainWindow = null
 
 function probePort(port) {
   return new Promise((resolve) => {
     const socket = new net.Socket()
-    socket.setTimeout(400)
+    socket.setTimeout(proxyHost() === '127.0.0.1' ? 400 : 1500)
     socket.once('connect', () => { socket.destroy(); resolve(true) })
     socket.once('timeout', () => { socket.destroy(); resolve(false) })
     socket.once('error', () => { socket.destroy(); resolve(false) })
-    socket.connect(port, AETHER_SOCKS_HOST)
+    socket.connect(port, proxyHost())
   })
 }
 async function isAetherProxyUp() {
@@ -189,7 +209,7 @@ function resolveAether() {
 // que el proxy local de Node use el agente SOCKS5 en sus fetches.
 async function applyAetherRouting() {
   await session.defaultSession.setProxy({
-    proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+    proxyRules: `socks5://${proxyHost()}:${AETHER_SOCKS_PORT}`,
     proxyBypassRules: AETHER_BYPASS_CHROMIUM,
   })
   aetherState.connected = true
@@ -248,7 +268,7 @@ async function aetherConnect(preferred, exitLoc) {
   // en :1819 con el data-plane muerto y devolver "connected" le diría a la
   // UI que todo va bien mientras cada request muere contra un proxy roto.
   if (aetherState.connected && await isAetherTunnelAlive()) {
-    return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+    return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
   }
   if (aetherState.connecting) {
     // Otro connect en curso (auto-connect de App.jsx + request bloqueada):
@@ -259,18 +279,33 @@ async function aetherConnect(preferred, exitLoc) {
       await new Promise(r => setTimeout(r, 500))
     }
     if (aetherState.connected) {
-      return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+      return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
     }
     throw new Error('WARP connection failed')
   }
   aetherState.connecting = true
   aetherState.error = ''
   try {
+    // MODO REMOTO: usar el túnel WARP de otro OctoStream en la LAN — sin
+    // aether local; todos los dispositivos salen por la misma IP a la vez.
+    if (warpRemote()) {
+      if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
+      let up = false
+      for (let i = 0; i < 20 && !up; i++) {
+        up = (await probePort(AETHER_SOCKS_PORT)) && (await probePort(AETHER_HTTP_PORT)) && await isAetherTunnelAlive()
+        if (!up) await new Promise(r => setTimeout(r, 500))
+      }
+      if (!up) throw new Error(`WARP remoto ${warpRemote()} no responde — ¿túnel activo y "Compartir en la red local" encendido en el otro OctoStream?`)
+      aetherState.protocol = 'remote'
+      await applyAetherRouting()
+      aetherState.connected = true
+      return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
+    }
     // Un aether externo ya corriendo en :1819 se adopta sin lanzar otro —
     // pero solo si el túnel pasa tráfico; un zombie se mata y se relanza.
     if (await isAetherTunnelAlive()) {
       await applyAetherRouting()
-      return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+      return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
     }
     const exe = resolveAether()
     if (!exe) throw new Error('binario aether no encontrado (build/aether o resources)')
@@ -291,8 +326,8 @@ async function aetherConnect(preferred, exitLoc) {
         AETHER_IP: 'v4',
         AETHER_NOIZE: 'aggressive',
         AETHER_LOG_LEVEL: 'warn',
-        AETHER_SOCKS: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
-        AETHER_HTTP_PROXY: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
+        AETHER_SOCKS: shareLan() ? `0.0.0.0:${AETHER_SOCKS_PORT}` : `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+        AETHER_HTTP_PROXY: shareLan() ? `0.0.0.0:${AETHER_HTTP_PORT}` : `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
         AETHER_CONFIG: path.join(workDir, 'aether.toml'),
         AETHER_QUICK_RECONNECT: '1',
         AETHER_ROUTE_SNIFF: '1',
@@ -354,7 +389,7 @@ async function aetherConnect(preferred, exitLoc) {
         if (await isAetherProxyUp()) {
           aetherState.protocol = protocol
           await applyAetherRouting()
-          return { status: 'connected', socks: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, http: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` }
+          return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
         }
         await new Promise(r => setTimeout(r, 500))
       }
@@ -431,7 +466,7 @@ async function aetherDisconnect(keepProxy) {
 // sin auth) y TLS por encima para https. Así las requests del proxy local
 // van por WARP igual que el renderer — paridad con OkHttp/ExoPlayer.
 function socksHandshake(host, port, cb) {
-  const sock = net.connect(AETHER_SOCKS_PORT, AETHER_SOCKS_HOST)
+  const sock = net.connect(AETHER_SOCKS_PORT, proxyHost())
   let done = false
   const fail = (e) => {
     if (done) return
@@ -1259,6 +1294,16 @@ ipcMain.handle('riseup:import', async (_e, arg) => {
 })
 
 ipcMain.handle('cloud:connect', (_e, opts) => aetherConnect(null, opts?.exitLoc))
+ipcMain.handle('cloud:set-remote', (_e, opts) => {
+  const host = (opts?.host || '').trim()
+  if (host && !/^[0-9a-zA-Z.\-]{3,45}$/.test(host)) throw new Error('host inválido')
+  setWarpRemote(host)
+  return { remote: warpRemote() }
+})
+ipcMain.handle('cloud:set-share-lan', (_e, opts) => {
+  setShareLan(opts?.enabled)
+  return { enabled: shareLan() }
+})
 ipcMain.handle('cloud:disconnect', () => aetherDisconnect(false))
 ipcMain.handle('cloud:disconnect-background', () => aetherDisconnect(true))
 ipcMain.handle('cloud:status', async () => {
@@ -1268,12 +1313,14 @@ ipcMain.handle('cloud:status', async () => {
   return {
     connected: up,
     connecting: aetherState.connecting,
-    socks: up ? `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}` : '',
-    http: up ? `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}` : '',
+    socks: up ? `${proxyHost()}:${AETHER_SOCKS_PORT}` : '',
+    http: up ? `${proxyHost()}:${AETHER_HTTP_PORT}` : '',
     error: aetherState.error,
     protocol: aetherState.protocol || '',
     tunnelFails: aetherState.tunnelFails || 0,
     exitLoc: warpExitLoc(),
+    remote: warpRemote(),
+    shareLan: shareLan(),
   }
 })
 
@@ -1447,7 +1494,7 @@ Embed.init({
   getProxyBase: () => `http://127.0.0.1:${PROXY_PORT}`,
   getProxyToken: () => PROXY_TOKEN,
   getRouting: () => aetherState.connected
-    ? { proxyRules: `socks5://${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`, proxyBypassRules: AETHER_BYPASS_CHROMIUM }
+    ? { proxyRules: `socks5://${proxyHost()}:${AETHER_SOCKS_PORT}`, proxyBypassRules: AETHER_BYPASS_CHROMIUM }
     : null,
   sendState: (payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

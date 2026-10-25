@@ -163,6 +163,10 @@ export default function Settings() {
   // (WARP-en-WARP, otro país cualquiera); o país fijado que el propio
   // aether verifica contra el trace de Cloudflare antes de aceptar el túnel.
   const [warpExitLoc, setWarpExitLoc] = useState(localStorage.getItem('octostream_warp_exit') || 'auto')
+  // Túnel compartido: IP de otro OctoStream en la LAN que presta su WARP
+  // (todos salen por la misma IP a la vez) y si ESTE dispositivo lo presta.
+  const [warpRemote, setWarpRemote] = useState(localStorage.getItem('octostream_warp_remote') || '')
+  const [warpShareLan, setWarpShareLan] = useState(localStorage.getItem('octostream_warp_sharelan') === 'true')
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
   const [leakBusy, setLeakBusy] = useState(false)
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
@@ -491,6 +495,31 @@ export default function Settings() {
     setWarpStrict(next)
     localStorage.setItem('octostream_warp_strict', next ? 'true' : 'false')
     CloudProxy.setStrictMode(next).catch(() => {})
+  }
+
+  const applyWarpRemote = async (host) => {
+    const h = (host || '').trim()
+    setWarpRemote(h)
+    localStorage.setItem('octostream_warp_remote', h)
+    try { await CloudProxy.setRemoteHost(h) } catch {}
+    // Con el túnel vivo el cambio de origen solo aplica reconectando.
+    if (vpnStatus === 'connected') {
+      try { await CloudProxy.disconnect() } catch {}
+      setVpnStatus('disconnected')
+      setVpnError(h ? 'Reconecta para usar el WARP remoto' : 'Reconecta para usar el WARP local')
+    }
+  }
+
+  const toggleWarpShareLan = async () => {
+    const next = !warpShareLan
+    setWarpShareLan(next)
+    localStorage.setItem('octostream_warp_sharelan', next ? 'true' : 'false')
+    try { await CloudProxy.setShareLan(next) } catch {}
+    if (vpnStatus === 'connected' && !warpRemote) {
+      try { await CloudProxy.disconnect() } catch {}
+      setVpnStatus('disconnected')
+      setVpnError('Reconecta WARP para aplicar el cambio de escucha')
+    }
   }
 
   const changeWarpExit = async (id) => {
@@ -1752,7 +1781,7 @@ export default function Settings() {
               {vpnStatus !== 'disconnected' && warpDetails && (
                 <p className="text-dark-400 text-xs">
                   {warpDetails.protocol
-                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : 'MASQUE (QUIC)'}`
+                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : warpDetails.protocol === 'remote' ? `WARP remoto (${warpDetails.remote})` : 'MASQUE (QUIC)'}`
                     : 'Transporte: —'}
                   {warpDetails.exitCountry ? ` · salida ${warpDetails.exitCountry}${warpDetails.exitColo ? '/' + warpDetails.exitColo : ''}` : ''}
                   {warpDetails.guard ? ' · guardián activo' : ''}
@@ -1790,6 +1819,41 @@ export default function Settings() {
                       {o.label}
                     </button>
                   ))}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-dark-700/50">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm text-dark-300">
+                    Compartir este túnel en la red local
+                    <span className="block text-xs text-dark-500">
+                      Otros OctoStream en la misma WiFi salen por la IP de este dispositivo
+                      — misma IP a la vez (activa solo en redes de confianza)
+                    </span>
+                  </span>
+                  <Toggle
+                    checked={warpShareLan}
+                    onChange={toggleWarpShareLan}
+                    label="Compartir túnel WARP en la LAN"
+                    color="yellow"
+                  />
+                </label>
+                <div className="mt-3">
+                  <p className="text-sm text-dark-300">
+                    Usar el WARP de otro OctoStream
+                    <span className="block text-xs text-dark-500">
+                      IP local del dispositivo que comparte su túnel (vacío = WARP propio)
+                    </span>
+                  </p>
+                  <input
+                    type="text"
+                    value={warpRemote}
+                    onChange={e => setWarpRemote(e.target.value)}
+                    onBlur={e => applyWarpRemote(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && applyWarpRemote(e.target.value)}
+                    placeholder="192.168.1.50"
+                    inputMode="decimal"
+                    className="input w-full mt-1"
+                  />
                 </div>
               </div>
               <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">

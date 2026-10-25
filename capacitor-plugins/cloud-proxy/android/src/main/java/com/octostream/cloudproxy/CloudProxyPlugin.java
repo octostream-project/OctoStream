@@ -89,6 +89,52 @@ public class CloudProxyPlugin extends Plugin {
     private boolean exitMode() { return !"auto".equals(warpExitLoc()); }
     private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
 
+    // WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
+    // dispositivos salen por la misma IP a la vez (cuentas que bloquean
+    // multi-IP como AllDebrid). "" = modo local (aether propio).
+    private static volatile String remoteIp = null;
+    // Compartir el túnel local en la LAN: aether escucha 0.0.0.0 en vez de
+    // 127.0.0.1 para que otros OctoStream lo usen como proxy.
+    private static volatile Boolean shareLan = null;
+    private String warpRemote() {
+        if (remoteIp != null) return remoteIp;
+        try {
+            remoteIp = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("remote", "");
+        } catch (Throwable t) { remoteIp = ""; }
+        return remoteIp;
+    }
+    private void setWarpRemote(String v) {
+        remoteIp = v == null ? "" : v.trim();
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("remote", remoteIp).apply();
+        } catch (Throwable ignored) {}
+    }
+    private boolean shareLan() {
+        if (shareLan != null) return shareLan;
+        try {
+            shareLan = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getBoolean("share_lan", false);
+        } catch (Throwable t) { shareLan = false; }
+        return shareLan;
+    }
+    private void setShareLan(boolean v) {
+        shareLan = v;
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putBoolean("share_lan", v).apply();
+        } catch (Throwable ignored) {}
+    }
+    // Host del proxy efectivo: el remoto si hay uno configurado, localhost
+    // en modo local. Los puertos son fijos (1819 SOCKS / 1820 HTTP).
+    private static String proxyHost() {
+        String r = remoteIp;
+        return (r == null || r.isEmpty()) ? "127.0.0.1" : r;
+    }
+    private static String socksAddr() { return proxyHost() + ":" + SOCKS_PORT; }
+    private static String httpProxyAddr() { return proxyHost() + ":" + HTTP_PROXY_PORT; }
+
     // Exit pegajoso: el edge interior que usó el último gool bueno. Al
     // fijarlo con AETHER_WIW_INNER_PEER la salida vuelve al mismo colo/
     // pool — la IP visible se mantiene entre sesiones en vez de rotar.
@@ -496,7 +542,7 @@ public class CloudProxyPlugin extends Plugin {
                         waited += 500;
                     }
                     if (connected) {
-                        call.resolve(new JSObject().put("status", "connected").put("socks", SOCKS_ADDR).put("http", HTTP_PROXY_ADDR));
+                        call.resolve(new JSObject().put("status", "connected").put("socks", socksAddr()).put("http", httpProxyAddr()));
                     } else {
                         call.reject("WARP connection failed");
                     }
@@ -522,14 +568,48 @@ public class CloudProxyPlugin extends Plugin {
         // quema CPU y el phantom killer lo liquidaba (~2s tras arrancar).
         // Solo si la app está en background (o se va durante el scan —
         // handleOnPause lo cubre por connecting=true); en foreground no
-        // hace falta y solo dejaba notificación permanente.
-        if (!appInForeground) startAetherGuard();
+        // hace falta y solo dejaba notificación permanente. En modo remoto
+        // no hay proceso local que proteger.
+        if (!appInForeground && warpRemote().isEmpty()) startAetherGuard();
 
         new Thread(() -> {
             try {
                 // Parar el proceso viejo fuera del lock y del hilo del bridge:
                 // waitFor(5s) aquí es tolerable (hilo propio), no en el caller.
                 if (needsStop) stopAether();
+                // MODO REMOTO: usar el túnel WARP de otro OctoStream en la
+                // LAN — sin aether local; todos los dispositivos salen por
+                // la MISMA IP a la vez (AllDebrid castiga multi-IP).
+                if (!warpRemote().isEmpty()) {
+                    currentProtocol = "remote";
+                    boolean up = false;
+                    for (int i = 0; i < 30 && !up; i++) {
+                        synchronized (PROCESS_LOCK) {
+                            if (!connecting) throw new InterruptedException("connect cancelled");
+                        }
+                        up = isSocksProxyUp() && isTunnelAlive();
+                        if (!up) Thread.sleep(500);
+                    }
+                    if (!up) throw new RuntimeException(
+                            "WARP remoto " + warpRemote() + " no responde — ¿túnel activo y 'Compartir en la red local' encendido en el otro OctoStream?");
+                    setAppProxy(() -> {
+                        synchronized (PROCESS_LOCK) {
+                            if (generation != connectionGeneration) {
+                                call.reject("WARP connection cancelled");
+                                return;
+                            }
+                            connected = true;
+                            connecting = false;
+                            connectedSince = System.currentTimeMillis();
+                        }
+                        refreshExitInfo();
+                        call.resolve(new JSObject()
+                            .put("status", "connected")
+                            .put("socks", socksAddr())
+                            .put("http", httpProxyAddr()));
+                    });
+                    return;
+                }
                 // Fallback de protocolos: el data-plane QUIC de MASQUE es
                 // filtrado/ahogado por algunos ISP. Cadena: masque (UDP h3)
                 // → masque-h2 (TCP, parece HTTPS) → wg. Se empieza por el
@@ -619,8 +699,7 @@ public class CloudProxyPlugin extends Plugin {
                         refreshExitInfo();
                         call.resolve(new JSObject()
                             .put("status", "connected")
-                            .put("socks", SOCKS_ADDR)
-                            .put("http", HTTP_PROXY_ADDR));
+                            .put("socks", socksAddr()).put("http", httpProxyAddr()));
                     } else {
                         clearAppProxy();
                         call.reject(lastError != null ? lastError : "WARP process stopped before proxy setup completed");
@@ -774,7 +853,8 @@ public class CloudProxyPlugin extends Plugin {
         if (connecting && System.currentTimeMillis() - connectingSince > connectStale) {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }
-        boolean processAlive = aetherProcess != null && aetherProcess.isAlive();
+        boolean processAlive = !warpRemote().isEmpty()
+                || (aetherProcess != null && aetherProcess.isAlive());
         // Puerto + data-plane: un aether zombi escucha en 1819/1820 con el
         // túnel muerto — solo el handshake SOCKS real distingue ambos casos.
         boolean probeUp = connected && processAlive && isSocksProxyUp() && isTunnelAlive();
@@ -804,8 +884,8 @@ public class CloudProxyPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("connected", isConnected);
         result.put("connecting", connecting);
-        result.put("socks", isConnected ? SOCKS_ADDR : "");
-        result.put("http", isConnected ? HTTP_PROXY_ADDR : "");
+        result.put("socks", isConnected ? socksAddr() : "");
+        result.put("http", isConnected ? httpProxyAddr() : "");
         result.put("error", lastError != null ? lastError : "");
         // Para el indicador UI: transporte activo (masque/masque-h2/wg),
         // si el guardián foreground está arriba y racha de muertes del
@@ -823,6 +903,10 @@ public class CloudProxyPlugin extends Plugin {
         result.put("exitIp", sessionExitIp);
         result.put("exitCountry", sessionExitCountry);
         result.put("exitColo", sessionExitColo);
+        // Modo remoto (túnel prestado de otro OctoStream en la LAN) y si
+        // este dispositivo comparte su túnel a otros.
+        result.put("remote", warpRemote());
+        result.put("shareLan", shareLan());
         call.resolve(result);
     }
 
@@ -832,13 +916,13 @@ public class CloudProxyPlugin extends Plugin {
      * consumidores (ExoPlayer DataSource, OkHttp) lo usan como Proxy.Type.HTTP.
      */
     public static String getHttpProxy() {
-        return connected ? HTTP_PROXY_ADDR : null;
+        return connected ? httpProxyAddr() : null;
     }
 
-    /** La dirección del proxy local aunque el estado esté marcado caído —
-     * para URLs que DEBEN salir por WARP (ligadas a la IP del túnel). */
+    /** La dirección del proxy efectivo (local o remoto) aunque el estado
+     * esté marcado caído — para URLs que DEBEN salir por WARP. */
     public static String getHttpProxyAddr() {
-        return HTTP_PROXY_ADDR;
+        return httpProxyAddr();
     }
 
     /**
@@ -855,7 +939,8 @@ public class CloudProxyPlugin extends Plugin {
         // estado WARP caído hasta reabrir la app.
         for (int attempt = 0; attempt < 2; attempt++) {
             try (java.net.Socket s = new java.net.Socket()) {
-                s.connect(new java.net.InetSocketAddress("127.0.0.1", HTTP_PROXY_PORT), 400);
+                s.connect(new java.net.InetSocketAddress(proxyHost(), HTTP_PROXY_PORT),
+                        proxyHost().equals("127.0.0.1") ? 400 : 1500);
                 // Puerto arriba no basta: túnel zombi (acepta CONNECT que
                 // nunca salen). El handshake SOCKS e2e es la prueba real —
                 // un stream enrutado a un túnel muerto colgaba ~15s.
@@ -885,7 +970,7 @@ public class CloudProxyPlugin extends Plugin {
         java.net.Socket s = null;
         try {
             s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", SOCKS_PORT), 1200);
+            s.connect(new java.net.InetSocketAddress(proxyHost(), SOCKS_PORT), 1200);
             s.setSoTimeout(1800);
             java.io.OutputStream out = s.getOutputStream();
             java.io.InputStream in = s.getInputStream();
@@ -927,6 +1012,37 @@ public class CloudProxyPlugin extends Plugin {
         strictKill = call.getBoolean("enabled", false);
         Log.i(TAG, "strict kill-switch: " + strictKill);
         call.resolve(new JSObject().put("enabled", strictKill));
+    }
+
+    /**
+     * IP de otro OctoStream en la LAN cuyo túnel WARP se quiere usar
+     * ("" = modo local con aether propio). Se aplica en el próximo
+     * connect() — el caller debe reconectar si hay túnel vivo.
+     */
+    @PluginMethod
+    public void setRemoteHost(PluginCall call) {
+        String host = call.getString("host", "");
+        host = host == null ? "" : host.trim();
+        // Solo IPv4/hostname corto — nada de URLs ni credenciales.
+        if (!host.isEmpty() && !host.matches("[0-9a-zA-Z.\\-]{3,45}")) {
+            call.reject("host inválido");
+            return;
+        }
+        setWarpRemote(host);
+        Log.i(TAG, "remote WARP host: " + (host.isEmpty() ? "(local)" : host));
+        call.resolve(new JSObject().put("remote", warpRemote()));
+    }
+
+    /**
+     * Compartir el túnel local en la LAN (bind 0.0.0.0): otros OctoStream
+     * apuntando a esta IP salen por el mismo exit WARP. Se aplica en el
+     * próximo arranque de aether.
+     */
+    @PluginMethod
+    public void setShareLan(PluginCall call) {
+        setShareLan(call.getBoolean("enabled", false));
+        Log.i(TAG, "share WARP on LAN: " + shareLan());
+        call.resolve(new JSObject().put("enabled", shareLan()));
     }
 
     /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
@@ -978,9 +1094,9 @@ public class CloudProxyPlugin extends Plugin {
     private void setAppProxy(Runnable onReady) {
         // 1. System properties for HttpURLConnection (CapacitorHttp)
         // These affect all HTTP/HTTPS requests made via HttpURLConnection
-        System.setProperty("http.proxyHost", "127.0.0.1");
+        System.setProperty("http.proxyHost", proxyHost());
         System.setProperty("http.proxyPort", String.valueOf(HTTP_PROXY_PORT));
-        System.setProperty("https.proxyHost", "127.0.0.1");
+        System.setProperty("https.proxyHost", proxyHost());
         System.setProperty("https.proxyPort", String.valueOf(HTTP_PROXY_PORT));
         // Don't proxy localhost/127.0.0.1 (app assets, Capacitor bridge) ni la
         // LAN privada: el escaneo/envío a otros OctoStream (192.168.x.x, 10.x.x.x,
@@ -993,7 +1109,7 @@ public class CloudProxyPlugin extends Plugin {
                 + "|*.atresplayer.com|*.atresmedia.com|dai.google.com|*.doubleclick.net";
         System.setProperty("http.nonProxyHosts", directHosts);
         System.setProperty("https.nonProxyHosts", directHosts);
-        Log.i(TAG, "System proxy set: " + HTTP_PROXY_ADDR);
+        Log.i(TAG, "System proxy set: " + httpProxyAddr());
 
         // 2. WebView proxy via ProxyController (API 29+)
         // This routes fetch/XHR/img requests through the WARP HTTP proxy
@@ -1003,7 +1119,7 @@ public class CloudProxyPlugin extends Plugin {
                 if (androidx.webkit.WebViewFeature.isFeatureSupported(
                         androidx.webkit.WebViewFeature.PROXY_OVERRIDE)) {
                     ProxyConfig proxyConfig = new ProxyConfig.Builder()
-                        .addProxyRule("127.0.0.1:" + HTTP_PROXY_PORT)
+                        .addProxyRule(proxyHost() + ":" + HTTP_PROXY_PORT)
                         .addBypassRule("localhost")
                         .addBypassRule("127.0.0.1")
                         .addBypassRule("*.local")
@@ -1041,7 +1157,7 @@ public class CloudProxyPlugin extends Plugin {
                         .addBypassRule("*.doubleclick.net")
                         .build();
                     ProxyController.getInstance().setProxyOverride(proxyConfig, DIRECT_EXECUTOR, () -> {
-                        Log.i(TAG, "WebView proxy set: " + HTTP_PROXY_ADDR);
+                        Log.i(TAG, "WebView proxy set: " + httpProxyAddr());
                     });
                 } else {
                     lastError = "WebView proxy override is not supported on this device";
@@ -1222,7 +1338,10 @@ public class CloudProxyPlugin extends Plugin {
         env.put("AETHER_NOIZE", "aggressive");
         // Reduce log level to warn (less CPU on log processing)
         env.put("AETHER_LOG_LEVEL", "warn");
-        env.put("AETHER_SOCKS", SOCKS_ADDR);
+        // Compartir el túnel en la LAN: bindea en todas las interfaces para
+        // que otros OctoStream lo usen como proxy remoto (misma IP de
+        // salida para todos — cuentas que penalizan multi-IP simultánea).
+        env.put("AETHER_SOCKS", shareLan() ? "0.0.0.0:" + SOCKS_PORT : SOCKS_ADDR);
         env.put("AETHER_CONFIG", new File(getContext().getFilesDir(), "aether.toml").getAbsolutePath());
         env.put("TMPDIR", getContext().getCacheDir().getAbsolutePath());
         // Quick reconnect to reuse last known good endpoint
@@ -1239,7 +1358,7 @@ public class CloudProxyPlugin extends Plugin {
             env.put("AETHER_QUIC_V2", "1");
         }
         // Also start HTTP CONNECT proxy (better for OkHttp - does remote DNS)
-        env.put("AETHER_HTTP_PROXY", HTTP_PROXY_ADDR);
+        env.put("AETHER_HTTP_PROXY", shareLan() ? "0.0.0.0:" + HTTP_PROXY_PORT : HTTP_PROXY_ADDR);
         // Route sniff: read SNI from first bytes for smarter routing
         env.put("AETHER_ROUTE_SNIFF", "1");
 
@@ -1302,9 +1421,9 @@ public class CloudProxyPlugin extends Plugin {
         }
 
         if (!isSocksProxyUp()) {
-            throw new RuntimeException("Aether proxy not responding (SOCKS " + SOCKS_ADDR + " or HTTP " + HTTP_PROXY_ADDR + ") after " + (attempts * 0.5) + "s");
+            throw new RuntimeException("Aether proxy not responding (SOCKS " + socksAddr() + " or HTTP " + httpProxyAddr() + ") after " + (attempts * 0.5) + "s");
         }
-        Log.i(TAG, "Aether proxies up: SOCKS " + SOCKS_ADDR + ", HTTP " + HTTP_PROXY_ADDR);
+        Log.i(TAG, "Aether proxies up: SOCKS " + socksAddr() + ", HTTP " + httpProxyAddr());
     }
 
     /**
@@ -1318,8 +1437,7 @@ public class CloudProxyPlugin extends Plugin {
             java.net.HttpURLConnection c = null;
             try {
                 java.net.Proxy p = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                        new java.net.InetSocketAddress(SOCKS_ADDR.split(":")[0],
-                                Integer.parseInt(SOCKS_ADDR.split(":")[1])));
+                        new java.net.InetSocketAddress(proxyHost(), SOCKS_PORT));
                 c = (java.net.HttpURLConnection)
                         new java.net.URL("https://cloudflare.com/cdn-cgi/trace").openConnection(p);
                 c.setConnectTimeout(8000);

@@ -30,6 +30,17 @@ export const CloudProxy = {
     typeof api().setStrictMode === 'function'
       ? api().setStrictMode({ enabled })
       : Promise.resolve({ enabled: false }),
+  // Usar el túnel WARP de otro OctoStream en la LAN (misma IP de salida
+  // para todos los dispositivos) — host = IP local; "" = modo local.
+  setRemoteHost: (host) =>
+    typeof api().setRemoteHost === 'function'
+      ? api().setRemoteHost({ host })
+      : Promise.resolve({ remote: '' }),
+  // Compartir el túnel propio en la LAN (aether escucha 0.0.0.0).
+  setShareLan: (enabled) =>
+    typeof api().setShareLan === 'function'
+      ? api().setShareLan({ enabled })
+      : Promise.resolve({ enabled: false }),
   // Fetch ligado à rede física (fora do túnel Riseup). Só existe no
   // Android; rejeita noutras plataformas — o chamador deve fazer fallback.
   directFetch: (opts) =>
