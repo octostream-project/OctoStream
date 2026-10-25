@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('octostream', {
   },
   // Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
   cloudProxy: {
-    connect: () => ipcRenderer.invoke('cloud:connect'),
+    connect: (opts) => ipcRenderer.invoke('cloud:connect', opts),
     disconnect: () => ipcRenderer.invoke('cloud:disconnect'),
     disconnectBackground: () => ipcRenderer.invoke('cloud:disconnect-background'),
     getStatus: () => ipcRenderer.invoke('cloud:status'),

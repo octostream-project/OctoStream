@@ -57,6 +57,37 @@ public class CloudProxyPlugin extends Plugin {
     private volatile long lastTunnelFailAt = 0;
     private volatile boolean protocolSwitching = false;
     private static volatile String lastError = null;
+    // Ubicación de salida WARP: "auto" = el colo más cercano (tu país);
+    // "random" = otro país cualquiera (gool/mim: segundo salto dentro de
+    // WARP → Cloudflare asigna otra salida); o un código ISO "DE","NL"…
+    // verificado por aether con AETHER_EXIT_LOC (rechaza salidas que no
+    // coincidan). Persistido para que reconexiones y el guardián usen el
+    // mismo modo.
+    private static final String PREFS_WARP = "octostream_warp";
+    private static volatile String exitLoc = null;
+    // Exit real observado tras conectar (trace a través del propio SOCKS).
+    private static volatile String sessionExitIp = "";
+    private static volatile String sessionExitCountry = "";
+    private static volatile String sessionExitColo = "";
+    private String warpExitLoc() {
+        if (exitLoc != null) return exitLoc;
+        try {
+            exitLoc = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("exit_loc", "auto");
+        } catch (Throwable t) { exitLoc = "auto"; }
+        return exitLoc;
+    }
+    private void setWarpExitLoc(String v) {
+        exitLoc = (v == null || v.isEmpty()) ? "auto" : v;
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("exit_loc", exitLoc).apply();
+        } catch (Throwable ignored) {}
+    }
+    // "auto"/"random" → cadena WARP normal / doble salto sin país fijado;
+    // "XX" → AETHER_EXIT_LOC=XX (allowlist de aether).
+    private boolean exitMode() { return !"auto".equals(warpExitLoc()); }
+    private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
     // Kill-switch estricto (ajuste del usuario): en vez de abrir la red al
     // detectar el túnel caído, el proxy se queda apuntando al puerto muerto
     // y TODA petición falla hasta reconectar — cero fugas a costa de que la
@@ -374,6 +405,11 @@ public class CloudProxyPlugin extends Plugin {
     @PluginMethod
     public void connect(PluginCall call) {
         Log.i(TAG, "connect() called");
+        // exitLoc opcional ("auto"|"random"|"DE"|…): se persiste — las
+        // reconexiones automáticas (JS retry, guardián, escalada) leen la
+        // preferencia guardada, así que solo hace falta mandarla una vez.
+        String reqExit = call.getString("exitLoc");
+        if (reqExit != null && !reqExit.isEmpty()) setWarpExitLoc(reqExit);
 
         // Exclusión mutua: si el túnel Riseup está vivo, conectar aether
         // lo para (si no, la IP de salida sería WARP, no Riseup).
@@ -406,7 +442,8 @@ public class CloudProxyPlugin extends Plugin {
                 // of a spurious "already in progress" error.
                 new Thread(() -> {
                     int waited = 0;
-                    while (connecting && waited < 70000) {
+                    int maxWait = exitMode() ? 200000 : 70000;
+                    while (connecting && waited < maxWait) {
                         try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
                         waited += 500;
                     }
@@ -450,7 +487,12 @@ public class CloudProxyPlugin extends Plugin {
                 // → masque-h2 (TCP, parece HTTPS) → wg. Se empieza por el
                 // preferido y se recorre el resto en orden; el último que
                 // funcione queda como preferido para la sesión.
-                String[] chain = { "masque", "masque-h2", "wg" };
+                // Con ubicación de salida no-auto la cadena es de doble
+                // salto: gool (WireGuard dentro de WARP — la salida la da el
+                // salto interior, otro país) → mim (MASQUE dentro de MASQUE).
+                String[] chain = exitMode()
+                        ? new String[] { "gool", "mim" }
+                        : new String[] { "masque", "masque-h2", "wg" };
                 int startIdx = 0;
                 for (int i = 0; i < chain.length; i++) {
                     if (chain[i].equals(preferredProtocol)) { startIdx = i; break; }
@@ -510,6 +552,7 @@ public class CloudProxyPlugin extends Plugin {
                         if (connected) connectedSince = System.currentTimeMillis();
                     }
                     if (connected) {
+                        refreshExitInfo();
                         call.resolve(new JSObject()
                             .put("status", "connected")
                             .put("socks", SOCKS_ADDR)
@@ -659,10 +702,12 @@ public class CloudProxyPlugin extends Plugin {
      */
     @PluginMethod
     public void getStatus(PluginCall call) {
-        // connecting tiene un límite interno de ~60s (startAether); un true
-        // más viejo que eso es estado corrupto (un connect cancelado o un
-        // hilo muerto) — se limpia solo para que los reintentos funcionen.
-        if (connecting && System.currentTimeMillis() - connectingSince > 75000) {
+        // connecting tiene un límite interno de ~60s (startAether; ~180s en
+        // modo doble salto gool/mim); un true más viejo que eso es estado
+        // corrupto (un connect cancelado o un hilo muerto) — se limpia
+        // solo para que los reintentos funcionen.
+        long connectStale = exitMode() ? 200000 : 75000;
+        if (connecting && System.currentTimeMillis() - connectingSince > connectStale) {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }
         boolean processAlive = aetherProcess != null && aetherProcess.isAlive();
@@ -708,6 +753,12 @@ public class CloudProxyPlugin extends Plugin {
         result.put("reconnects", sessionReconnects);
         result.put("uptimeMs", isConnected && connectedSince > 0
                 ? System.currentTimeMillis() - connectedSince : 0);
+        // Ubicación de salida: modo pedido (auto/random/ISO) + exit real
+        // observado por el trace (ip país y colo) cuando ya se midió.
+        result.put("exitLoc", warpExitLoc());
+        result.put("exitIp", sessionExitIp);
+        result.put("exitCountry", sessionExitCountry);
+        result.put("exitColo", sessionExitColo);
         call.resolve(result);
     }
 
@@ -1082,7 +1133,21 @@ public class CloudProxyPlugin extends Plugin {
         // recibe el binario sigue siendo "masque".
         boolean isH2 = "masque-h2".equals(protocol);
         boolean isMasque = isH2 || "masque".equals(protocol);
+        // Doble salto (IP del primer país del usuario enmascarada detrás de
+        // otra salida Cloudflare): gool = WireGuard-en-WARP, mim =
+        // MASQUE-en-MASQUE. El binario los resuelve como protocolos propios.
+        boolean isExitChain = "gool".equals(protocol) || "mim".equals(protocol);
         env.put("AETHER_PROTOCOL", isH2 ? "masque" : protocol);
+        if (isExitChain) {
+            String spec = exitSpec();
+            // Con país fijado, aether valida el exit contra cdn-cgi/trace y
+            // rechaza/reintenta salidas que no coincidan (DE, DE,NL, !ES).
+            if (!spec.isEmpty()) env.put("AETHER_EXIT_LOC", spec);
+            // Código de país → etiqueta de status (DE,NL,FR,IS,GB,US,CH).
+            sessionExitCountry = "";
+            sessionExitIp = "";
+            sessionExitColo = "";
+        }
         // ironclad: full tunnel + real HTTP request per candidate (most secure scan)
         env.put("AETHER_SCAN", "ironclad");
         env.put("AETHER_IP", "v4");
@@ -1154,9 +1219,11 @@ public class CloudProxyPlugin extends Plugin {
         // peer fijado valida (~5-10s); si en ~35s no hay proxies el protocolo
         // está filtrado y no merece quemar los 120s del scan — se corta y el
         // caller cae al otro protocolo. WG recibe más margen porque escanea
-        // endpoints propios (~10s típico, hasta ~60s).
+        // endpoints propios (~10s típico, hasta ~60s). gool/mim = dos
+        // provisiones + scan exterior + dial interior (~2-3min la primera
+        // vez; el quick-reconnect reutiliza peers conocidos las siguientes).
         int attempts = 0;
-        int maxAttempts = isMasque ? 70 : 120; // 35s masque / 60s wg
+        int maxAttempts = isExitChain ? 360 : (isMasque ? 70 : 120); // 180s exit / 35s masque / 60s wg
         while (!isSocksProxyUp() && attempts < maxAttempts) {
             synchronized (PROCESS_LOCK) {
                 if (!connecting) throw new InterruptedException("connect cancelled");
@@ -1171,6 +1238,42 @@ public class CloudProxyPlugin extends Plugin {
             throw new RuntimeException("Aether proxy not responding (SOCKS " + SOCKS_ADDR + " or HTTP " + HTTP_PROXY_ADDR + ") after " + (attempts * 0.5) + "s");
         }
         Log.i(TAG, "Aether proxies up: SOCKS " + SOCKS_ADDR + ", HTTP " + HTTP_PROXY_ADDR);
+    }
+
+    /**
+     * Consulta cloudflare.com/cdn-cgi/trace A TRAVÉS del propio SOCKS5 del
+     * túnel y cachea ip/loc/colo reales de salida — getStatus los expone y
+     * la UI puede mostrar el país real en vez de asumir el modo pedido.
+     * Sin impacto en el poll de estado: corre una vez tras cada conexión.
+     */
+    private void refreshExitInfo() {
+        new Thread(() -> {
+            java.net.HttpURLConnection c = null;
+            try {
+                java.net.Proxy p = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                        new java.net.InetSocketAddress(SOCKS_ADDR.split(":")[0],
+                                Integer.parseInt(SOCKS_ADDR.split(":")[1])));
+                c = (java.net.HttpURLConnection)
+                        new java.net.URL("https://cloudflare.com/cdn-cgi/trace").openConnection(p);
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                java.io.InputStream in = c.getInputStream();
+                byte[] buf = new byte[8192];
+                int n = in.read(buf);
+                String body = n > 0 ? new String(buf, 0, n) : "";
+                for (String line : body.split("\n")) {
+                    if (line.startsWith("ip=")) sessionExitIp = line.substring(3).trim();
+                    else if (line.startsWith("loc=")) sessionExitCountry = line.substring(4).trim();
+                    else if (line.startsWith("colo=")) sessionExitColo = line.substring(5).trim();
+                }
+                Log.i(TAG, "WARP exit: ip=" + sessionExitIp + " loc=" + sessionExitCountry
+                        + " colo=" + sessionExitColo);
+            } catch (Throwable t) {
+                Log.w(TAG, "exit trace failed: " + t.getMessage());
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }, "aether-exit-trace").start();
     }
 
     /** Sube el guardián foreground — inmune a phantom-kill de aether. */
@@ -1304,8 +1407,11 @@ public class CloudProxyPlugin extends Plugin {
         // ~5 muertes (~10s de túnel inválido) bastan para rendirse.
         if (tunnelFailStreak < 5 || protocolSwitching) return;
         // Siguiente escalón: masque → masque-h2 (TCP, sobrevive a redes que
-        // bloquean UDP/QUIC) → wg. En wg no hay más adonde escalar.
-        final String next = "masque".equals(currentProtocol) ? "masque-h2"
+        // bloquean UDP/QUIC) → wg. En wg no hay más adonde escalar. Con
+        // salida no-auto la cadena es gool → mim.
+        final String next = exitMode()
+                ? ("gool".equals(currentProtocol) ? "mim" : null)
+                : "masque".equals(currentProtocol) ? "masque-h2"
                 : "masque-h2".equals(currentProtocol) ? "wg" : null;
         if (next == null) return;
         protocolSwitching = true;
@@ -1329,6 +1435,7 @@ public class CloudProxyPlugin extends Plugin {
                 if (connected) {
                     connectedSince = System.currentTimeMillis();
                     sessionReconnects++;
+                    refreshExitInfo();
                     Log.i(TAG, "Aether restarted with " + next + " after tunnel storm");
                 } else {
                     markDisconnected();

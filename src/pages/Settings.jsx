@@ -159,6 +159,10 @@ export default function Settings() {
   const [vpnError, setVpnError] = useState('')
   const [vpnAutoConnect, setVpnAutoConnect] = useState(localStorage.getItem('octostream_warp_autoconnect') !== 'false')
   const [warpStrict, setWarpStrict] = useState(warpStrictEnabled())
+  // Salida WARP: 'auto' = colo cercano (tu país); 'random' = segundo salto
+  // (WARP-en-WARP, otro país cualquiera); o país fijado que el propio
+  // aether verifica contra el trace de Cloudflare antes de aceptar el túnel.
+  const [warpExitLoc, setWarpExitLoc] = useState(localStorage.getItem('octostream_warp_exit') || 'auto')
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
   const [leakBusy, setLeakBusy] = useState(false)
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
@@ -455,9 +459,10 @@ export default function Settings() {
         localStorage.setItem('octostream_warp_autoconnect', 'true')
         setVpnAutoConnect(true)
         setVpnStatus('connecting')
-        await CloudProxy.connect()
-        // El handshake puede tardar: sondea el estado hasta 15s.
-        for (let i = 0; i < 15; i++) {
+        await CloudProxy.connect({ exitLoc: warpExitLoc })
+        // El handshake puede tardar (hasta ~3min en modo doble salto la
+        // primera vez): sondea el estado mientras el nativo lo reporta.
+        for (let i = 0; i < 60; i++) {
           const st = await CloudProxy.getStatus().catch(() => ({}))
           if (st?.connected) { setVpnStatus('connected'); return }
           if (!st?.connecting && i > 0) break // falló el handshake
@@ -486,6 +491,32 @@ export default function Settings() {
     setWarpStrict(next)
     localStorage.setItem('octostream_warp_strict', next ? 'true' : 'false')
     CloudProxy.setStrictMode(next).catch(() => {})
+  }
+
+  const changeWarpExit = async (id) => {
+    setWarpExitLoc(id)
+    localStorage.setItem('octostream_warp_exit', id)
+    // Con el túnel vivo el cambio solo aplica reconectando — la
+    // reconexión pasa por el mismo path que toggleVpn (con el nuevo modo).
+    if (vpnStatus === 'connected' && vpnStatus !== 'connecting') {
+      setVpnError('')
+      try {
+        await CloudProxy.disconnect()
+        setVpnStatus('connecting')
+        await CloudProxy.connect({ exitLoc: id })
+        for (let i = 0; i < 60; i++) {
+          const st = await CloudProxy.getStatus().catch(() => ({}))
+          if (st?.connected) { setVpnStatus('connected'); return }
+          if (!st?.connecting && i > 0) break
+          await new Promise(r => setTimeout(r, 1000))
+        }
+        setVpnStatus('disconnected')
+        setVpnError('WARP no conectó con esa salida — prueba otra')
+      } catch (e) {
+        setVpnError(e?.message || 'Error con WARP')
+        setVpnStatus('disconnected')
+      }
+    }
   }
 
   const runLeakTest = async () => {
@@ -1721,14 +1752,46 @@ export default function Settings() {
               {vpnStatus !== 'disconnected' && warpDetails && (
                 <p className="text-dark-400 text-xs">
                   {warpDetails.protocol
-                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : 'MASQUE (QUIC)'}`
+                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : 'MASQUE (QUIC)'}`
                     : 'Transporte: —'}
+                  {warpDetails.exitCountry ? ` · salida ${warpDetails.exitCountry}${warpDetails.exitColo ? '/' + warpDetails.exitColo : ''}` : ''}
                   {warpDetails.guard ? ' · guardián activo' : ''}
                   {warpDetails.tunnelFails > 0 ? ` · inestable (${warpDetails.tunnelFails} caídas)` : ''}
                   {warpDetails.reconnects > 0 ? ` · ${warpDetails.reconnects} reconexión${warpDetails.reconnects > 1 ? 'es' : ''}` : ''}
                   {warpDetails.uptimeMs > 0 ? ` · arriba ${Math.round(warpDetails.uptimeMs / 60000)} min` : ''}
                 </p>
               )}
+              <div className="pt-1">
+                <p className="text-sm text-dark-300">
+                  Ubicación de salida
+                  <span className="block text-xs text-dark-500">
+                    "Otro país" o un país fijado enmascara la IP detrás de un segundo
+                    salto WARP — más privacidad a cambio de más latencia.
+                  </span>
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {[
+                    { id: 'auto', label: 'Automático' },
+                    { id: 'random', label: 'Otro país' },
+                    { id: 'DE', label: 'Alemania' },
+                    { id: 'NL', label: 'Países Bajos' },
+                    { id: 'IS', label: 'Islandia' },
+                    { id: 'FR', label: 'Francia' },
+                    { id: 'GB', label: 'Reino Unido' },
+                    { id: 'US', label: 'EE.UU.' },
+                    { id: 'CH', label: 'Suiza' },
+                  ].map(o => (
+                    <button
+                      key={o.id}
+                      onClick={() => changeWarpExit(o.id)}
+                      disabled={vpnStatus === 'connecting'}
+                      className={`text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${warpExitLoc === o.id ? 'bg-primary-600 text-white' : 'bg-dark-700 hover:bg-dark-600 text-dark-200'}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">
                 <span className="text-sm text-dark-300">
                   Auto-conectar al iniciar

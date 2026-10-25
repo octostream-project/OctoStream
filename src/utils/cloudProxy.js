@@ -19,7 +19,10 @@ function api() {
 }
 
 export const CloudProxy = {
-  connect: () => api().connect(),
+  // opts.exitLoc: ubicación de salida WARP — "auto" (colo más cercano),
+  // "random" (doble salto, otro país cualquiera) o código ISO ("DE","NL"…)
+  // verificado contra el trace de Cloudflare por el propio aether.
+  connect: (opts) => api().connect(opts),
   disconnect: () => api().disconnect(),
   disconnectBackground: () => api().disconnectBackground(),
   getStatus: () => api().getStatus(),

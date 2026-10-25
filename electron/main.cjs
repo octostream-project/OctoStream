@@ -56,7 +56,26 @@ function isAetherBypassHost(host) {
 const LAN_HOST = /^(localhost|127\.|0\.0\.0\.0|\[?::1\]?|192\.168\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i
 function isLanHost(host) { return LAN_HOST.test(host || '') }
 
-const aetherState = { proc: null, connected: false, connecting: false, error: '', protocol: '', tunnelFails: 0, lastTunnelFailAt: 0, switching: false }
+const aetherState = { proc: null, connected: false, connecting: false, error: '', protocol: '', tunnelFails: 0, lastTunnelFailAt: 0, switching: false, exitLoc: '' }
+
+// Ubicación de salida WARP ("auto"|"random"|ISO code) — paridad con el
+// pref warp_exit_loc del plugin Android: persiste en userData para que
+// los auto-connect y las escaladas mantengan el modo elegido.
+function warpExitLoc() {
+  if (aetherState.exitLoc) return aetherState.exitLoc
+  try {
+    aetherState.exitLoc = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), 'utf8')).exitLoc || 'auto'
+  } catch { aetherState.exitLoc = 'auto' }
+  return aetherState.exitLoc
+}
+function setWarpExitLoc(v) {
+  aetherState.exitLoc = v || 'auto'
+  try {
+    fs.writeFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'), JSON.stringify({ exitLoc: aetherState.exitLoc }))
+  } catch {}
+}
+const warpExitMode = () => warpExitLoc() !== 'auto'
+const warpExitSpec = () => warpExitLoc() === 'random' ? '' : warpExitLoc()
 let mainWindow = null
 
 function probePort(port) {
@@ -176,7 +195,7 @@ function aetherTunnelDied(proc) {
   aetherState.lastTunnelFailAt = now
   aetherState.tunnelFails++
   if (aetherState.tunnelFails < 5) return
-  const chain = ['masque', 'masque-h2', 'wg']
+  const chain = warpExitMode() ? ['gool', 'mim'] : ['masque', 'masque-h2', 'wg']
   const idx = chain.indexOf(aetherState.protocol)
   const next = idx >= 0 && idx < chain.length - 1 ? chain[idx + 1] : null
   if (!next) return
@@ -188,7 +207,8 @@ function aetherTunnelDied(proc) {
     .finally(() => { aetherState.switching = false })
 }
 
-async function aetherConnect(preferred) {
+async function aetherConnect(preferred, exitLoc) {
+  if (exitLoc) setWarpExitLoc(exitLoc)
   // Validar el túnel real, no solo los puertos — un aether zombie escucha
   // en :1819 con el data-plane muerto y devolver "connected" le diría a la
   // UI que todo va bien mientras cada request muere contra un proxy roto.
@@ -198,7 +218,8 @@ async function aetherConnect(preferred) {
   if (aetherState.connecting) {
     // Otro connect en curso (auto-connect de App.jsx + request bloqueada):
     // esperar al resultado en vez de fallar con "already in progress".
-    const deadline = Date.now() + 70000
+    // En modo doble salto (gool/mim) el handshake puede tardar ~3min.
+    const deadline = Date.now() + (warpExitMode() ? 200000 : 70000)
     while (aetherState.connecting && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 500))
     }
@@ -247,6 +268,12 @@ async function aetherConnect(preferred) {
         // en WG los endpoints son otros puertos (908…) y hay que escanear.
         env.AETHER_PEER = '162.159.198.1:443'
         env.AETHER_QUIC_V2 = '1'
+      } else if (protocol === 'gool' || protocol === 'mim') {
+        // Doble salto (WARP-en-WARP / MASQUE-en-MASQUE): la IP visible la
+        // da el segundo salto, no el colo cercano del usuario. Con país
+        // fijado, aether valida el exit contra cdn-cgi/trace y reintenta.
+        const spec = warpExitSpec()
+        if (spec) env.AETHER_EXIT_LOC = spec
       } else if (protocol === 'masque-h2') {
         // MASQUE sobre HTTP/2 (TCP 443): parece HTTPS normal y sobrevive a
         // redes que bloquean o ahogan UDP/QUIC. El binario sigue en
@@ -299,17 +326,22 @@ async function aetherConnect(preferred) {
     // MASQUE va rápido cuando su peer fijado valida (~5-10s); si en 35s no
     // hay proxies el protocolo está filtrado — se corta y se prueba el
     // siguiente. Cadena: masque (QUIC/UDP) → masque-h2 (TCP, parece HTTPS)
-    // → wg, empezando por el último que funcionó.
-    const chain = ['masque', 'masque-h2', 'wg']
+    // → wg, empezando por el último que funcionó. Con salida no-auto la
+    // cadena es de doble salto: gool (WireGuard-en-WARP) → mim.
+    const exitMode = warpExitMode()
+    const chain = exitMode ? ['gool', 'mim'] : ['masque', 'masque-h2', 'wg']
     let startIdx = 0
-    const pref = preferred || aetherState.protocol || 'masque'
+    const pref = preferred || aetherState.protocol || (exitMode ? 'gool' : 'masque')
     for (let i = 0; i < chain.length; i++) {
       if (chain[i] === pref) { startIdx = i; break }
     }
     let lastErr = null
     for (let i = 0; i < chain.length; i++) {
       const proto = chain[(startIdx + i) % chain.length]
-      const r = await spawnAndWait(proto, proto === 'wg' ? 60000 : 35000)
+      // gool/mim = dos provisiones + scan exterior + dial interior — hasta
+      // ~3min en frío (el quick-reconnect recorta las siguientes veces).
+      const r = await spawnAndWait(proto,
+        proto === 'gool' || proto === 'mim' ? 180000 : proto === 'wg' ? 60000 : 35000)
       if (r.status === 'connected') return r
       lastErr = r
       console.warn(`[Aether] ${proto} falló — probando siguiente`)
@@ -1178,7 +1210,7 @@ ipcMain.handle('riseup:import', async (_e, arg) => {
   }
 })
 
-ipcMain.handle('cloud:connect', () => aetherConnect())
+ipcMain.handle('cloud:connect', (_e, opts) => aetherConnect(null, opts?.exitLoc))
 ipcMain.handle('cloud:disconnect', () => aetherDisconnect(false))
 ipcMain.handle('cloud:disconnect-background', () => aetherDisconnect(true))
 ipcMain.handle('cloud:status', async () => {
@@ -1193,6 +1225,7 @@ ipcMain.handle('cloud:status', async () => {
     error: aetherState.error,
     protocol: aetherState.protocol || '',
     tunnelFails: aetherState.tunnelFails || 0,
+    exitLoc: warpExitLoc(),
   }
 })
 
