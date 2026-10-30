@@ -14,7 +14,10 @@ const applySync = (dataStr) => {
     const counts = mergeRemoteData(JSON.parse(dataStr))
     if (!counts.favs && !counts.hist && !counts.eps && !counts.watchlist && !counts.settings) return
     console.log(`[Sync] merge recibido: +${counts.favs} favoritos, ${counts.watchlist} mi lista, ${counts.hist} historial, ${counts.eps} episodios, ${counts.settings} ajustes`)
-    getSyncServer().then(S => S?.setLocalData({ data: JSON.stringify(localSyncPayload()) }).catch(() => {}))
+    getSyncServer().then(async S => {
+      const p = await localSyncPayload()
+      S?.setLocalData({ data: JSON.stringify(p) }).catch(() => {})
+    })
   } catch (e) {
     console.error('[Sync] Parse error:', e?.message)
   }

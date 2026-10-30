@@ -58,8 +58,8 @@ beforeEach(() => {
 })
 
 describe('localSyncPayload categories', () => {
-  it('includes only lists when lists is selected', () => {
-    const payload = localSyncPayload(['lists'])
+  it('includes only lists when lists is selected', async () => {
+    const payload = await localSyncPayload(['lists'])
 
     expect(payload.kind).toBe('octostream-sync')
     expect(payload.version).toBe(2)
@@ -70,12 +70,12 @@ describe('localSyncPayload categories', () => {
     expect(payload.watchedEpisodes).toBeUndefined()
   })
 
-  it('includes structured history and non-store history settings', () => {
+  it('includes structured history and non-store history settings', async () => {
     localStorage.setItem('octostream_search_history', JSON.stringify(['alien']))
     localStorage.setItem('octostream_localpos_/movie.mkv', '123')
     localStorage.setItem('octostream_history', JSON.stringify([{ id: 'duplicate' }]))
 
-    const payload = localSyncPayload(['history'])
+    const payload = await localSyncPayload(['history'])
 
     expect(payload.watchHistory).toHaveLength(1)
     expect(payload.watchedEpisodes['s1:S1:E1'].progress).toBe(1)
@@ -85,13 +85,13 @@ describe('localSyncPayload categories', () => {
     expect(payload.settings.octostream_history).toBeUndefined()
   })
 
-  it('collects accounts/settings and excludes non-portable keys', () => {
+  it('collects accounts/settings and excludes non-portable keys', async () => {
     localStorage.setItem('octostream_alldebrid_key', 'ad-key')
     localStorage.setItem('octostream_autoplay', 'false')
     localStorage.setItem('octostream_pair_tokens', '{"dev":"token"}')
     localStorage.setItem('octostream_last_sync', 'ayer')
 
-    const payload = localSyncPayload(['accounts', 'settings'])
+    const payload = await localSyncPayload(['accounts', 'settings'])
 
     expect(payload.settings.octostream_alldebrid_key).toBe('ad-key')
     expect(payload.settings.octostream_autoplay).toBe('false')
@@ -101,10 +101,10 @@ describe('localSyncPayload categories', () => {
     expect(payload.watchHistory).toBeUndefined()
   })
 
-  it('persists the selected categories for passive pulls', () => {
+  it('persists the selected categories for passive pulls', async () => {
     saveSyncCategories(['settings'])
     expect(loadSyncCategories()).toEqual(['settings'])
-    expect(localSyncPayload().sections).toEqual(['settings'])
+    expect((await localSyncPayload()).sections).toEqual(['settings'])
   })
 
   it('falls back to the legacy-safe default selection', () => {

@@ -83,7 +83,7 @@ export default function SyncDevices() {
   const updateLocalData = async () => {
     const SyncServer = await getSyncServer()
     if (!SyncServer) return
-    const data = JSON.stringify(localSyncPayload())
+    const data = JSON.stringify(await localSyncPayload())
     try {
       await SyncServer.setLocalData({ data })
     } catch (e) {
@@ -247,7 +247,7 @@ export default function SyncDevices() {
     try {
       setStatus('syncing')
       setMessage('Enviando tus datos...')
-      const r = await pushSync(url, dev, localSyncPayload(syncCats))
+      const r = await pushSync(url, dev, await localSyncPayload(syncCats))
       if (r === 'denied') {
         setStatus('error')
         setMessage('El otro dispositivo rechazó el emparejamiento.')

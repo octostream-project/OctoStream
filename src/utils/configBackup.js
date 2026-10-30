@@ -7,6 +7,7 @@
 
 import { isAndroidNative } from './platform.js'
 import { ExoPlayer } from '@octostream/exo-player'
+import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
 
 const PREFIX = 'octostream_'
 const BACKUP_NAME = 'octostream-backup.json'
@@ -45,6 +46,12 @@ export const BACKUP_CATEGORIES = [
       'octostream_hdfull_username',
       'octostream_hdfull_password',
       'octostream_pair_tokens',
+      // Acceso al VPS (host + SSH): viaja con las cuentas — en Android la
+      // clave se inyecta desde el Keystore en exportSettings/localSyncPayload.
+      'octostream_warp_remote',
+      'octostream_warp_ssh_user',
+      'octostream_warp_ssh_pass',
+      'octostream_warp_ssh_port',
     ],
     prefixes: ['octostream_aiostreams_', 'octostream_trakt_'],
   },
@@ -89,14 +96,14 @@ export function collectSettings(categories, excludedKeys = null) {
   return settings
 }
 
-function buildBackup(categories) {
+function buildBackup(categories, extraSettings = null) {
   return JSON.stringify({
     app: 'octostream',
     kind: 'settings-backup',
     version: 1,
     sections: categories || ALL_CATEGORIES,
     exportedAt: new Date().toISOString(),
-    settings: collectSettings(categories),
+    settings: { ...collectSettings(categories), ...(extraSettings || {}) },
   }, null, 2)
 }
 
@@ -105,7 +112,11 @@ function buildBackup(categories) {
  * (por defecto todas). Devuelve true si el usuario completó el guardado.
  */
 export async function exportSettings(categories = null) {
-  const content = buildBackup(categories)
+  // La clave SSH del VPS no vive en localStorage en Android (Keystore):
+  // se pide al plugin para que viaje con las demás cuentas.
+  const extra = (!categories || categories.includes('accounts'))
+    ? await sshCredsForTransfer() : null
+  const content = buildBackup(categories, extra)
   if (isAndroidNative()) {
     try {
       const r = await ExoPlayer.exportConfig({ filename: BACKUP_NAME, content })
@@ -173,5 +184,7 @@ export async function importSettings(categories = null) {
     localStorage.setItem(k, v)
     count++
   }
+  // En Android la clave SSH recién restaurada sube al Keystore del plugin.
+  await applyReceivedSshCreds()
   return count
 }

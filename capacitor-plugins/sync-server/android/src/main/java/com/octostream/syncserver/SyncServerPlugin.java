@@ -107,6 +107,11 @@ public class SyncServerPlugin extends Plugin {
     // Emparejamientos pendientes de respuesta del usuario (deviceId → datos).
     private final java.util.Map<String, JSONObject> pendingPairs =
             java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+    // Recién aceptados, pendientes de entregar el token al emisor en su
+    // siguiente /pair. Sin este mapa la siguiente /pair volvía a crear el
+    // pending y el diálogo de aceptación reaparecía en bucle.
+    private final java.util.Map<String, JSONObject> approvedPairs =
+            java.util.Collections.synchronizedMap(new java.util.HashMap<>());
     // deviceIds rechazados esta sesión: respuesta inmediata sin re-notificar.
     private final java.util.Set<String> deniedDevices =
             java.util.Collections.synchronizedSet(new java.util.HashSet<>());
@@ -318,32 +323,49 @@ public class SyncServerPlugin extends Plugin {
                             res = newFixedLengthResponse(Response.Status.FORBIDDEN,
                                 "application/json", "{\"ok\":false,\"denied\":true}");
                         } else {
-                            if (!pendingPairs.containsKey(devId)) {
-                                // Flood control: poda entradas >2min y cap
-                                // total — un peer hostil no debe inflar el mapa.
-                                long now = System.currentTimeMillis();
-                                synchronized (pendingPairs) {
-                                    pendingPairs.entrySet().removeIf(e ->
-                                        now - e.getValue().optLong("ts") > 120000);
-                                    if (pendingPairs.size() < 64) {
-                                        JSONObject pp = new JSONObject();
-                                        pp.put("ip", session.getRemoteIpAddress());
-                                        pp.put("alias", j.optString("alias", ""));
-                                        pp.put("fingerprint", j.optString("fingerprint", ""));
-                                        pp.put("ts", now);
-                                        pendingPairs.put(devId, pp);
-                                        JSObject ev = new JSObject();
-                                        ev.put("ip", session.getRemoteIpAddress());
-                                        ev.put("endpoint", "pair");
-                                        ev.put("deviceId", devId);
-                                        ev.put("alias", j.optString("alias", ""));
-                                        ev.put("fingerprint", j.optString("fingerprint", ""));
-                                        notifyListeners("pairRequest", ev);
+                            // Recién aprobado: entregar el token UNA vez —
+                            // sin esto el emisor recreaba el pending y el
+                            // diálogo reaparecía en bucle en el receptor.
+                            long nowA = System.currentTimeMillis();
+                            approvedPairs.entrySet().removeIf(e ->
+                                nowA - e.getValue().optLong("ts") > 120000);
+                            JSONObject ap = approvedPairs.remove(devId);
+                            if (ap != null) {
+                                JSONObject ok = new JSONObject();
+                                ok.put("ok", true);
+                                ok.put("token", ap.optString("token"));
+                                ok.put("deviceId", devId);
+                                ok.put("alias", deviceAlias);
+                                res = newFixedLengthResponse(Response.Status.OK,
+                                    "application/json", ok.toString());
+                            } else {
+                                if (!pendingPairs.containsKey(devId)) {
+                                    // Flood control: poda entradas >2min y cap
+                                    // total — un peer hostil no debe inflar el mapa.
+                                    long now = System.currentTimeMillis();
+                                    synchronized (pendingPairs) {
+                                        pendingPairs.entrySet().removeIf(e ->
+                                            now - e.getValue().optLong("ts") > 120000);
+                                        if (pendingPairs.size() < 64) {
+                                            JSONObject pp = new JSONObject();
+                                            pp.put("ip", session.getRemoteIpAddress());
+                                            pp.put("alias", j.optString("alias", ""));
+                                            pp.put("fingerprint", j.optString("fingerprint", ""));
+                                            pp.put("ts", now);
+                                            pendingPairs.put(devId, pp);
+                                            JSObject ev = new JSObject();
+                                            ev.put("ip", session.getRemoteIpAddress());
+                                            ev.put("endpoint", "pair");
+                                            ev.put("deviceId", devId);
+                                            ev.put("alias", j.optString("alias", ""));
+                                            ev.put("fingerprint", j.optString("fingerprint", ""));
+                                            notifyListeners("pairRequest", ev);
+                                        }
                                     }
                                 }
+                                res = newFixedLengthResponse(Response.Status.ACCEPTED,
+                                    "application/json", "{\"ok\":false,\"pending\":true}");
                             }
-                            res = newFixedLengthResponse(Response.Status.ACCEPTED,
-                                "application/json", "{\"ok\":false,\"pending\":true}");
                         }
                     }
                 } catch (Exception e) {
@@ -560,12 +582,18 @@ public class SyncServerPlugin extends Plugin {
         }
         if (allow) {
             try {
+                String tok = randomHex(24);
                 JSONObject d = new JSONObject();
                 d.put("alias", pp != null ? pp.optString("alias") : "");
                 d.put("fingerprint", pp != null ? pp.optString("fingerprint") : "");
-                d.put("token", randomHex(24));
+                d.put("token", tok);
                 d.put("ts", System.currentTimeMillis());
                 pairedDevices.put(devId, d);
+                // El emisor sigue sondeando /pair: la próxima recibe el token.
+                JSONObject ap = new JSONObject();
+                ap.put("token", tok);
+                ap.put("ts", d.optLong("ts"));
+                approvedPairs.put(devId, ap);
                 savePaired();
             } catch (Exception ignored) {}
         } else {

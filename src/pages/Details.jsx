@@ -756,12 +756,22 @@ export default function Details() {
         .filter(s => s.streamType === 'debrid' && s.url && !seen.has(s.url) && seen.add(s.url))
       const candidates = [stream, ...others].slice(0, 8)
       const errors = []
+      // Enlace eliminado en el hoster (LINK_DOWN/DMCA): se quita de la
+      // lista al momento — no tiene sentido dejar una fuente muerta a la vista.
+      const deadRe = /LINK_DOWN|LINK_TEMPORARY|not available on the file hoster|link is not available/i
+      const dropDead = (cand, err) => {
+        if (!deadRe.test(String(err || ''))) return
+        setEpisodeStreams(prev => Array.isArray(prev) ? prev.filter(s => s.url !== cand.url) : prev)
+        setStreams(prev => Array.isArray(prev) ? prev.filter(s => s.url !== cand.url) : prev)
+      }
       const attempts = candidates.map(cand =>
         unlockDebrid(cand.url).then(r => {
           if (r?.link) return { cand, direct: r.link }
+          dropDead(cand, r?.error)
           errors.push(r?.error || 'unlock failed')
           throw new Error(r?.error || 'unlock failed')
         }).catch(e => {
+          dropDead(cand, e?.message)
           errors.push(e?.message)
           console.warn('[Details] Debrid unlock error:', e?.message)
           throw e

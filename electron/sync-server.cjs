@@ -106,6 +106,7 @@ class SyncServer {
     this.receivedData = null
     this.pairedDevices = new Map()   // deviceId → {alias, fingerprint, token, ts}
     this.pendingPairs = new Map()    // deviceId → {ip, alias, fingerprint, ts}
+    this.approvedPairs = new Map()   // deviceId → {token, ts} — recién aceptado, pendiente de entregar el token
     this.deniedDevices = new Set()
     this.allowedIps = new Set()      // whitelist legacy por IP
     this.deniedIps = new Set()
@@ -217,11 +218,23 @@ class SyncServer {
         if (this.deniedDevices.has(devId)) {
           this._json(res, 403, { ok: false, denied: true }, origin)
         } else {
+          const now = Date.now()
+          for (const [k, v] of this.pendingPairs) {
+            if (now - (v.ts || 0) > 120000) this.pendingPairs.delete(k)
+          }
+          for (const [k, v] of this.approvedPairs) {
+            if (now - (v.ts || 0) > 120000) this.approvedPairs.delete(k)
+          }
+          // Recién aprobado: entregar el token UNA vez. Sin este paso la
+          // siguiente /pair recreaba el pending y el diálogo de aceptación
+          // reaparecía en bucle en el receptor.
+          const ap = this.approvedPairs.get(devId)
+          if (ap) {
+            this.approvedPairs.delete(devId)
+            this._json(res, 200, { ok: true, token: ap.token, deviceId: devId, alias: this.deviceAlias }, origin)
+            return
+          }
           if (!this.pendingPairs.has(devId)) {
-            const now = Date.now()
-            for (const [k, v] of this.pendingPairs) {
-              if (now - (v.ts || 0) > 120000) this.pendingPairs.delete(k)
-            }
             if (this.pendingPairs.size < 64) {
               this.pendingPairs.set(devId, {
                 ip: remoteIp, alias: j.alias || '', fingerprint: j.fingerprint || '', ts: now,
@@ -444,10 +457,15 @@ class SyncServer {
     const pp = this.pendingPairs.get(deviceId)
     this.pendingPairs.delete(deviceId)
     if (allow) {
+      // Aceptar sin petición pendiente crearía un emparejamiento fantasma.
+      if (!pp) return
+      const token = randomHex(24)
       this.pairedDevices.set(deviceId, {
-        alias: pp?.alias || '', fingerprint: pp?.fingerprint || '',
-        token: randomHex(24), ts: Date.now(),
+        alias: pp.alias || '', fingerprint: pp.fingerprint || '',
+        token, ts: Date.now(),
       })
+      // El emisor sigue sondeando /pair: la próxima recibe el token.
+      this.approvedPairs.set(deviceId, { token, ts: Date.now() })
       this._saveState()
     } else {
       this.deniedDevices.add(deviceId)

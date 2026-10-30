@@ -1,5 +1,6 @@
 import { useStore } from '../store/useStore.js'
 import { BACKUP_CATEGORIES, ALL_CATEGORIES, categoryOf, collectSettings } from './configBackup.js'
+import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
 
 // Mismas secciones que la copia de seguridad: listas, historial, cuentas y
 // resto de ajustes. La selección se guarda por dispositivo.
@@ -130,13 +131,17 @@ export function mergeRemoteData(remoteData, categories = null) {
     }
   }
 
+  // Credenciales SSH recién recibidas: en Android se suben al almacén
+  // cifrado del plugin y se borra la copia en claro de localStorage.
+  applyReceivedSshCreds().catch(() => {})
+
   return counts
 }
 
 // Serializa el estado local al formato del protocolo /sync. `settings`
 // contiene las claves octostream_* de las secciones elegidas, salvo las listas
 // estructuradas de arriba y las claves locales/sensibles excluidas.
-export function localSyncPayload(categories = null) {
+export async function localSyncPayload(categories = null) {
   const cats = normalizeSyncCategories(categories ?? loadSyncCategories())
   const s = useStore.getState()
   const payload = {
@@ -153,6 +158,9 @@ export function localSyncPayload(categories = null) {
     payload.watchedEpisodes = s.watchedEpisodes
   }
   const settings = collectSettings(cats, settingsExcluded())
+  // La clave SSH del VPS no vive en localStorage en Android (Keystore):
+  // se pide al plugin para que viaje con las demás cuentas.
+  if (cats.includes('accounts')) Object.assign(settings, await sshCredsForTransfer())
   if (Object.keys(settings).length) payload.settings = settings
   return payload
 }
