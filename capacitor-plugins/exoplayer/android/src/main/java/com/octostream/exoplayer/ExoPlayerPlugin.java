@@ -373,6 +373,7 @@ public class ExoPlayerPlugin extends Plugin {
     private TextView octoEpgEndTv = null;
     private ImageButton octoCastBtn = null;
     private ImageButton octoPipBtn = null;
+    private ImageButton octoSleepBtn = null;
     private CastContext castContext = null;
     private SessionManagerListener<CastSession> castSessionListener = null;
     private String currentLogoUrl = null;
@@ -5798,6 +5799,11 @@ public class ExoPlayerPlugin extends Plugin {
         subtitle.setOnClickListener(v -> showSubtitleMenu());
         View settings = controlsOverlay.findViewById(R.id.octo_settings);
         if (settings != null) settings.setOnClickListener(v -> showSettingsMenu());
+        octoSleepBtn = controlsOverlay.findViewById(R.id.octo_sleep);
+        if (octoSleepBtn != null) {
+            octoSleepBtn.setColorFilter(sleepTimerMinutes > 0 ? ACCENT_COLOR : Color.WHITE);
+            octoSleepBtn.setOnClickListener(v -> { showSleepTimerMenu(); resetControlsTimer(); });
+        }
         View subDelay = controlsOverlay.findViewById(R.id.octo_subdelay);
         if (subDelay != null) subDelay.setOnClickListener(v -> showSubtitleDelayMenu());
 
@@ -7884,11 +7890,13 @@ public class ExoPlayerPlugin extends Plugin {
         }
         if (minutes <= 0) {
             Toast.makeText(getContext(), "Temporizador de apagado desactivado", Toast.LENGTH_SHORT).show();
+            if (octoSleepBtn != null) octoSleepBtn.setColorFilter(Color.WHITE);
             return;
         }
         sleepTimerRunnable = this::executeSleepTimer;
         mainHandler.postDelayed(sleepTimerRunnable, minutes * 60_000L);
         Toast.makeText(getContext(), "OctoStream se cerrará en " + minutes + " min", Toast.LENGTH_LONG).show();
+        if (octoSleepBtn != null) octoSleepBtn.setColorFilter(ACCENT_COLOR);
         resetControlsTimer();
     }
 
