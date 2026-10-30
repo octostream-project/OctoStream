@@ -273,6 +273,58 @@ export async function instantAvailability(hashes) {
   }
 }
 
+// ─── Auditoría de la clave ────────────────────────────────────────────────
+// Cuenta asociada a la API key configurada (/user): nombre y fin de
+// premium. Read-only — no genera URLs ligadas a IP.
+export async function getAccountInfo() {
+  if (!isAlldebridEnabled()) return null
+  try {
+    const data = await apiFetch('/user', {}, true, 'GET', API_BASE_41)
+    const u = data?.user || data
+    if (!u?.username) return null
+    return {
+      username: u.username,
+      isPremium: !!u.isPremium,
+      premiumUntil: u.premiumUntil || u.premiumUntilString || null,
+      fidelity: u.fidelityPoints ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+// Últimos enlaces desbloqueados con la clave (/link/history): si aparece
+// algo que nadie de casa descargó, la clave está comprometida. Devuelve
+// [{link, filename?, date}] o [] en error.
+export async function getLinkHistory() {
+  if (!isAlldebridEnabled()) return []
+  try {
+    const data = await apiFetch('/link/history', {}, true, 'GET', API_BASE_41)
+    const list = data?.links || data?.history || []
+    return (Array.isArray(list) ? list : []).slice(0, 15).map(l => ({
+      link: l.link || l.url || '',
+      filename: l.filename || l.name || '',
+      date: l.date || l.unlockDate || null,
+    }))
+  } catch {
+    return []
+  }
+}
+
+// Registro local de propagación: a qué dispositivos se ha entregado la
+// clave por sync (la API no expone uso por dispositivo — esto lo cubre).
+const AD_KEY_LOG = 'octostream_ad_key_log'
+export function logAdKeyPropagation(alias) {
+  try {
+    const log = JSON.parse(localStorage.getItem(AD_KEY_LOG) || '[]')
+    log.unshift({ ts: Date.now(), alias: String(alias || 'desconocido') })
+    localStorage.setItem(AD_KEY_LOG, JSON.stringify(log.slice(0, 20)))
+  } catch { /* sin storage */ }
+}
+export function getAdKeyLog() {
+  try { return JSON.parse(localStorage.getItem(AD_KEY_LOG) || '[]') } catch { return [] }
+}
+
 // Upload a magnet link and return the magnet ID.
 // Dedup por infoHash: si el magnet ya está en la cola de la cuenta (lo
 // subió la app antes, la instancia AIOStreams u otro dispositivo) se

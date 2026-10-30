@@ -14,7 +14,7 @@ import { useStore } from './store/useStore.js'
 import { isAndroidNative, isElectron } from './utils/platform.js'
 import { initTvNavigation, refocusAfterPageChange, isPlayerOpen, getPlayerClosedAt } from './utils/tvNavigation.js'
 import { CloudProxy } from './utils/cloudProxy.js'
-import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus } from './utils/warpStatus.js'
+import { refreshWarpStatus, resetWarpReady, subscribeWarpStatus, startNetWatchdog } from './utils/warpStatus.js'
 import { startLoadPlan } from './utils/loadPlan.js'
 import { AppUpdater } from './utils/appUpdater.js'
 import { getTorrentEngine } from './utils/torrentEngine.js'
@@ -151,6 +151,9 @@ export default function App() {
       }).catch(() => {})
     }
     startWarp()
+    // Watchdog de planos: si WARP o el VPS mueren con la sesión viva,
+    // reconecta sin esperar a que falle la siguiente petición.
+    startNetWatchdog()
 
     // Plan de carga en background (TMDB → anime → deportes): precalienta las
     // cachés en orden para que cada sección abra al instante. Espera a WARP

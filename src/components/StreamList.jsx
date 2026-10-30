@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
-import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, isDownloadableDirect } from '../utils/streamMeta.js'
+import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, getLangPrioritySaved, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
 import { isAlldebridEnabled, hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
 
@@ -15,23 +15,65 @@ function useDebridJobsTick() {
 // más de 6 enlaces, lista completa si no.
 export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
   useDebridJobsTick()
+  // Filtros de la lista (persisten entre fichas): idioma preferido,
+  // solo listos en debrid, y solo fuentes con seeders.
+  const FILTERS_KEY = 'octostream_stream_filters'
+  const [filters, setFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') || {} } catch { return {} }
+  })
   if (!streams?.length) return null
   // Entradas "processing" (debrid descargando el magnet): atenuadas con
   // su título, pero PULSABLES — tocar una envía el magnet al debrid para
   // ponerla a descargar. Pasan a reproducibles cuando termina (Details
   // re-pide la lista periódicamente).
-  // Orden: más seeders primero (sort estable — los que no traen el dato
-  // quedan al final en su orden de llegada).
+  // Orden: idioma preferido primero (la prioridad de Ajustes) y a igual
+  // idioma, más seeders. Los sin idioma quedan al final.
+  const langRank = (s) => {
+    const l = parseStreamLang(s)
+    const i = l ? getLangPrioritySaved().indexOf(l) : -1
+    return i === -1 ? 99 : i
+  }
   const bySeeds = (a, b) => (b.seeds || 0) - (a.seeds || 0)
+  const byLangSeeds = (a, b) => langRank(a) - langRank(b) || bySeeds(a, b)
+  const toggleFilter = (k) => setFilters(f => {
+    const next = { ...f, [k]: !f[k] }
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)) } catch { /* sin storage */ }
+    return next
+  })
+  const prefLang = (() => {
+    try { return (JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')[0]) || 'ESP' } catch { return 'ESP' }
+  })()
+  const applyFilters = (list) => list.filter(s => {
+    if (filters.lang && parseStreamLang(s) !== prefLang) return false
+    if (filters.ready && s.cached !== true && !s.processing) return false
+    if (filters.seeds && !(s.seeds > 0)) return false
+    return true
+  })
   // Sin debrid configurado ni AIOStreams, nada de su mundo aparece:
   // entradas "procesándose" (no se pueden descargar) y enlaces
   // streamType 'debrid' (no se pueden desbloquear sin clave AllDebrid).
   const canDebrid = hasAnyDebrid()
   const canUnlock = isAlldebridEnabled()
-  const playable = streams
+  const playable = applyFilters(streams
     .filter(s => !s.processing && (canUnlock || s.streamType !== 'debrid'))
-    .sort(bySeeds)
-  const processing = canDebrid ? streams.filter(s => s.processing).sort(bySeeds) : []
+    .sort(byLangSeeds))
+  const processing = canDebrid ? applyFilters(streams.filter(s => s.processing).sort(byLangSeeds)) : []
+  const chip = (k, label) => (
+    <button
+      key={k}
+      onClick={() => toggleFilter(k)}
+      className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+        filters[k] ? 'bg-primary-600 text-white' : 'bg-dark-700 text-dark-300 hover:bg-dark-600'
+      }`}
+    >{label}</button>
+  )
+  const filterChips = (
+    <div className="flex items-center gap-2 mb-2 flex-wrap">
+      {chip('lang', `${langFlag(prefLang)} ${prefLang}`)}
+      {canDebrid && chip('ready', '⚡ Listos')}
+      {chip('seeds', '👥 Seeds')}
+    </div>
+  )
   // Progreso real de AllDebrid cuando el magnet está en la cola (subido
   // por la app o por la propia instancia AIOStreams).
   const procStatus = (s) => {
@@ -91,6 +133,8 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
 
   if (playable.length > 6) {
     return (
+      <div>
+        {filterChips}
       <div data-tv-list className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
         {playable.map((stream, i) => {
           const quality = parseStreamQuality(stream)
@@ -137,10 +181,13 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
         })}
         {processing.map(processingCell)}
       </div>
+      </div>
     )
   }
 
   return (
+    <div>
+      {filterChips}
     <div data-tv-list className="space-y-2">
       {playable.map((stream, i) => {
         const quality = parseStreamQuality(stream)
@@ -230,6 +277,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
         </div>
         )
       })}
+    </div>
     </div>
   )
 }

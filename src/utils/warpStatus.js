@@ -223,6 +223,33 @@ export async function getWarpDetails() {
   }
 }
 
+// ─── Watchdog de planos ──────────────────────────────────────────────────
+// Sonda ligera (45s): si un plano muere mientras la sesión debería estar
+// viva (el usuario encendió la red y no la apagó), dispara una reconexión.
+// Respeta la intención: tras un disconnect manual ('octostream_net_intent'
+// = '0') no reconecta nada. Un solo intento por caída — si fracasa espera
+// a la siguiente sonda, no un bucle caliente.
+let _watchTimer = null
+let _wasConnected = false
+export function startNetWatchdog() {
+  if (_watchTimer || typeof window === 'undefined') return
+  _watchTimer = setInterval(async () => {
+    const st = await getWarpDetails().catch(() => null)
+    if (!st) return
+    const intentOn = (() => { try { return localStorage.getItem('octostream_net_intent') !== '0' } catch { return true } })()
+    if (_wasConnected && !st.connected && !st.connecting && intentOn) {
+      _wasConnected = false // un intento; la siguiente sonda evalúa de nuevo
+      console.warn('[NetWatchdog] plano caído con sesión viva — reconectando')
+      CloudProxy.connect({}).catch(() => {})
+      return
+    }
+    _wasConnected = st.connected
+  }, 45000)
+}
+export function stopNetWatchdog() {
+  if (_watchTimer) { clearInterval(_watchTimer); _watchTimer = null }
+}
+
 // ─── Test de fuga de IP ─────────────────────────────────────────────────
 // Compara la IP que sale por la ruta normal de la app (proxy WARP) con la
 // de la red física. Es la prueba honesta de "sin fugas": si ambas

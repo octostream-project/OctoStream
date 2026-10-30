@@ -6,6 +6,7 @@ import OctoLoader from './OctoLoader.jsx'
 import Modal from './ui/Modal.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
 import { mergeRemoteData, localSyncPayload, SYNC_CATEGORIES, loadSyncCategories, saveSyncCategories } from '../utils/syncMerge.js'
+import { logAdKeyPropagation } from '../plugins/bundled/alldebrid.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
 // red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
@@ -252,6 +253,11 @@ export default function SyncDevices() {
         setStatus('error')
         setMessage('El otro dispositivo rechazó el emparejamiento.')
         return
+      }
+      // Auditoría: la clave AllDebrid viajó en este envío si 'accounts' va
+      // activa — queda registrado a qué dispositivo se entregó.
+      if ((syncCats || []).includes('accounts')) {
+        logAdKeyPropagation(dev?.alias || dev?.ip || dev?.deviceId)
       }
       setMessage('Descargando los datos del otro dispositivo...')
       const remoteData = await pullSync(url, dev)

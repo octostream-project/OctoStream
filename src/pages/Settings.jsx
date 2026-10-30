@@ -9,7 +9,7 @@ import Modal from '../components/ui/Modal.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
-import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
+import { getPin as adGetPin, checkPin as adCheckPin, getAccountInfo as adAccountInfo, getLinkHistory as adLinkHistory, getAdKeyLog } from '../plugins/bundled/alldebrid.js'
 import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails, warpStrictEnabled, checkIpLeak } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
@@ -147,6 +147,16 @@ export default function Settings() {
   // AllDebrid API key
   const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
   const [adSaved, setAdSaved] = useState(false)
+  // Auditoría: cuenta AllDebrid + historial de desbloqueos + propagación.
+  const [adAudit, setAdAudit] = useState(null)
+  const [adAuditBusy, setAdAuditBusy] = useState(false)
+  const loadAdAudit = async () => {
+    setAdAuditBusy(true)
+    try {
+      const [account, history] = await Promise.all([adAccountInfo(), adLinkHistory()])
+      setAdAudit({ account, history, propagation: getAdKeyLog() })
+    } finally { setAdAuditBusy(false) }
+  }
   // PIN flow state (AllDebrid)
   const [adPin, setAdPin] = useState(null)
   const [adPinLoading, setAdPinLoading] = useState(false)
@@ -1709,6 +1719,66 @@ export default function Settings() {
               </ol>
             </div>
           </div>
+
+          {/* Auditoría de la clave: cuenta, uso reciente y propagación por sync */}
+          {localStorage.getItem('octostream_alldebrid_key') && (
+            <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-white font-bold">Cuenta y actividad</h3>
+                  <p className="text-dark-400 text-sm mt-1">
+                    Quién usa esta clave — si ves desbloqueos que no son tuyos, regenera la API key
+                  </p>
+                </div>
+                <button
+                  onClick={loadAdAudit}
+                  disabled={adAuditBusy}
+                  className="btn-secondary px-3 py-1.5 text-sm flex-shrink-0"
+                >
+                  {adAuditBusy ? 'Consultando…' : 'Ver actividad'}
+                </button>
+              </div>
+              {adAudit && (
+                <div className="space-y-3 text-sm">
+                  {adAudit.account ? (
+                    <p className="text-dark-300">
+                      Cuenta <span className="text-white font-medium">{adAudit.account.username}</span>
+                      {adAudit.account.isPremium
+                        ? <span className="text-emerald-400"> · premium{adAudit.account.premiumUntil ? ` hasta ${new Date(adAudit.account.premiumUntil).toLocaleDateString()}` : ''}</span>
+                        : <span className="text-amber-400"> · sin premium activo</span>}
+                    </p>
+                  ) : (
+                    <p className="text-dark-400">No se pudo leer la cuenta.</p>
+                  )}
+                  {adAudit.history.length > 0 && (
+                    <div>
+                      <p className="text-dark-400 text-xs mb-1">Últimos enlaces desbloqueados con la clave:</p>
+                      <ul className="space-y-1">
+                        {adAudit.history.slice(0, 6).map((h, i) => (
+                          <li key={i} className="flex items-center justify-between gap-2 text-xs bg-dark-700/50 rounded px-2 py-1">
+                            <span className="text-dark-200 truncate">{h.filename || h.link}</span>
+                            <span className="text-dark-500 flex-shrink-0">{h.date ? new Date(h.date).toLocaleDateString() : ''}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {adAudit.propagation.length > 0 && (
+                    <div>
+                      <p className="text-dark-400 text-xs mb-1">Clave entregada por sincronización a:</p>
+                      <ul className="space-y-1">
+                        {adAudit.propagation.slice(0, 5).map((p, i) => (
+                          <li key={i} className="text-xs text-dark-300">
+                            {p.alias} — <span className="text-dark-500">{new Date(p.ts).toLocaleString()}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <div className="flex items-start justify-between mb-3">

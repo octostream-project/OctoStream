@@ -383,18 +383,55 @@ export class PluginManager {
   // Streams expire quickly because tokens/URLs are short-lived (5 min TTL)
   static streamCache = new Map()
   static STREAM_TTL_MS = 4 * 60 * 1000 // 4 minutes
+  // Persistencia a disco: las fichas re-abiertas tras reiniciar la app no
+  // re-resuelven nada si la entrada tiene <60min. En memoria el TTL sigue
+  // siendo 4min (frescura); en disco 60min (utilidad real).
+  static STREAM_DISK_TTL_MS = 60 * 60 * 1000
+  static STREAM_DISK_KEY = 'octostream_stream_cache_v1'
+  static _diskLoaded = false
+
+  static _loadDiskCache() {
+    if (PluginManager._diskLoaded) return
+    PluginManager._diskLoaded = true
+    try {
+      const raw = JSON.parse(localStorage.getItem(PluginManager.STREAM_DISK_KEY) || '[]')
+      const now = Date.now()
+      for (const [k, v] of raw) {
+        if (v?.ts && now - v.ts < PluginManager.STREAM_DISK_TTL_MS
+            && !v.streams?.some(s => s._noCache)) {
+          PluginManager.streamCache.set(k, { streams: v.streams, ts: v.ts, disk: true })
+        }
+      }
+    } catch { /* JSON corrupto */ }
+  }
+
+  static _persistDiskCache() {
+    try {
+      const arr = [...PluginManager.streamCache.entries()]
+        .filter(([, v]) => !v.streams?.some(s => s._noCache))
+        .slice(-30)
+      localStorage.setItem(PluginManager.STREAM_DISK_KEY, JSON.stringify(arr))
+    } catch { /* cuota llena */ }
+  }
+
+  static _cacheValid(cached) {
+    const ttl = cached?.disk ? PluginManager.STREAM_DISK_TTL_MS : PluginManager.STREAM_TTL_MS
+    return cached && (Date.now() - cached.ts < ttl)
+  }
 
   // Clear stale stream cache (called on app init)
   static clearStreamCache() {
     PluginManager.streamCache.clear()
+    try { localStorage.removeItem(PluginManager.STREAM_DISK_KEY) } catch { /* sin storage */ }
   }
 
   async getStreams(type, id, name, signal, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year) {
     await this.ensureReady()
     // Check cache first - avoids re-fetching when navigating back
     const cacheKey = `${type}:${id}${season ? `:S${season}E${episode || ''}` : ''}`
+    PluginManager._loadDiskCache()
     const cached = PluginManager.streamCache.get(cacheKey)
-    if (cached && (Date.now() - cached.ts < PluginManager.STREAM_TTL_MS)) {
+    if (PluginManager._cacheValid(cached)) {
       return cached.streams
     }
 
@@ -441,6 +478,7 @@ export class PluginManager {
         const oldest = PluginManager.streamCache.keys().next().value
         if (oldest) PluginManager.streamCache.delete(oldest)
       }
+      PluginManager._persistDiskCache()
     }
 
     return allStreams
@@ -453,8 +491,9 @@ export class PluginManager {
     await this.ensureReady()
     // Check cache first
     const cacheKey = `${type}:${id}${season ? `:S${season}E${episode || ''}` : ''}`
+    PluginManager._loadDiskCache()
     const cached = PluginManager.streamCache.get(cacheKey)
-    if (cached && (Date.now() - cached.ts < PluginManager.STREAM_TTL_MS)) {
+    if (PluginManager._cacheValid(cached)) {
       if (onBatch) onBatch(cached.streams)
       return cached.streams
     }
@@ -513,6 +552,7 @@ export class PluginManager {
         const oldest = PluginManager.streamCache.keys().next().value
         if (oldest) PluginManager.streamCache.delete(oldest)
       }
+      PluginManager._persistDiskCache()
     }
 
     return allStreams

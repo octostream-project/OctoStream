@@ -18,13 +18,21 @@ function api() {
   return bridge || NativeCloudProxy
 }
 
+// Intención del usuario respecto a la red: el watchdog de warpStatus
+// solo reconecta un plano caído cuando la última acción fue encender.
+const NET_INTENT_KEY = 'octostream_net_intent'
+const setNetIntent = (on) => { try { localStorage.setItem(NET_INTENT_KEY, on ? '1' : '0') } catch { /* sin storage */ } }
+export const getNetIntent = () => {
+  try { return localStorage.getItem(NET_INTENT_KEY) !== '0' } catch { return true }
+}
+
 export const CloudProxy = {
   // opts.exitLoc: ubicación de salida WARP — "auto" (colo más cercano),
   // "random" (doble salto, otro país cualquiera) o código ISO ("DE","NL"…)
   // verificado contra el trace de Cloudflare por el propio aether.
-  connect: (opts) => api().connect(opts),
-  disconnect: () => api().disconnect(),
-  disconnectBackground: () => api().disconnectBackground(),
+  connect: (opts) => { setNetIntent(true); return api().connect(opts) },
+  disconnect: () => { setNetIntent(false); return api().disconnect() },
+  disconnectBackground: () => { setNetIntent(false); return api().disconnectBackground() },
   getStatus: () => api().getStatus(),
   setStrictMode: (enabled) =>
     typeof api().setStrictMode === 'function'

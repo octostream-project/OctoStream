@@ -99,6 +99,17 @@ let langPriorityCache = null
 export function invalidateLangPriority() {
   langPriorityCache = null
 }
+// Prioridad de idioma editable desde Ajustes — orden de preferencia en la
+// lista de enlaces (los streams sin idioma quedan al final siempre).
+export const LANG_PRIORITY_DEFAULT = ['ESP', 'LAT', 'DUAL', 'SUB', 'ENG']
+export function setLangPriority(order) {
+  const clean = Array.isArray(order) && order.length ? order : LANG_PRIORITY_DEFAULT
+  langPriorityCache = clean
+  try { localStorage.setItem('octostream_lang_priority', JSON.stringify(clean)) } catch { /* sin storage */ }
+}
+export function getLangPrioritySaved() {
+  return getLangPriority()
+}
 function getLangPriority() {
   if (langPriorityCache) return langPriorityCache
   try {

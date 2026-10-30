@@ -78,8 +78,20 @@ export default function RemotePlayReceiver() {
       stopHandle = await SyncServer.addListener('stopReceived', () => {
         setRequest(null)
       })
-      pairHandle = await SyncServer.addListener('pairRequest', (ev) => {
+      pairHandle = await SyncServer.addListener('pairRequest', async (ev) => {
         if (!ev?.ip) return
+        // "Confiar siempre": un deviceId ya emparejado se acepta sin
+        // re-preguntar — el sync periódico no interrumpe con el diálogo.
+        if (ev.deviceId) {
+          try {
+            const paired = await SyncServer.getPairedDevices?.()
+            const known = (paired?.devices || paired || []).some(d => d.deviceId === ev.deviceId || d === ev.deviceId)
+            if (known) {
+              await SyncServer.answerPair({ deviceId: ev.deviceId, allow: true })
+              return
+            }
+          } catch { /* fallthrough al diálogo */ }
+        }
         setPairReq(prev => prev || ev) // un diálogo a la vez
       })
     })()
