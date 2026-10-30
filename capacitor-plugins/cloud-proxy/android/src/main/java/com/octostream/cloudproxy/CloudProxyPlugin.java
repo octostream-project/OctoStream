@@ -1165,6 +1165,25 @@ public class CloudProxyPlugin extends Plugin {
         call.resolve(new JSObject().put("trusted", true).put("fingerprint", keyFingerprint(b64)));
     }
 
+    /**
+     * Host key SSH aparcada a la espera de confirmación del usuario, si
+     * existe. El auto-connect rechaza con SSH_HOST_KEY_* sin UI — este
+     * método permite a Ajustes mostrar el diálogo de aceptación cuando
+     * el usuario acude a "confirmar la huella" desde cualquier aviso.
+     */
+    @PluginMethod
+    public void getPendingHostKey(PluginCall call) {
+        JSObject r = new JSObject();
+        synchronized (PROCESS_LOCK) {
+            if (pendingHostKeyHost != null && pendingHostKeyB64 != null) {
+                r.put("host", pendingHostKeyHost);
+                r.put("fingerprint", keyFingerprint(pendingHostKeyB64));
+                r.put("changed", pendingHostKeyChanged);
+            }
+        }
+        call.resolve(r);
+    }
+
     /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
     public static void markDisconnected() {
         synchronized (PROCESS_LOCK) {

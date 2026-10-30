@@ -59,6 +59,13 @@ export const CloudProxy = {
     typeof api().getRemoteSsh === 'function'
       ? api().getRemoteSsh()
       : Promise.resolve({ user: '', pass: '', port: 22 }),
+  // Host key SSH pendiente de confirmación (la que rechazó el último
+  // connect con SSH_HOST_KEY_*). Permite abrir el diálogo de aceptación
+  // desde cualquier aviso, no solo desde el botón "Probar". Solo Android.
+  getPendingHostKey: () =>
+    typeof api().getPendingHostKey === 'function'
+      ? api().getPendingHostKey()
+      : Promise.resolve({}),
   // Fija la host key pendiente del VPS tras la confirmación del usuario
   // (TOFU visible — la huella se mostró en el diálogo). Solo Android.
   trustRemoteHost: () =>

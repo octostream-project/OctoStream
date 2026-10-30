@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import ContentCard from '../components/ContentCard.jsx'
 import DownloadsList from '../components/DownloadsList.jsx'
@@ -7,7 +7,7 @@ import MediaGrid from '../components/ui/MediaGrid.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { isAlldebridEnabled } from '../plugins/bundled/alldebrid.js'
-import { Bookmark, CheckCircle2, Clock, Heart, Download, CloudDownload } from 'lucide-react'
+import { Bookmark, CheckCircle2, Clock, Heart, Download, CloudDownload, Search, X } from 'lucide-react'
 
 // Mi lista solo recoge contenido con principio y fin — la TV en directo y
 // canales no se pueden "terminar" y ensucian Pendientes sin sentido.
@@ -37,6 +37,7 @@ export default function Favorites() {
   const history = useStore(s => s.watchHistory)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
   const [category, setCategory] = useState('pending')
+  const [query, setQuery] = useState('')
 
   const { pending, completed } = useMemo(() => {
     const keyOf = item => `${item.type}:${item.id}`
@@ -58,6 +59,13 @@ export default function Favorites() {
   }, [watchlist, history, watchedEpisodes])
 
   const items = category === 'pending' ? pending : category === 'favorites' ? favorites : completed
+  // Buscador local: insensible a acentos ("alien" encuentra "Alienación"),
+  // filtra la pestaña activa — con bibliotecas grandes es el acceso rápido.
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const q = norm(query.trim())
+  const filtered = q
+    ? items.filter(i => norm(i.name).includes(q) || norm(i.originalName).includes(q) || norm(i.title).includes(q))
+    : items
   const empty = category === 'pending'
     ? 'No tienes nada pendiente. Marca títulos con el icono de marcador en su ficha o empieza a ver algo.'
     : category === 'favorites'
@@ -82,6 +90,27 @@ export default function Favorites() {
         <p className="mt-2 text-sm text-dark-400">Pendientes recoge lo marcado con el marcador y lo que estás viendo; Finalizadas solo incluye contenido terminado.</p>
       </header>
 
+      <div className="mb-4 relative max-w-md">
+        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400 pointer-events-none" />
+        <input
+          type="search"
+          data-tv-item
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Buscar en mi lista…"
+          className="w-full bg-dark-800 text-white rounded-xl pl-10 pr-10 py-3 border border-dark-700 focus:border-primary-500 focus:outline-none placeholder:text-dark-500"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-400 hover:text-white"
+            aria-label="Limpiar búsqueda"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+
       <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Categorías de Mi lista">
         {tabs.map(({ key, label, icon: Icon, count, active }) => (
           <button
@@ -105,11 +134,13 @@ export default function Favorites() {
         <div className="rounded-2xl border border-dark-800 bg-dark-900/50 p-5">
           <DebridJobsList />
         </div>
-      ) : items.length === 0 ? (
-        <EmptyState icon={category === 'completed' ? CheckCircle2 : Bookmark}>{empty}</EmptyState>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={category === 'completed' ? CheckCircle2 : Bookmark}>
+          {q ? `Sin resultados para «${query.trim()}» en esta pestaña.` : empty}
+        </EmptyState>
       ) : (
         <MediaGrid>
-          {items.map(item => <ContentCard key={`${item.type}-${item.id}`} item={item} />)}
+          {filtered.map(item => <ContentCard key={`${item.type}-${item.id}`} item={item} />)}
         </MediaGrid>
       )}
     </div>

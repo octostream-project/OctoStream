@@ -208,6 +208,22 @@ export default function Settings() {
   const [warpSshPort, setWarpSshPort] = useState(localStorage.getItem('octostream_warp_ssh_port') || '22')
   // Host key SSH pendiente de confirmación (TOFU): {fingerprint, changed}.
   const [hostKeyPrompt, setHostKeyPrompt] = useState(null)
+  // Huella SSH pendiente: el auto-connect la rechaza sin UI y el aviso
+  // mandaba a "Ajustes → Red", pero el diálogo solo se abría si el error
+  // saltaba dentro del botón Probar. Al entrar en Red se consulta la
+  // pendiente del plugin y el diálogo aparece solo.
+  useEffect(() => {
+    let dead = false
+    CloudProxy.getPendingHostKey?.().then(pk => {
+      if (dead || !pk?.fingerprint) return
+      // Solo si la pendiente es para el remoto configurado ahora.
+      const { host } = parseRemoteHostInput(warpRemote || '')
+      if (!pk.host || !host || pk.host === host) {
+        setHostKeyPrompt(prev => prev || { fingerprint: pk.fingerprint, changed: !!pk.changed })
+      }
+    }).catch(() => {})
+    return () => { dead = true }
+  }, [activeTab])
   const [vpsTest, setVpsTest] = useState(null)
   const [vpsTestBusy, setVpsTestBusy] = useState(false)
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
@@ -1742,9 +1758,11 @@ export default function Settings() {
                 <div className="space-y-3 text-sm">
                   {adAudit.account ? (
                     <p className="text-dark-300">
-                      Cuenta <span className="text-white font-medium">{adAudit.account.username}</span>
+                      Cuenta
                       {adAudit.account.isPremium
-                        ? <span className="text-emerald-400"> · premium{adAudit.account.premiumUntil ? ` hasta ${new Date(adAudit.account.premiumUntil).toLocaleDateString()}` : ''}</span>
+                        ? <span className="text-emerald-400"> · premium{adAudit.account.premiumUntil
+                            ? ` hasta ${new Date((adAudit.account.premiumUntil > 1e12 ? adAudit.account.premiumUntil : adAudit.account.premiumUntil * 1000)).toLocaleDateString()}`
+                            : ''}</span>
                         : <span className="text-amber-400"> · sin premium activo</span>}
                     </p>
                   ) : (
@@ -1757,7 +1775,7 @@ export default function Settings() {
                         {adAudit.history.slice(0, 6).map((h, i) => (
                           <li key={i} className="flex items-center justify-between gap-2 text-xs bg-dark-700/50 rounded px-2 py-1">
                             <span className="text-dark-200 truncate">{h.filename || h.link}</span>
-                            <span className="text-dark-500 flex-shrink-0">{h.date ? new Date(h.date).toLocaleDateString() : ''}</span>
+                            <span className="text-dark-500 flex-shrink-0">{h.date ? new Date(h.date > 1e12 ? h.date : h.date * 1000).toLocaleDateString() : ''}</span>
                           </li>
                         ))}
                       </ul>
