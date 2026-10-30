@@ -17,12 +17,6 @@ let _refreshing = null
 let _reconnecting = null
 const _waiters = new Set()
 
-// Whether the user wants WARP to come up automatically. When disabled,
-// requests must NOT be gated on the tunnel at all.
-export function warpAutoConnectEnabled() {
-  try { return localStorage.getItem('octostream_warp_autoconnect') !== 'false' } catch { return true }
-}
-
 // Kill-switch estricto (ajuste): si el túnel cae, el proxy muerto se
 // conserva y TODA petición falla en vez de salir por la IP real.
 export function warpStrictEnabled() {
@@ -132,10 +126,8 @@ export function isWarpConnected() {
 
 export function waitForWarp(timeoutMs = 15000) {
   if (_connected) return Promise.resolve(true)
-  // User opted out of WARP → don't gate requests on the tunnel at all.
-  if (!warpAutoConnectEnabled()) return Promise.resolve(false)
   // On desktop/Electron, refresh() probes the Aether/WARP session proxy.
-  // On Android, refresh() queries the native VPN plugin.
+  // On Android, refresh() queries the native cloud-proxy plugin.
   return new Promise(resolve => {
     let settled = false
     const finish = connected => {
@@ -163,7 +155,7 @@ export function waitForWarp(timeoutMs = 15000) {
         // plugin mata el aether ahogado y levanta uno nuevo (~2s).
         // Single-flight: varios waiters concurrentes comparten el mismo
         // connect() — antes cada uno lanzaba el suyo (6 arranques a la vez).
-        if (!reconnectTried && isAndroidNative() && warpAutoConnectEnabled()) {
+        if (!reconnectTried && isAndroidNative()) {
           reconnectTried = true
           if (!_reconnecting) {
             _reconnecting = CloudProxy.connect()
@@ -205,7 +197,7 @@ export async function getWarpDetails() {
     if (!isAndroidNative()) {
       const bridge = window.octostream?.cloudProxy
       const st = bridge ? await bridge.getStatus().catch(() => ({})) : {}
-      return { connected: !!st.connected, connecting: !!st.connecting, protocol: st.protocol || '', guard: false, tunnelFails: 0, exitLoc: st.exitLoc || '', remote: st.remote || '', shareLan: !!st.shareLan }
+      return { connected: !!st.connected, connecting: !!st.connecting, protocol: st.protocol || '', guard: false, tunnelFails: 0, exitLoc: st.exitLoc || '', remote: st.remote || '' }
     }
     const st = await CloudProxy.getStatus()
     return {
@@ -223,7 +215,8 @@ export async function getWarpDetails() {
       exitCountry: st?.exitCountry || '',
       exitColo: st?.exitColo || '',
       remote: st?.remote || '',
-      shareLan: !!st?.shareLan,
+      // Forward SSH al VPS vivo (salida dedicada a tráfico debrid).
+      vps: !!st?.vps,
     }
   } catch {
     return null
@@ -235,13 +228,26 @@ export async function getWarpDetails() {
 // de la red física. Es la prueba honesta de "sin fugas": si ambas
 // coinciden, el tráfico sale por la IP real aunque WARP diga conectado.
 export async function checkIpLeak() {
-  const parseTrace = text => ({
-    ip: (String(text).match(/(?:^|\n)ip=([^\n]+)/) || [])[1] || '',
-    loc: (String(text).match(/(?:^|\n)loc=([^\n]+)/) || [])[1] || '',
-    colo: (String(text).match(/(?:^|\n)colo=([^\n]+)/) || [])[1] || '',
-    warp: (String(text).match(/(?:^|\n)warp=([^\n]+)/) || [])[1] || '',
-  })
-  const URL = 'https://cloudflare.com/cdn-cgi/trace'
+  const parseTrace = data => {
+    // CapacitorHttp puede devolver ya el JSON parseado; fetch devuelve texto.
+    if (data && typeof data === 'object') {
+      return {
+        ip: data.ip || '',
+        loc: data.loc || '',
+        colo: data.colo || '',
+        warp: data.warp || '',
+      }
+    }
+    const body = String(data || '').trim()
+    try { return parseTrace(JSON.parse(body)) } catch {}
+    return {
+      ip: (body.match(/(?:^|\n)ip=([^\n]+)/) || [])[1] || body,
+      loc: (body.match(/(?:^|\n)loc=([^\n]+)/) || [])[1] || '',
+      colo: (body.match(/(?:^|\n)colo=([^\n]+)/) || [])[1] || '',
+      warp: (body.match(/(?:^|\n)warp=([^\n]+)/) || [])[1] || '',
+    }
+  }
+  const URL = 'https://api.ipify.org?format=json'
   const result = { tunnel: null, direct: null }
   // Ruta normal de la app (CapacitorHttp → proxy WARP en Android).
   try {

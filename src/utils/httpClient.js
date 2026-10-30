@@ -6,71 +6,34 @@
 import { CapacitorHttp } from '@capacitor/core'
 import { isAndroidNative } from './platform.js'
 import { CloudProxy } from './cloudProxy.js'
-import { waitForWarp, warpAutoConnectEnabled } from './warpStatus.js'
+import { waitForWarp } from './warpStatus.js'
 
-// Solo directos/servicios de TV con restricción geográfica evitan WARP.
-// El resto del tráfico de la app usa Aether/WARP.
-// Lista canónica en geoBypass.js (compartida con Java/Electron — el test
-// geoBypass.test.js detecta si alguna copia deriva).
-import { isGeoBypassHost } from './geoBypass.js'
-const isGeoHost = isGeoBypassHost
-async function requireWarpForNativeTraffic(url) {
-  if (!isAndroidNative() || isGeoHost(url) || !warpAutoConnectEnabled()) return
+async function requireWarpForNativeTraffic() {
+  if (!isAndroidNative()) return
   if (await waitForWarp(30000)) return
   const error = new Error('Aether/WARP no está conectado; la petición se bloqueó para evitar salir fuera del proxy.')
   error.code = 'WARP_NOT_CONNECTED'
   throw error
 }
-// Bootstrap de Riseup: generar el .ovpn exige salir a riseup.net ANTES de
-// que exista el túnel — estas peticiones salen directas siempre.
-const VPN_BOOTSTRAP_HOST_RE = /(^|\.)riseup\.net$/i
-function isVpnBootstrapHost(url) {
-  try { return VPN_BOOTSTRAP_HOST_RE.test(new URL(url).hostname) } catch { return false }
-}
-// Gate fail-closed: con Riseup en autoconnect, nada sale por la física
-// antes del CONNECTED (evita fugas de IP en peticiones IP-bound).
-export async function waitForVpnTunnel(maxMs = 30000, { required = false } = {}) {
-  if (!isAndroidNative()) return
-  if (!required) {
-    try {
-      if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') return
-    } catch { return }
-  }
-  const deadline = Date.now() + maxMs
-  while (Date.now() < deadline) {
-    let st
-    try {
-      st = await CloudProxy.riseupTunnelStatus()
-    } catch {
-      const error = new Error('Riseup VPN status unavailable; request blocked to prevent IP leak')
-      error.code = 'VPN_NOT_CONNECTED'
-      throw error
-    }
-    if (st?.connected) return
-    await new Promise(r => setTimeout(r, 400))
-  }
-  const error = new Error('Riseup VPN is not connected; request blocked to prevent IP leak')
-  error.code = 'VPN_NOT_CONNECTED'
-  throw error
-}
-
 async function nativeRequest(opts) {
-  if (opts.bypassVpn || isGeoHost(opts.url)) {
-    try {
-      const r = await CloudProxy.directFetch(opts)
-      if (r && typeof r.status === 'number') return r
-    } catch { /* sem rede física ou host fora da lista: cai no CapacitorHttp */ }
+  if (opts.vps) {
+    // Tráfico debrid: sale por el forward SSH al VPS (o por el proxy WARP
+    // normal si no hay VPS configurado). Nunca por la red física. El gate
+    // WARP se mantiene: si el usuario "saltó" el proxy, los requests debrid
+    // no quedan colgados esperando el túnel.
+    await requireWarpForNativeTraffic()
+    const response = await CloudProxy.directFetch({ ...opts, vps: true })
+    if (response && typeof response.status === 'number') return response
+    throw new Error('La solicitud VPS no devolvió respuesta')
   }
-  // Riseup tiene prioridad sobre WARP cuando está en autoconnect — y el
-  // gate es FAIL-CLOSED: con el túnel obligatorio caído la petición no
-  // puede salir directa por la IP real (el error se propaga).
-  if (!isVpnBootstrapHost(opts.url) && !isGeoHost(opts.url)
-      && localStorage.getItem('octostream_riseup_autoconnect') === 'true') {
-    await waitForVpnTunnel(30000, { required: true })
+  if (opts.bypassVpn) {
+    const response = await CloudProxy.directFetch(opts)
+    if (response && typeof response.status === 'number') return response
+    throw new Error('La solicitud directa no devolvió respuesta')
   }
-  // Con autoconexión activa, no se permite que CapacitorHttp salga en claro
-  // si el proxy Aether todavía no está arriba.
-  await requireWarpForNativeTraffic(opts.url)
+  // WARP es siempre-activo: no se permite que CapacitorHttp salga en claro
+  // si el proxy Aether todavía no está arriba (fail-closed).
+  await requireWarpForNativeTraffic()
   return CapacitorHttp.request(opts)
 }
 
@@ -130,7 +93,7 @@ export function shortSignal(signal, ms) {
  * @param {Object} headers
  * @param {AbortSignal} [signal] - optional abort signal (web/fetch only)
  */
-export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, strictNative = false) {
+export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, strictNative = false, vps = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     const isGz = url.endsWith('.gz')
@@ -143,12 +106,13 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
         responseType: isGz ? 'blob' : 'text',
         bypassVpn,
+        ...(vps ? { vps: true } : {}),
       })
       if (response.status >= 400) {
         throw httpError(response)
       }
     } catch (e) {
-      if (strictNative || e?.code === 'VPN_NOT_CONNECTED' || e?.code === 'WARP_NOT_CONNECTED') throw e
+      if (bypassVpn || strictNative || e?.code === 'WARP_NOT_CONNECTED') throw e
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) {
@@ -198,12 +162,13 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
 /**
  * POST JSON with platform-aware HTTP client.
  */
-export async function httpPostJson(url, body, headers = {}, form = false, signal, bypassVpn = false) {
+export async function httpPostJson(url, body, headers = {}, form = false, signal, bypassVpn = false, vps = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     const response = await nativeRequest({
         ...NATIVE_TIMEOUTS,
       bypassVpn,
+      ...(vps ? { vps: true } : {}),
       method: 'POST',
       url,
       headers: { 'User-Agent': DEFAULT_UA, ...headers },
@@ -278,7 +243,7 @@ export async function httpGetWithHeaders(url, headers = {}, signal, bypassVpn = 
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return { data: response.data || '', headers: response.headers || {} }
     } catch (e) {
-      if (e?.name === 'AbortError' || e?.code === 'WARP_NOT_CONNECTED') throw e
+      if (bypassVpn || e?.name === 'AbortError' || e?.code === 'WARP_NOT_CONNECTED') throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const text = await res.text()
@@ -307,7 +272,7 @@ function parseBodyForCapacitor(body, headers = {}) {
   try { return JSON.parse(body) } catch { return body }
 }
 
-export async function httpPostText(url, body, headers = {}, signal) {
+export async function httpPostText(url, body, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
@@ -318,6 +283,7 @@ export async function httpPostText(url, body, headers = {}, signal) {
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
         data: parseBodyForCapacitor(body, headers),
         responseType: 'text',
+        bypassVpn,
       })
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       return response.data

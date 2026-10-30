@@ -14,7 +14,9 @@
 
 import { getItemSync, removeItemSync } from '../../utils/storage.js'
 import { pickTorrentEntries } from '../../utils/torrentPick.js'
-import { httpGetJson, httpPostJson, waitForVpnTunnel } from '../../utils/httpClient.js'
+import { httpGetJson, httpPostJson } from '../../utils/httpClient.js'
+import { waitForWarp } from '../../utils/warpStatus.js'
+import { isAndroidNative } from '../../utils/platform.js'
 
 const API_BASE = 'https://api.alldebrid.com/v4'
 // /v4/magnet/status está discontinuado: el estado de magnets vive en v4.1.
@@ -24,27 +26,27 @@ const AGENT = 'octostream_stream'
 // Solo host para logs: las URLs de unlock llevan token en el query.
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
-// Las llamadas a AllDebrid prefieren el túnel Riseup en Android: el provider
-// registra la IP de salida y liga los links desbloqueados a ella. Soft-wait:
-// si el túnel está caído la petición sale por WARP/física — la consistencia
-// se mantiene porque unlock y playback salen por el mismo egress. El gate
-// duro anterior impedía usar AllDebrid sin Riseup configurado.
+// Las llamadas a AllDebrid van por el túnel WARP en Android: el provider
+// registra la IP de salida y liga los links desbloqueados a ella. Con VPS
+// SSH configurado sale por el túnel dedicado (vps:true) — unlock y playback
+// comparten la misma IP de salida del VPS; sin VPS cae al proxy WARP y la
+// consistencia IP se mantiene igual.
 async function apiGetJson(url) {
-  try { await waitForVpnTunnel(20000) } catch {}
-  return httpGetJson(url, {}, undefined, false, true)
+  try { if (isAndroidNative()) await waitForWarp(20000) } catch {}
+  return httpGetJson(url, {}, undefined, false, true, true)
 }
 
 // PIN flow: handshake de autenticación — a diferencia de /link/unlock no
-// genera URLs ligadas a la IP de salida. Espera al túnel si el usuario lo
-// tiene en autoconnect, pero NO bloquea el PIN cuando la VPN está caída:
+// genera URLs ligadas a la IP de salida. Espera al túnel, pero NO bloquea
+// el PIN si WARP está caído:
 // vincular la cuenta no puede exigir tener la VPN ya configurada.
 async function apiGetJsonPin(url) {
-  try { await waitForVpnTunnel(15000) } catch {}
+  try { if (isAndroidNative()) await waitForWarp(15000) } catch {}
   try {
     return await httpGetJson(url, {}, undefined, false, false)
   } catch (e) {
-    if (e?.code !== 'VPN_NOT_CONNECTED' && e?.code !== 'WARP_NOT_CONNECTED') throw e
-    // Túnel caído o mal configurado: el PIN sale por la física.
+    if (e?.code !== 'WARP_NOT_CONNECTED') throw e
+    // Túnel caído o mal configurado: el PIN usa conexión directa.
     return httpGetJson(url, {}, undefined, true, false)
   }
 }
@@ -153,12 +155,15 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
   const url = apiUrl(endpoint, method === 'GET' ? params : {}, base)
   let data
   if (method === 'POST') {
-    try { await waitForVpnTunnel(20000) } catch {}
+    try { if (isAndroidNative()) await waitForWarp(20000) } catch {}
     data = await httpPostJson(
       url,
       new URLSearchParams(params).toString(),
       { 'Content-Type': 'application/x-www-form-urlencoded' },
       true,
+      undefined,
+      false,
+      true, // vps: delayed/unlock comparten la IP de salida del VPS
     )
   } else {
     data = await apiGetJson(url)
@@ -173,7 +178,7 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
       throw new Error('AllDebrid: API key invalid, please re-authenticate')
     }
     const msg = data.error?.message || 'Unknown AllDebrid error'
-    throw new Error(`AllDebrid: ${msg}`)
+    throw new Error(`AllDebrid: ${code ? `[${code}] ` : ''}${msg}`)
   }
   return data.data
 }
@@ -242,7 +247,7 @@ export async function instantAvailability(hashes) {
   const hs = [...new Set((hashes || []).map(h => String(h || '').toLowerCase()).filter(h => /^[0-9a-f]{32,40}$/.test(h)))]
   if (!hs.length || !isAlldebridEnabled()) return null
   try {
-    // Sin waitForVpnTunnel: es una consulta de solo lectura (no genera URLs
+    // Sin waitForWarp: es una consulta de solo lectura (no genera URLs
     // ligadas a IP como /link/unlock) — esperar al túnel solo retrasaba
     // el marcado de "descargando" en la lista.
     const body = hs.map(h => `magnets[]=${encodeURIComponent(`magnet:?xt=urn:btih:${h}`)}`).join('&')

@@ -1,5 +1,7 @@
 package com.octostream.cloudproxy;
 
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.util.Log;
 
 import androidx.webkit.ProxyConfig;
@@ -16,11 +18,20 @@ import com.jcraft.jsch.Session;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
-import de.blinkt.openvpn.api.IOpenVPNAPIService;
-import de.blinkt.openvpn.api.IOpenVPNStatusCallback;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 /**
  * Capacitor plugin that runs the Aether binary to create a local proxy
@@ -38,6 +49,13 @@ public class CloudProxyPlugin extends Plugin {
     private static final int SOCKS_PORT = 1819;
     private static final String HTTP_PROXY_ADDR = "127.0.0.1:1820";
     private static final int HTTP_PROXY_PORT = 1820;
+    // Forwards SSH al VPS (salida solo-debrid): 127.0.0.1:2819→VPS:1819
+    // (SOCKS5) y 127.0.0.1:2820→VPS:1820 (HTTP CONNECT). Van por puertos
+    // separados porque el aether local ocupa 1819/1820 — ambos transportes
+    // conviven y el VPS (cuota limitada) solo ve tráfico debrid; fútbol,
+    // YouTube y servidores gratuitos salen por WARP local.
+    private static final int VPS_SOCKS_PORT = 2819;
+    private static final int VPS_HTTP_PORT = 2820;
 
     private static volatile Process aetherProcess = null;
     private static volatile boolean connected = false;
@@ -45,9 +63,9 @@ public class CloudProxyPlugin extends Plugin {
     private static volatile long connectingSince = 0;
     private static volatile int statusMisses = 0;
     // Protocolo que funcionó la última vez — se prueba primero en la
-    // siguiente conexión. "masque" es preferido (se disfraza de HTTPS/443);
-    // en redes que filtran el data-plane QUIC cae a "wg" automáticamente.
-    private static volatile String preferredProtocol = "masque";
+    // siguiente conexión. Siempre doble salto (gool → mim); si gool no
+    // sostiene el túnel se escala a mim automáticamente.
+    private static volatile String preferredProtocol = "gool";
     // Protocolo que corre el proceso aether actual — MASQUE a veces no
     // sostiene el túnel bajo carga ("tunnel ended: Operation not
     // permitted" en bucle cada ~2s) mientras sus puertos locales siguen
@@ -93,9 +111,8 @@ public class CloudProxyPlugin extends Plugin {
     private boolean exitMode() { return true; }
     private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
 
-    // WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
-    // dispositivos salen por la misma IP a la vez (cuentas que bloquean
-    // multi-IP como AllDebrid). "" = modo local (aether propio).
+    // WARP remoto: usar un proxy externo accesible en :1819/:1820 o, con
+    // usuario SSH, el proxy del VPS alcanzado por port-forward. "" = local.
     private static volatile String remoteIp = null;
     // Remoto-via-SSH: si hay usuario SSH configurado, el host remoto se
     // alcanza por un túnel SSH (JSch) que hace port-forward de
@@ -107,9 +124,12 @@ public class CloudProxyPlugin extends Plugin {
     private static volatile Session sshSession = null;
     // true mientras el modo remoto activo es SSH (proxyHost→127.0.0.1).
     private static volatile boolean sshMode = false;
-    // Compartir el túnel local en la LAN: aether escucha 0.0.0.0 en vez de
-    // 127.0.0.1 para que otros OctoStream lo usen como proxy.
-    private static volatile Boolean shareLan = null;
+    // Host key SSH pendiente de confirmación por el usuario (TOFU con
+    // huella): la primera clave vista —o una que cambia— se aparca aquí y
+    // la sesión se rechaza; trustRemoteHost() la fija tras el OK explícito.
+    private static volatile String pendingHostKeyHost = null;
+    private static volatile String pendingHostKeyB64 = null;
+    private static volatile boolean pendingHostKeyChanged = false;
     private String warpRemote() {
         if (remoteIp != null) return remoteIp;
         try {
@@ -133,11 +153,82 @@ public class CloudProxyPlugin extends Plugin {
         } catch (Throwable t) { remoteSshUser = ""; }
         return remoteSshUser;
     }
+    // --- Secreto en reposo (Android Keystore) ---
+    // La clave AES-GCM vive en el AndroidKeyStore (TEE/hardware cuando el
+    // dispositivo lo tiene): SharedPreferences solo guarda
+    // "enc:v1:<b64(iv+ct)>" — el texto plano nunca toca disco. Valores
+    // legacy sin prefijo se tratan como claro y se re-cifran al leerlos.
+    private static final String KEYSTORE_ALIAS = "octo_ssh_secret";
+    private static final String ENC_PREFIX = "enc:v1:";
+
+    private static SecretKey secretKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+        KeyStore.Entry e = ks.getEntry(KEYSTORE_ALIAS, null);
+        if (e instanceof KeyStore.SecretKeyEntry) {
+            return ((KeyStore.SecretKeyEntry) e).getSecretKey();
+        }
+        KeyGenerator kg = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        kg.init(new KeyGenParameterSpec.Builder(KEYSTORE_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return kg.generateKey();
+    }
+
+    private String encryptSecret(String plain) {
+        if (plain == null || plain.isEmpty()) return "";
+        try {
+            Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+            c.init(Cipher.ENCRYPT_MODE, secretKey());
+            byte[] iv = c.getIV();
+            byte[] ct = c.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+            byte[] blob = new byte[iv.length + ct.length];
+            System.arraycopy(iv, 0, blob, 0, iv.length);
+            System.arraycopy(ct, 0, blob, iv.length, ct.length);
+            return ENC_PREFIX + android.util.Base64.encodeToString(blob, android.util.Base64.NO_WRAP);
+        } catch (Throwable t) {
+            // Keystore no disponible (dispositivo raro): guardar en claro
+            // antes que perder la credencial — el túnel debe arrancar.
+            Log.w(TAG, "SSH secret encrypt unavailable — storing legacy plaintext");
+            return plain;
+        }
+    }
+
+    private String decryptSecret(String stored) {
+        if (stored == null || stored.isEmpty()) return "";
+        if (!stored.startsWith(ENC_PREFIX)) return stored; // legacy claro
+        try {
+            byte[] blob = android.util.Base64.decode(
+                    stored.substring(ENC_PREFIX.length()), android.util.Base64.NO_WRAP);
+            Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+            c.init(Cipher.DECRYPT_MODE, secretKey(),
+                    new GCMParameterSpec(128, Arrays.copyOfRange(blob, 0, 12)));
+            return new String(c.doFinal(Arrays.copyOfRange(blob, 12, blob.length)),
+                    StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            // Keystore invalidado (app restaurada en otro dispositivo): el
+            // blob ya no descifra — "" fuerza a re-introducir la clave.
+            Log.w(TAG, "SSH secret decrypt failed — credential needs re-entry");
+            return "";
+        }
+    }
+
     private String sshPass() {
         if (remoteSshPass != null) return remoteSshPass;
         try {
-            remoteSshPass = getContext().getSharedPreferences(PREFS_WARP, 0)
+            String stored = getContext().getSharedPreferences(PREFS_WARP, 0)
                     .getString("remote_ssh_pass", "");
+            remoteSshPass = decryptSecret(stored);
+            // Migración perezosa: el valor viejo en claro se re-cifra al
+            // leerlo — prefs solo conserva el blob cifrado.
+            if (!remoteSshPass.isEmpty() && stored != null && !stored.startsWith(ENC_PREFIX)) {
+                getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                        .putString("remote_ssh_pass", encryptSecret(remoteSshPass)).apply();
+            }
         } catch (Throwable t) { remoteSshPass = ""; }
         return remoteSshPass;
     }
@@ -156,7 +247,7 @@ public class CloudProxyPlugin extends Plugin {
         try {
             getContext().getSharedPreferences(PREFS_WARP, 0).edit()
                     .putString("remote_ssh_user", remoteSshUser)
-                    .putString("remote_ssh_pass", remoteSshPass)
+                    .putString("remote_ssh_pass", encryptSecret(remoteSshPass))
                     .putInt("remote_ssh_port", remoteSshPort)
                     .apply();
         } catch (Throwable ignored) {}
@@ -165,8 +256,9 @@ public class CloudProxyPlugin extends Plugin {
     private boolean sshRemote() {
         return !warpRemote().isEmpty() && !sshUser().isEmpty();
     }
-    // Host key SSH del VPS (TOFU: la primera vista se acepta y se guarda;
-    // si luego cambia la conexión se rechaza — MITM visible).
+    // Host key SSH del VPS (TOFU con confirmación: la primera vista queda
+    // pendiente hasta que el usuario acepta la huella; si luego cambia la
+    // conexión se rechaza — MITM visible).
     private String storedHostKey(String host) {
         try {
             return getContext().getSharedPreferences(PREFS_WARP, 0)
@@ -179,21 +271,6 @@ public class CloudProxyPlugin extends Plugin {
                     .putString("remote_ssh_hostkey_" + host, b64).apply();
         } catch (Throwable ignored) {}
     }
-    private boolean shareLan() {
-        if (shareLan != null) return shareLan;
-        try {
-            shareLan = getContext().getSharedPreferences(PREFS_WARP, 0)
-                    .getBoolean("share_lan", false);
-        } catch (Throwable t) { shareLan = false; }
-        return shareLan;
-    }
-    private void setShareLan(boolean v) {
-        shareLan = v;
-        try {
-            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
-                    .putBoolean("share_lan", v).apply();
-        } catch (Throwable ignored) {}
-    }
     // Host del proxy efectivo: el remoto si hay uno configurado, localhost
     // en modo local. Los puertos son fijos (1819 SOCKS / 1820 HTTP).
     private static String proxyHost() {
@@ -202,8 +279,12 @@ public class CloudProxyPlugin extends Plugin {
         String r = remoteIp;
         return (r == null || r.isEmpty()) ? "127.0.0.1" : r;
     }
-    private static String socksAddr() { return proxyHost() + ":" + SOCKS_PORT; }
-    private static String httpProxyAddr() { return proxyHost() + ":" + HTTP_PROXY_PORT; }
+    private static String proxyAddrHost() {
+        String host = proxyHost();
+        return host.indexOf(':') >= 0 ? "[" + host + "]" : host;
+    }
+    private static String socksAddr() { return proxyAddrHost() + ":" + SOCKS_PORT; }
+    private static String httpProxyAddr() { return proxyAddrHost() + ":" + HTTP_PROXY_PORT; }
 
     // Exit pegajoso: el edge interior que usó el último gool bueno. Al
     // fijarlo con AETHER_WIW_INNER_PEER la salida vuelve al mismo colo/
@@ -269,238 +350,6 @@ public class CloudProxyPlugin extends Plugin {
     // se arranca con la app en background o al entrar en él.
     private volatile boolean appInForeground = true;
 
-    // ─── RiseupVPN vía API remota de OpenVPN for Android ────────────────────
-    // La app oficial (de.blinkt.openvpn) expone IOpenVPNAPIService por bind:
-    // podemos importar el .ovpn generado y arrancar/parar el túnel real —
-    // VPN sistema-completo gestionada desde OctoStream sin engine propio.
-    // aether/WARP y el resto del tráfico enrutan por la VPN (VpnService
-    // intercepta todo el tráfico de las apps).
-    private static final String OVPN_PKG = "de.blinkt.openvpn";
-    private volatile IOpenVPNAPIService mOvpnApi = null;
-    private volatile boolean mOvpnConnected = false;
-    private volatile String mPendingOvpnConf = null;
-    private android.content.ServiceConnection mOvpnConn = null;
-
-    private boolean isOvpnAppInstalled() {
-        try {
-            getContext().getPackageManager().getPackageInfo(OVPN_PKG, 0);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private final IOpenVPNStatusCallback mOvpnStatusCb = new IOpenVPNStatusCallback.Stub() {
-        @Override
-        public void newStatus(String uuid, String state, String message, String level) {
-            mOvpnConnected = "CONNECTED".equals(state);
-        }
-    };
-
-    // Serializa el bind a la API remota: dos riseupConnect paralelos creaban
-    // dos bindService y el segundo sobrescribía mOvpnConn sin unbind del
-    // primero — fuga de ServiceConnection. Los callers que llegan con un bind
-    // en curso se encolan y se sirven todos en onServiceConnected.
-    private final Object mOvpnLock = new Object();
-    private final java.util.List<Runnable> mOvpnReadyQueue = new java.util.ArrayList<>();
-
-    private void bindOvpnApi(Runnable onReady) {
-        synchronized (mOvpnLock) {
-            if (mOvpnApi != null) { onReady.run(); return; }
-            mOvpnReadyQueue.add(onReady);
-            if (mOvpnConn != null) return; // bind en curso
-            android.content.Context ctx = getContext();
-            final android.content.Context appCtx = ctx.getApplicationContext();
-            mOvpnConn = new android.content.ServiceConnection() {
-                @Override public void onServiceConnected(android.content.ComponentName n, android.os.IBinder b) {
-                    mOvpnApi = IOpenVPNAPIService.Stub.asInterface(b);
-                    try { mOvpnApi.registerStatusCallback(mOvpnStatusCb); } catch (Exception ignored) {}
-                    java.util.List<Runnable> q;
-                    synchronized (mOvpnLock) {
-                        q = new java.util.ArrayList<>(mOvpnReadyQueue);
-                        mOvpnReadyQueue.clear();
-                    }
-                    for (Runnable r : q) r.run();
-                }
-                @Override public void onServiceDisconnected(android.content.ComponentName n) {
-                    mOvpnApi = null;
-                }
-            };
-            try {
-                android.content.Intent intent = new android.content.Intent(IOpenVPNAPIService.class.getName());
-                intent.setPackage(OVPN_PKG);
-                if (!appCtx.bindService(intent, mOvpnConn, android.content.Context.BIND_AUTO_CREATE)) {
-                    mOvpnApi = null;
-                    mOvpnConn = null;
-                    throw new IllegalStateException("bind rechazado");
-                }
-            } catch (Exception e) {
-                mOvpnApi = null;
-                try { appCtx.unbindService(mOvpnConn); } catch (Exception ignored) {}
-                mOvpnConn = null;
-                // Los callers encolados reciben su onReady con api nula — su
-                // propio try/catch rechaza la llamada en vez de colgarla.
-                java.util.List<Runnable> q = new java.util.ArrayList<>(mOvpnReadyQueue);
-                mOvpnReadyQueue.clear();
-                for (Runnable r : q) { try { r.run(); } catch (Exception ignored) {} }
-                throw e;
-            }
-        }
-    }
-
-    /** Motor embebido: true si libovpnexec.so viene en jniLibs. */
-    private boolean hasEmbeddedOvpn() {
-        return new File(getContext().getApplicationInfo().nativeLibraryDir, "libovpnexec.so").isFile();
-    }
-
-    /**
-     * Conecta el túnel RiseupVPN con el .ovpn generado en JS.
-     * Motor embebido primero (VpnService propio + libovpnexec.so); si el
-     * binario falta, fallback a la API remota de OpenVPN for Android.
-     * @param call {config: string} — contenido .ovpn con PEMs inline.
-     *   status: connected | need-vpn-permission | consent (API remota)
-     */
-    @PluginMethod
-    public void riseupConnect(PluginCall call) {
-        final String conf = call.getString("config");
-        if (conf == null || conf.isEmpty()) {
-            call.reject("config required");
-            return;
-        }
-        if (hasEmbeddedOvpn()) {
-            riseupConnectEmbedded(call, conf);
-            return;
-        }
-        if (!isOvpnAppInstalled()) {
-            call.reject("no-openvpn-app");
-            return;
-        }
-        mPendingOvpnConf = conf;
-        new Thread(() -> {
-            try {
-                bindOvpnApi(() -> doOvpnConnect(call));
-            } catch (Exception e) {
-                call.reject("bind a OpenVPN falló: " + e.getMessage());
-            }
-        }, "ovpn-bind").start();
-    }
-
-    /** Motor embebido: VpnService propio + proceso libovpnexec.so. */
-    private void riseupConnectEmbedded(PluginCall call, String conf) {
-        android.content.Context ctx = getContext();
-        // Permiso VPN del sistema (una sola vez por app). El intent del
-        // diálogo se lanza vía startActivityForResult del plugin — lanzarlo
-        // con startActivity() desde el contexto de la app se lo traga en
-        // varios ROMs (MIUI, Android TV) y el diálogo nunca aparecía.
-        android.content.Intent prepare = android.net.VpnService.prepare(ctx);
-        if (prepare != null) {
-            mPendingOvpnConf = conf;
-            mPendingEmbeddedCall = call;
-            startActivityForResult(call, prepare, "ovpnPermResult");
-            return;
-        }
-        doStartEmbedded(call, conf);
-    }
-
-    private volatile PluginCall mPendingEmbeddedCall = null;
-
-    /** Resultado del diálogo de permiso VPN del sistema. */
-    @com.getcapacitor.annotation.ActivityCallback
-    private void ovpnPermResult(PluginCall call, androidx.activity.result.ActivityResult result) {
-        PluginCall pending = mPendingEmbeddedCall;
-        mPendingEmbeddedCall = null;
-        if (pending == null) return; // call ya resuelta — no rechazar dos veces
-        if (result.getResultCode() == android.app.Activity.RESULT_OK
-                && mPendingOvpnConf != null) {
-            doStartEmbedded(pending, mPendingOvpnConf);
-        } else {
-            pending.reject("Permiso VPN denegado");
-        }
-    }
-
-    private void doStartEmbedded(PluginCall call, String conf) {
-        android.content.Context ctx = getContext();
-        try {
-            // Riseup y WARP/aether son EXCLUYENTES: si aether sigue activo
-            // envuelve el tráfico en MASQUE→Cloudflare y la IP de salida
-            // que ven los servicios es WARP, no la de Riseup. Al arrancar
-            // el túnel, aether se desconecta (en bg — stopAether espera
-            // al proceso y no puede bloquear este hilo).
-            new Thread(() -> disconnect(false), "aether-stop").start();
-            File confFile = new File(ctx.getCacheDir(), "riseup-user.ovpn");
-            java.io.FileWriter w = new java.io.FileWriter(confFile, false);
-            w.write(conf);
-            w.close();
-            android.content.Intent intent = new android.content.Intent(ctx, OctoVpnService.class);
-            intent.setAction(OctoVpnService.ACTION_START);
-            intent.putExtra(OctoVpnService.EXTRA_CONF, confFile.getAbsolutePath());
-            if (android.os.Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent);
-            else ctx.startService(intent);
-            call.resolve(new JSObject().put("status", "connected"));
-        } catch (Exception e) {
-            Log.e(TAG, "riseupConnectEmbedded failed", e);
-            call.reject("riseupConnectEmbedded: " + e.getMessage());
-        }
-    }
-
-    private void doOvpnConnect(PluginCall call) {
-        try {
-            // Consentimiento de API remota (una sola vez por app): prepare()
-            // devuelve un Intent de confirmación del lado de OpenVPN.
-            android.content.Intent perm = mOvpnApi.prepare(getContext().getPackageName());
-            if (perm != null) {
-                perm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(perm);
-                call.resolve(new JSObject().put("status", "consent"));
-                return;
-            }
-            // Permiso VPN del sistema (una sola vez).
-            android.content.Intent vpnPerm = mOvpnApi.prepareVPNService();
-            if (vpnPerm != null) {
-                vpnPerm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(vpnPerm);
-                call.resolve(new JSObject().put("status", "need-vpn-permission"));
-                return;
-            }
-            // startVPN con el config inline — no guarda perfil en la app.
-            mOvpnApi.startVPN(mPendingOvpnConf);
-            mOvpnConnected = true;
-            call.resolve(new JSObject().put("status", "connected"));
-        } catch (Exception e) {
-            Log.e(TAG, "riseupConnect failed", e);
-            call.reject("riseupConnect: " + e.getMessage());
-        }
-    }
-
-    @PluginMethod
-    public void riseupDisconnect(PluginCall call) {
-        try {
-            if (hasEmbeddedOvpn() || OctoVpnService.isRunning()) {
-                android.content.Intent intent = new android.content.Intent(getContext(), OctoVpnService.class);
-                intent.setAction(OctoVpnService.ACTION_STOP);
-                getContext().startService(intent);
-            }
-            if (mOvpnApi != null) mOvpnApi.disconnect();
-            mOvpnConnected = false;
-            call.resolve(new JSObject().put("status", "disconnected"));
-        } catch (Exception e) {
-            call.reject("riseupDisconnect: " + e.getMessage());
-        }
-    }
-
-    @PluginMethod
-    public void riseupTunnelStatus(PluginCall call) {
-        JSObject ret = new JSObject();
-        boolean embedded = hasEmbeddedOvpn();
-        ret.put("installed", embedded || isOvpnAppInstalled());
-        ret.put("embedded", embedded);
-        ret.put("connected", embedded ? OctoVpnService.isConnected() : mOvpnConnected);
-        ret.put("connecting", OctoVpnService.isRunning() && !OctoVpnService.isConnected());
-        ret.put("error", OctoVpnService.getLastError());
-        ret.put("hasEngine", embedded || mOvpnApi != null);
-        call.resolve(ret);
-    }
-
     @Override
     public void load() {
         Log.i(TAG, "CloudProxyPlugin loaded");
@@ -513,7 +362,9 @@ public class CloudProxyPlugin extends Plugin {
     @Override
     protected void handleOnPause() {
         appInForeground = false;
-        if (connected || connecting) startAetherGuard();
+        // En modo SSH el aether local también corre (salida del tráfico
+        // general) — solo el modo remoto plano se queda sin guardián.
+        if ((connected || connecting) && (warpRemote().isEmpty() || sshRemote())) startAetherGuard();
         super.handleOnPause();
     }
 
@@ -530,17 +381,6 @@ public class CloudProxyPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // NO apagar el túnel Riseup aquí: handleOnDestroy dispara también en
-        // recreaciones de Activity (rotación, config change) y al minimizar,
-        // y matar el servicio tumba la VPN sin que el usuario lo pida. Solo
-        // el toggle de Settings (ACTION_STOP → enabled=false) la para. Si el
-        // SO mata el proceso, START_STICKY + conf cacheado lo reaniman.
-        try {
-            if (mOvpnConn != null) {
-                getContext().getApplicationContext().unbindService(mOvpnConn);
-                mOvpnConn = null; mOvpnApi = null;
-            }
-        } catch (Exception ignored) {}
         // Capacitor can destroy/recreate its Activity for configuration
         // changes or while Android backgrounds the app. Do not tear WARP
         // down in those cases: only stop it when the Activity is actually
@@ -575,26 +415,29 @@ public class CloudProxyPlugin extends Plugin {
         String reqExit = call.getString("exitLoc");
         if (reqExit != null && !reqExit.isEmpty()) setWarpExitLoc(reqExit);
 
-        // Exclusión mutua: si el túnel Riseup está vivo, conectar aether
-        // lo para (si no, la IP de salida sería WARP, no Riseup).
-        if (OctoVpnService.isRunning()) {
-            android.content.Intent stop = new android.content.Intent(getContext(), OctoVpnService.class);
-            stop.setAction(OctoVpnService.ACTION_STOP);
-            getContext().startService(stop);
-        }
-
         final long generation;
         final boolean needsStop;
         // La sonda de sockets (hasta ~1s) NO puede ir dentro del lock —
         // bloquearía a getStatus/getHttpProxy y al propio wait-path.
         boolean fastAlive;
         synchronized (PROCESS_LOCK) {
-            fastAlive = connected && aetherProcess != null && aetherProcess.isAlive();
+            Session ssh = sshSession;
+            fastAlive = connected && (sshMode
+                ? ssh != null && ssh.isConnected()
+                    && aetherProcess != null && aetherProcess.isAlive()
+                : warpRemote().isEmpty()
+                    ? aetherProcess != null && aetherProcess.isAlive()
+                    : true);
         }
-        // Fast-path: no basta con que el proceso viva — verifica que el
-        // túnel responde, si no un túnel medio muerto devolvería
-        // "connected" sin reconectar nada.
-        if (fastAlive && isSocksProxyUp() && isTunnelAlive()) {
+        // Fast-path: no basta con que el proceso/sesión viva — verifica que
+        // el túnel responde, si no un túnel medio muerto devolvería
+        // "connected" sin reconectar nada. En modo SSH ambos planos deben
+        // estar arriba: el aether local (tráfico general) y el forward al
+        // VPS (debrid).
+        if (fastAlive && isSocksProxyUp() && isTunnelAlive()
+                && (!sshMode
+                    || (isSocksProxyUp("127.0.0.1", VPS_SOCKS_PORT, VPS_HTTP_PORT)
+                        && isTunnelAlive("127.0.0.1", VPS_SOCKS_PORT)))) {
             call.resolve(new JSObject().put("status", "connected"));
             return;
         }
@@ -646,21 +489,20 @@ public class CloudProxyPlugin extends Plugin {
             try {
                 // Parar el proceso viejo fuera del lock y del hilo del bridge:
                 // waitFor(5s) aquí es tolerable (hilo propio), no en el caller.
-                if (needsStop) stopAether();
-                // MODO REMOTO: usar el túnel WARP de otro OctoStream en la
-                // LAN — sin aether local; todos los dispositivos salen por
-                // la MISMA IP a la vez (AllDebrid castiga multi-IP).
-                // Si hay credenciales SSH, el remoto es un VPS alcanzado por
-                // túnel SSH (port-forward loopback) — mismo efecto desde
-                // cualquier red, sin apps ni cuentas extra.
-                if (!warpRemote().isEmpty()) {
-                    if (sshRemote()) {
-                        sshMode = true;
-                        startSshTunnel();
-                        currentProtocol = "remote-ssh";
-                    } else {
-                        currentProtocol = "remote";
-                    }
+                if (needsStop && !stopAether(generation)) {
+                    throw new InterruptedException("connect cancelled");
+                }
+                // Igual con una sesión SSH zombi: puede seguir viva con el
+                // estado marcado caído; si no se cierra antes, el nuevo
+                // forward choca en 127.0.0.1:1819/1820 con EADDRINUSE.
+                if (!stopSshTunnel(generation)) {
+                    throw new InterruptedException("connect cancelled");
+                }
+                // MODO REMOTO PLANO (legacy): un proxy externo ya accesible
+                // en :1819/:1820 da salida a TODO el tráfico — no hay
+                // aether local en este modo.
+                if (!warpRemote().isEmpty() && !sshRemote()) {
+                    currentProtocol = "remote";
                     boolean up = false;
                     for (int i = 0; i < 30 && !up; i++) {
                         synchronized (PROCESS_LOCK) {
@@ -670,10 +512,7 @@ public class CloudProxyPlugin extends Plugin {
                         if (!up) Thread.sleep(500);
                     }
                     if (!up) {
-                        stopSshTunnel();
-                        throw new RuntimeException(sshRemote()
-                            ? "Túnel SSH a " + warpRemote() + " caído o proxy del VPS no responde"
-                            : "WARP remoto " + warpRemote() + " no responde — ¿túnel activo y 'Compartir en la red local' encendido en el otro OctoStream?");
+                        throw new RuntimeException("Proxy remoto " + warpRemote() + " no responde en :1819/:1820");
                     }
                     setAppProxy(() -> {
                         synchronized (PROCESS_LOCK) {
@@ -693,17 +532,35 @@ public class CloudProxyPlugin extends Plugin {
                     });
                     return;
                 }
-                // Fallback de protocolos: el data-plane QUIC de MASQUE es
-                // filtrado/ahogado por algunos ISP. Cadena: masque (UDP h3)
-                // → masque-h2 (TCP, parece HTTPS) → wg. Se empieza por el
-                // preferido y se recorre el resto en orden; el último que
+                // MODO SSH (VPS con cuota limitada): forwards dedicados
+                // 127.0.0.1:2819/2820 → proxy del VPS. Solo los los usa el
+                // tráfico debrid (API AllDebrid + enlaces desbloqueados,
+                // que van IP-bound a la salida que desbloqueó); el resto
+                // sigue por el aether local que arranca debajo en
+                // 1819/1820 — el VPS no recibe el volumen de fútbol,
+                // YouTube ni servidores gratuitos.
+                if (sshRemote()) {
+                    sshMode = true;
+                    startSshTunnel(generation);
+                    boolean up = false;
+                    for (int i = 0; i < 30 && !up; i++) {
+                        synchronized (PROCESS_LOCK) {
+                            if (!connecting) throw new InterruptedException("connect cancelled");
+                        }
+                        up = isSocksProxyUp("127.0.0.1", VPS_SOCKS_PORT, VPS_HTTP_PORT)
+                                && isTunnelAlive("127.0.0.1", VPS_SOCKS_PORT);
+                        if (!up) Thread.sleep(500);
+                    }
+                    if (!up) {
+                        stopSshTunnel(generation);
+                        throw new RuntimeException("Túnel SSH a " + warpRemote() + " caído o proxy del VPS no responde");
+                    }
+                }
+                // Cadena siempre de doble salto Cloudflare→Cloudflare:
+                // gool (WireGuard dentro de WARP — la salida la da el salto
+                // interior) → mim (MASQUE dentro de MASQUE). El último que
                 // funcione queda como preferido para la sesión.
-                // Con ubicación de salida no-auto la cadena es de doble
-                // salto: gool (WireGuard dentro de WARP — la salida la da el
-                // salto interior, otro país) → mim (MASQUE dentro de MASQUE).
-                String[] chain = exitMode()
-                        ? new String[] { "gool", "mim" }
-                        : new String[] { "masque", "masque-h2", "wg" };
+                String[] chain = { "gool", "mim" };
                 int startIdx = 0;
                 for (int i = 0; i < chain.length; i++) {
                     if (chain[i].equals(preferredProtocol)) { startIdx = i; break; }
@@ -715,14 +572,16 @@ public class CloudProxyPlugin extends Plugin {
                     boolean unpinnedRetry = false;
                     while (true) {
                         try {
-                            startAether(proto);
+                            startAether(proto, generation);
                             started = true;
                             preferredProtocol = proto;
                             break;
-                        } catch (Exception err) {
-                            lastErr = err;
-                            Log.w(TAG, "Aether " + proto + " failed (" + err.getMessage() + ") — trying next");
-                            stopAether();
+                } catch (Exception err) {
+                    lastErr = err;
+                    Log.w(TAG, "Aether " + proto + " failed (" + err.getMessage() + ") — trying next");
+                    if (!stopAether(generation)) {
+                        throw new InterruptedException("connect cancelled");
+                    }
                             // Sticky exit: si el edge interior fijado murió,
                             // una segunda oportunidad sin él antes de caer
                             // al siguiente protocolo de la cadena.
@@ -803,8 +662,8 @@ public class CloudProxyPlugin extends Plugin {
                 // retener PROCESS_LOCK segundos congela el fast-path de
                 // connect() y las sondas de ExoPlayer.
                 if (own) {
-                    stopSshTunnel();
-                    stopAether();
+                    stopSshTunnel(generation);
+                    stopAether(generation);
                     // Con kill-switch estricto el proxy muerto se conserva
                     // (fail-closed) — sin él se abre la red para no dejar
                     // la app colgada si el usuario decide seguir sin WARP.
@@ -817,59 +676,6 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     /**
-     * Escribe un perfil OpenVPN (.ovpn) en el cache interno y lo abre con
-     * el cliente OpenVPN del sistema (OpenVPN Connect / OpenVPN for Android
-     * registran la extensión .ovpn). RiseupVPN como capa VPN alternativa —
-     * el túnel corre sistema-completo en el cliente del usuario, no dentro
-     * de la app (sin motor OpenVPN propio).
-     * @param call {config: string (contenido .ovpn), name?: string}
-     */
-    @PluginMethod
-    public void exportOvpn(PluginCall call) {
-        String config = call.getString("config");
-        if (config == null || config.isEmpty()) {
-            call.reject("config required");
-            return;
-        }
-        String name = call.getString("name");
-        if (name == null || name.isEmpty()) name = "riseup-ovpn.conf";
-        if (!name.endsWith(".conf") && !name.endsWith(".ovpn")) name += ".ovpn";
-        try {
-            android.content.Context ctx = getContext();
-            File out = new File(ctx.getCacheDir(), name);
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
-            fos.write(config.getBytes("UTF-8"));
-            fos.close();
-            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
-                    ctx, ctx.getPackageName() + ".fileprovider", out);
-            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
-            intent.setDataAndType(uri, "application/x-openvpn-profile");
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                    | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            try {
-                ctx.startActivity(intent);
-            } catch (android.content.ActivityNotFoundException noView) {
-                // Sin app que entienda .ovpn → compartir genérico (el usuario
-                // puede guardarlo o mandarlo a su cliente OpenVPN).
-                android.content.Intent share = new android.content.Intent(android.content.Intent.ACTION_SEND);
-                share.setType("application/x-openvpn-profile");
-                share.putExtra(android.content.Intent.EXTRA_STREAM, uri);
-                share.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                        | android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                ctx.startActivity(android.content.Intent.createChooser(share, null)
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
-            }
-            JSObject ret = new JSObject();
-            ret.put("opened", true);
-            ret.put("name", name);
-            call.resolve(ret);
-        } catch (Exception e) {
-            Log.e(TAG, "exportOvpn failed", e);
-            call.reject("exportOvpn failed: " + e.getMessage(), e);
-        }
-    }
-
-    /**
      * Disconnects from Cloudflare WARP by stopping the Aether binary.
      * @param keepProxy if true, keep proxy settings pointing to dead port
      *                  (blocks requests instead of leaking real IP).
@@ -877,14 +683,18 @@ public class CloudProxyPlugin extends Plugin {
      */
     public void disconnect(boolean keepProxy) {
         Log.i(TAG, "disconnect() called (keepProxy=" + keepProxy + ")");
+        final long generation;
         synchronized (PROCESS_LOCK) {
-            connectionGeneration++;
+            generation = ++connectionGeneration;
             connecting = false;
+            connected = false;
         }
-        stopSshTunnel();
-        stopAether();
+        stopSshTunnel(generation);
+        stopAether(generation);
+        synchronized (PROCESS_LOCK) {
+            if (generation != connectionGeneration) return;
+        }
         stopAetherGuard();
-        connected = false;
         if (!keepProxy) {
             // User explicitly disconnected → clear proxy (allow direct traffic)
             clearAppProxy();
@@ -938,8 +748,12 @@ public class CloudProxyPlugin extends Plugin {
         if (connecting && System.currentTimeMillis() - connectingSince > connectStale) {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }
-        boolean processAlive = !warpRemote().isEmpty()
-                || (aetherProcess != null && aetherProcess.isAlive());
+        Session ssh = sshSession;
+        boolean processAlive = sshMode
+                ? ssh != null && ssh.isConnected()
+                    && aetherProcess != null && aetherProcess.isAlive()
+                : !warpRemote().isEmpty()
+                    || (aetherProcess != null && aetherProcess.isAlive());
         // Puerto + data-plane: un aether zombi escucha en 1819/1820 con el
         // túnel muerto — solo el handshake SOCKS real distingue ambos casos.
         boolean probeUp = connected && processAlive && isSocksProxyUp() && isTunnelAlive();
@@ -988,11 +802,11 @@ public class CloudProxyPlugin extends Plugin {
         result.put("exitIp", sessionExitIp);
         result.put("exitCountry", sessionExitCountry);
         result.put("exitColo", sessionExitColo);
-        // Modo remoto (túnel prestado de otro OctoStream en la LAN) y si
-        // este dispositivo comparte su túnel a otros.
+        // Modo remoto: proxy externo legacy o VPS por túnel SSH.
         result.put("remote", warpRemote());
         result.put("ssh", sshRemote());
-        result.put("shareLan", shareLan());
+        // Forward SSH al VPS vivo (salida dedicada a tráfico debrid).
+        result.put("vps", sshMode && ssh != null && ssh.isConnected());
         call.resolve(result);
     }
 
@@ -1009,6 +823,31 @@ public class CloudProxyPlugin extends Plugin {
      * esté marcado caído — para URLs que DEBEN salir por WARP. */
     public static String getHttpProxyAddr() {
         return httpProxyAddr();
+    }
+
+    /**
+     * Proxy HTTP del VPS (forward SSH 127.0.0.1:2820) para tráfico debrid.
+     * Null sin sesión SSH viva — el caller cae al proxy WARP normal, nunca
+     * a la red física (un enlace desbloqueado IP-bound a la salida del VPS
+     * puede fallar por WARP, pero jamás sale en claro).
+     */
+    public static String getVpsHttpProxyAddr() {
+        Session s = sshSession;
+        return sshMode && s != null && s.isConnected()
+                ? "127.0.0.1:" + VPS_HTTP_PORT : null;
+    }
+
+    /** Sonda end-to-end del forward SSH al VPS (SOCKS+TLS real), paralela
+     *  a {@link #isLocalProxyUp()} pero sobre los puertos dedicados. */
+    public static boolean isVpsProxyUp() {
+        Session s = sshSession;
+        if (!(sshMode && s != null && s.isConnected())) return false;
+        try (java.net.Socket sock = new java.net.Socket()) {
+            sock.connect(new java.net.InetSocketAddress("127.0.0.1", VPS_HTTP_PORT), 400);
+        } catch (Exception e) {
+            return false;
+        }
+        return isTunnelAlive("127.0.0.1", VPS_SOCKS_PORT);
     }
 
     /**
@@ -1053,10 +892,17 @@ public class CloudProxyPlugin extends Plugin {
      * solo miraba puertos y un túnel colgado se reportaba "connected".
      */
     public static boolean isTunnelAlive() {
+        return isTunnelAlive(proxyHost(), SOCKS_PORT);
+    }
+
+    /** Variante por host/puerto: sonda también los forwards SSH del VPS
+     *  (127.0.0.1:2819) sin tocar el plano del tráfico general. */
+    public static boolean isTunnelAlive(String proxyAddr, int proxyPort) {
         java.net.Socket s = null;
+        javax.net.ssl.SSLSocket tls = null;
         try {
             s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress(proxyHost(), SOCKS_PORT), 1200);
+            s.connect(new java.net.InetSocketAddress(proxyAddr, proxyPort), 1200);
             s.setSoTimeout(1800);
             java.io.OutputStream out = s.getOutputStream();
             java.io.InputStream in = s.getInputStream();
@@ -1084,10 +930,34 @@ public class CloudProxyPlugin extends Plugin {
             for (int i = 0; i < skip + 2; i++) {
                 if (in.read() < 0) return false;
             }
-            return rep == 0x00;
+            if (rep != 0x00) return false;
+
+            // A successful SOCKS CONNECT alone can be returned before the
+            // upstream tunnel is actually passing data. Complete TLS and read
+            // the HTTP status line so zombie listeners do not report healthy.
+            tls = (javax.net.ssl.SSLSocket)
+                    ((javax.net.ssl.SSLSocketFactory) javax.net.ssl.SSLSocketFactory.getDefault())
+                            .createSocket(s, "cloudflare.com", 443, true);
+            tls.setSoTimeout(3500);
+            javax.net.ssl.SSLParameters sslParams = tls.getSSLParameters();
+            sslParams.setEndpointIdentificationAlgorithm("HTTPS");
+            tls.setSSLParameters(sslParams);
+            tls.startHandshake();
+            tls.getOutputStream().write(
+                    ("GET /cdn-cgi/trace HTTP/1.1\r\n"
+                    + "Host: cloudflare.com\r\n"
+                    + "Connection: close\r\n\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            String status = new java.io.BufferedReader(new java.io.InputStreamReader(
+                    tls.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII)).readLine();
+            if (status == null || !status.matches("HTTP/\\d(?:\\.\\d)? [23]\\d\\d(?: .*)?")) {
+                return false;
+            }
+            return true;
         } catch (Exception e) {
             return false;
         } finally {
+            try { if (tls != null) tls.close(); } catch (Exception ignored) {}
             try { if (s != null) s.close(); } catch (Exception ignored) {}
         }
     }
@@ -1101,22 +971,103 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     /**
-     * IP de otro OctoStream en la LAN cuyo túnel WARP se quiere usar
-     * ("" = modo local con aether propio). Se aplica en el próximo
-     * connect() — el caller debe reconectar si hay túnel vivo.
+     * Host del proxy remoto/VPS a usar en vez del aether local
+     * ("" = modo local). Se aplica en el próximo connect() — el caller debe
+     * reconectar si hay túnel vivo.
      */
     @PluginMethod
     public void setRemoteHost(PluginCall call) {
-        String host = call.getString("host", "");
-        host = host == null ? "" : host.trim();
-        // Solo IPv4/hostname corto — nada de URLs ni credenciales.
-        if (!host.isEmpty() && !host.matches("[0-9a-zA-Z.\\-]{3,45}")) {
-            call.reject("host inválido");
+        String raw = call.getString("host", "");
+        int embeddedPort = remotePortFromRaw(raw);
+        String host = normalizeRemoteHost(raw);
+        if (!host.isEmpty() && !isValidRemoteHost(host)) {
+            call.reject("host inválido — usa la IP o dominio del VPS");
             return;
         }
         setWarpRemote(host);
+        // "host:2222" / "ssh://user@host:2222" también fija el puerto SSH;
+        // el puerto del proxy remoto sigue siendo el estándar 1819/1820.
+        if (embeddedPort > 0) setSshCreds(sshUser(), sshPass(), embeddedPort);
         Log.i(TAG, "remote WARP host: " + (host.isEmpty() ? "(local)" : host));
         call.resolve(new JSObject().put("remote", warpRemote()));
+    }
+
+    private static int remotePortFromRaw(String raw) {
+        String s = raw == null ? "" : raw.trim();
+        if (s.isEmpty()) return -1;
+        try {
+            if (s.contains("://")) {
+                int p = new URI(s).getPort();
+                return p > 0 && p < 65536 ? p : -1;
+            }
+            int at = s.lastIndexOf('@');
+            if (at >= 0) s = s.substring(at + 1);
+            int cut = s.length();
+            for (char c : new char[] { '/', '?', '#' }) {
+                int i = s.indexOf(c);
+                if (i >= 0 && i < cut) cut = i;
+            }
+            s = s.substring(0, cut);
+            if (s.startsWith("[")) {
+                int end = s.indexOf(']');
+                if (end < 0 || end + 1 >= s.length() || s.charAt(end + 1) != ':') return -1;
+                s = s.substring(end + 2);
+            } else {
+                int colon = s.lastIndexOf(':');
+                if (colon <= 0 || colon != s.indexOf(':')) return -1;
+                s = s.substring(colon + 1);
+            }
+            int p = Integer.parseInt(s);
+            return p > 0 && p < 65536 ? p : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** Tolera valores copiados tipo URL, user@host o host:puerto. */
+    private static String normalizeRemoteHost(String raw) {
+        String host = raw == null ? "" : raw.trim();
+        if (host.isEmpty()) return "";
+        if (host.contains("://")) {
+            try {
+                URI uri = new URI(host);
+                if (uri.getHost() != null) host = uri.getHost();
+            } catch (Exception ignored) {}
+        }
+        int at = host.lastIndexOf('@');
+        if (at >= 0) host = host.substring(at + 1);
+        int cut = host.length();
+        for (char c : new char[] { '/', '?', '#' }) {
+            int i = host.indexOf(c);
+            if (i >= 0 && i < cut) cut = i;
+        }
+        host = host.substring(0, cut).trim();
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            if (end > 1) host = host.substring(1, end);
+        } else {
+            int colon = host.indexOf(':');
+            if (colon > 0 && colon == host.lastIndexOf(':')
+                    && host.substring(colon + 1).matches("\\d{1,5}")) {
+                host = host.substring(0, colon);
+            }
+        }
+        return host.endsWith(".") ? host.substring(0, host.length() - 1) : host;
+    }
+
+    private static boolean isValidRemoteHost(String host) {
+        if (host.length() > 253) return false;
+        if (host.indexOf(':') >= 0) {
+            try { return InetAddress.getByName(host) instanceof Inet6Address; }
+            catch (Exception e) { return false; }
+        }
+        if (host.matches("(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)")) {
+            return true;
+        }
+        for (String label : host.split("\\.", -1)) {
+            if (!label.matches("[A-Za-z0-9](?:[A-Za-z0-9\\-]{0,61}[A-Za-z0-9])?")) return false;
+        }
+        return true;
     }
 
     /**
@@ -1145,15 +1096,42 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     /**
-     * Compartir el túnel local en la LAN (bind 0.0.0.0): otros OctoStream
-     * apuntando a esta IP salen por el mismo exit WARP. Se aplica en el
-     * próximo arranque de aether.
+     * Credenciales SSH guardadas del remoto. La clave sale descifrada del
+     * blob cifrado con Android Keystore — solo la propia app la lee (para
+     * repintar el formulario de Ajustes sin localStorage).
      */
     @PluginMethod
-    public void setShareLan(PluginCall call) {
-        setShareLan(call.getBoolean("enabled", false));
-        Log.i(TAG, "share WARP on LAN: " + shareLan());
-        call.resolve(new JSObject().put("enabled", shareLan()));
+    public void getRemoteSsh(PluginCall call) {
+        call.resolve(new JSObject()
+                .put("user", sshUser())
+                .put("pass", sshPass())
+                .put("port", sshPort()));
+    }
+
+    /**
+     * Confirma la host key SSH pendiente para el remoto actual (TOFU):
+     * la fija en prefs y devuelve su huella. Rechaza si no hay pendiente
+     * para ese host — nunca fija una clave distinta de la que el usuario
+     * vio en el diálogo de confirmación.
+     */
+    @PluginMethod
+    public void trustRemoteHost(PluginCall call) {
+        String host = warpRemote();
+        String b64;
+        synchronized (PROCESS_LOCK) {
+            if (pendingHostKeyHost == null || !pendingHostKeyHost.equals(host)
+                    || pendingHostKeyB64 == null) {
+                call.reject("no hay clave de host pendiente de confirmación");
+                return;
+            }
+            b64 = pendingHostKeyB64;
+            pendingHostKeyHost = null;
+            pendingHostKeyB64 = null;
+            pendingHostKeyChanged = false;
+        }
+        saveHostKey(host, b64);
+        Log.i(TAG, "SSH host key pinned by user for " + host);
+        call.resolve(new JSObject().put("trusted", true).put("fingerprint", keyFingerprint(b64)));
     }
 
     /** Marca la sesión como caída desde fuera (sonda del puerto falló). */
@@ -1215,9 +1193,7 @@ public class CloudProxyPlugin extends Plugin {
         String directHosts = "localhost|127.0.0.1|*.local"
                 + "|192.168.*|10.*|169.254.*"
                 + "|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*"
-                + "|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*"
-                + "|*.tdtspain.com|*.tdtchannels.com|*.rtve.es|*.mediaset.net|*.mediasetinfinity.es"
-                + "|*.atresplayer.com|*.atresmedia.com|dai.google.com|*.doubleclick.net";
+                + "|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*";
         System.setProperty("http.nonProxyHosts", directHosts);
         System.setProperty("https.nonProxyHosts", directHosts);
         Log.i(TAG, "System proxy set: " + httpProxyAddr());
@@ -1230,7 +1206,7 @@ public class CloudProxyPlugin extends Plugin {
                 if (androidx.webkit.WebViewFeature.isFeatureSupported(
                         androidx.webkit.WebViewFeature.PROXY_OVERRIDE)) {
                     ProxyConfig proxyConfig = new ProxyConfig.Builder()
-                        .addProxyRule(proxyHost() + ":" + HTTP_PROXY_PORT)
+                        .addProxyRule(proxyAddrHost() + ":" + HTTP_PROXY_PORT)
                         .addBypassRule("localhost")
                         .addBypassRule("127.0.0.1")
                         .addBypassRule("*.local")
@@ -1254,18 +1230,6 @@ public class CloudProxyPlugin extends Plugin {
                         .addBypassRule("172.29.*")
                         .addBypassRule("172.30.*")
                         .addBypassRule("172.31.*")
-                        .addBypassRule("*.tdtspain.com")
-                        .addBypassRule("*.tdtchannels.com")
-                        .addBypassRule("*.rtve.es")
-                        .addBypassRule("*.mediaset.net")
-                        .addBypassRule("*.mediasetinfinity.es")
-                        // Atresmedia igual que RTVE/Mediaset: sus URLs de
-                        // directo van ligadas a la IP que resuelve — por
-                        // WARP la firma no casa con la IP de reproducción.
-                        .addBypassRule("*.atresplayer.com")
-                        .addBypassRule("*.atresmedia.com")
-                        .addBypassRule("dai.google.com")
-                        .addBypassRule("*.doubleclick.net")
                         .build();
                     ProxyController.getInstance().setProxyOverride(proxyConfig, DIRECT_EXECUTOR, () -> {
                         Log.i(TAG, "WebView proxy set: " + httpProxyAddr());
@@ -1386,7 +1350,12 @@ public class CloudProxyPlugin extends Plugin {
      * Starts the Aether binary as a background process.
      * The binary is bundled as libaether.so in jniLibs.
      */
-    private void startAether(String protocol) throws Exception {
+    private void startAether(String protocol, long generation) throws Exception {
+        synchronized (PROCESS_LOCK) {
+            if (!connecting || generation != connectionGeneration) {
+                throw new InterruptedException("connect cancelled");
+            }
+        }
         // Orphan cleanup: a previous libaether process can outlive the app
         // (Android doesn't always reap children on process death) and keep
         // ports 1819/1820 bound — every subsequent connect() would then time
@@ -1449,10 +1418,8 @@ public class CloudProxyPlugin extends Plugin {
         env.put("AETHER_NOIZE", "aggressive");
         // Reduce log level to warn (less CPU on log processing)
         env.put("AETHER_LOG_LEVEL", "warn");
-        // Compartir el túnel en la LAN: bindea en todas las interfaces para
-        // que otros OctoStream lo usen como proxy remoto (misma IP de
-        // salida para todos — cuentas que penalizan multi-IP simultánea).
-        env.put("AETHER_SOCKS", shareLan() ? "0.0.0.0:" + SOCKS_PORT : SOCKS_ADDR);
+        // Solo loopback: ningún túnel local se expone a la LAN.
+        env.put("AETHER_SOCKS", SOCKS_ADDR);
         env.put("AETHER_CONFIG", new File(getContext().getFilesDir(), "aether.toml").getAbsolutePath());
         env.put("TMPDIR", getContext().getCacheDir().getAbsolutePath());
         // Quick reconnect to reuse last known good endpoint
@@ -1469,7 +1436,7 @@ public class CloudProxyPlugin extends Plugin {
             env.put("AETHER_QUIC_V2", "1");
         }
         // Also start HTTP CONNECT proxy (better for OkHttp - does remote DNS)
-        env.put("AETHER_HTTP_PROXY", shareLan() ? "0.0.0.0:" + HTTP_PROXY_PORT : HTTP_PROXY_ADDR);
+        env.put("AETHER_HTTP_PROXY", HTTP_PROXY_ADDR);
         // Route sniff: read SNI from first bytes for smarter routing
         env.put("AETHER_ROUTE_SNIFF", "1");
 
@@ -1484,9 +1451,8 @@ public class CloudProxyPlugin extends Plugin {
         // proceso recién creado → aether huérfano con los puertos ocupados
         // y el túnel vivo aunque la app crea que WARP está apagado.
         synchronized (PROCESS_LOCK) {
-            if (!connecting) {
+            if (!connecting || generation != connectionGeneration) {
                 spawned.destroy();
-                aetherProcess = null;
                 throw new InterruptedException("connect cancelled");
             }
             aetherProcess = spawned;
@@ -1523,7 +1489,9 @@ public class CloudProxyPlugin extends Plugin {
         int maxAttempts = isExitChain ? 360 : (isMasque ? 70 : 120); // 180s exit / 35s masque / 60s wg
         while (!isSocksProxyUp() && attempts < maxAttempts) {
             synchronized (PROCESS_LOCK) {
-                if (!connecting) throw new InterruptedException("connect cancelled");
+                if (!connecting || generation != connectionGeneration) {
+                    throw new InterruptedException("connect cancelled");
+                }
             }
             Process p = aetherProcess;
             if (p == null || !p.isAlive()) break;
@@ -1534,33 +1502,63 @@ public class CloudProxyPlugin extends Plugin {
         if (!isSocksProxyUp()) {
             throw new RuntimeException("Aether proxy not responding (SOCKS " + socksAddr() + " or HTTP " + httpProxyAddr() + ") after " + (attempts * 0.5) + "s");
         }
+        // Puerto arriba no basta: algunos arranques exponen los listeners
+        // antes de que el data-plane responda. Esperar un handshake SOCKS
+        // e2e evita marcar "connected" sobre un túnel zombi.
+        for (int i = 0; i < 30 && !isTunnelAlive(); i++) {
+            synchronized (PROCESS_LOCK) {
+                if (!connecting || generation != connectionGeneration) {
+                    throw new InterruptedException("connect cancelled");
+                }
+            }
+            Process p = aetherProcess;
+            if (p == null || !p.isAlive()) break;
+            Thread.sleep(500);
+        }
+        if (!isTunnelAlive()) {
+            throw new RuntimeException("Aether tunnel not passing traffic through SOCKS " + socksAddr());
+        }
         Log.i(TAG, "Aether proxies up: SOCKS " + socksAddr() + ", HTTP " + httpProxyAddr());
     }
 
     /**
-     * Consulta cloudflare.com/cdn-cgi/trace A TRAVÉS del propio SOCKS5 del
-     * túnel y cachea ip/loc/colo reales de salida — getStatus los expone y
-     * la UI puede mostrar el país real en vez de asumir el modo pedido.
-     * Sin impacto en el poll de estado: corre una vez tras cada conexión.
+     * Consulta la IP de salida A TRAVÉS del propio SOCKS5 del túnel y la
+     * cachea para getStatus. En modo SSH se usa un endpoint IPv4 para que
+     * la UI muestre la IPv4 pública del VPS en vez de una salida IPv6.
      */
     private void refreshExitInfo() {
         new Thread(() -> {
             java.net.HttpURLConnection c = null;
             try {
+                Session sshSess = sshSession;
+                boolean ssh = sshMode && sshSess != null && sshSess.isConnected();
+                // Con VPS activo la salida reportada es la del forward SSH
+                // (2819) — la IP que verán los servicios debrid. El tráfico
+                // general sigue saliendo por el aether local (1819).
                 java.net.Proxy p = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                        new java.net.InetSocketAddress(proxyHost(), SOCKS_PORT));
+                        new java.net.InetSocketAddress("127.0.0.1",
+                                ssh ? VPS_SOCKS_PORT : SOCKS_PORT));
+                String traceUrl = ssh
+                        ? "https://api.ipify.org?format=text"
+                        : "https://cloudflare.com/cdn-cgi/trace";
                 c = (java.net.HttpURLConnection)
-                        new java.net.URL("https://cloudflare.com/cdn-cgi/trace").openConnection(p);
+                        new java.net.URL(traceUrl).openConnection(p);
                 c.setConnectTimeout(8000);
                 c.setReadTimeout(8000);
                 java.io.InputStream in = c.getInputStream();
                 byte[] buf = new byte[8192];
                 int n = in.read(buf);
                 String body = n > 0 ? new String(buf, 0, n) : "";
-                for (String line : body.split("\n")) {
-                    if (line.startsWith("ip=")) sessionExitIp = line.substring(3).trim();
-                    else if (line.startsWith("loc=")) sessionExitCountry = line.substring(4).trim();
-                    else if (line.startsWith("colo=")) sessionExitColo = line.substring(5).trim();
+                if (ssh) {
+                    sessionExitIp = body.trim();
+                    sessionExitCountry = "";
+                    sessionExitColo = "";
+                } else {
+                    for (String line : body.split("\n")) {
+                        if (line.startsWith("ip=")) sessionExitIp = line.substring(3).trim();
+                        else if (line.startsWith("loc=")) sessionExitCountry = line.substring(4).trim();
+                        else if (line.startsWith("colo=")) sessionExitColo = line.substring(5).trim();
+                    }
                 }
                 Log.i(TAG, "WARP exit: ip=" + sessionExitIp + " loc=" + sessionExitCountry
                         + " colo=" + sessionExitColo);
@@ -1599,12 +1597,22 @@ public class CloudProxyPlugin extends Plugin {
      * onTaskRemoved: el usuario cerró la app de recents). */
     public static void killAetherProcess() {
         Process p;
+        Session ssh;
         synchronized (PROCESS_LOCK) {
             p = aetherProcess;
             aetherProcess = null;
+            ssh = sshSession;
+            sshSession = null;
+            sshMode = false;
+            connectionGeneration++;
             connected = false;
             connecting = false;
             statusMisses = 0;
+        }
+        if (ssh != null) {
+            try { ssh.delPortForwardingL("127.0.0.1", VPS_SOCKS_PORT); } catch (Throwable ignored) {}
+            try { ssh.delPortForwardingL("127.0.0.1", VPS_HTTP_PORT); } catch (Throwable ignored) {}
+            try { ssh.disconnect(); } catch (Throwable ignored) {}
         }
         if (p != null) {
             p.destroy();
@@ -1628,7 +1636,7 @@ public class CloudProxyPlugin extends Plugin {
      * vive el proxy compartido. Auth por contraseña + host key TOFU
      * guardada en prefs (si la clave del servidor cambia se rechaza).
      */
-    private void startSshTunnel() throws Exception {
+    private void startSshTunnel(long generation) throws Exception {
         String host = warpRemote();
         String user = sshUser();
         Log.i(TAG, "SSH tunnel: " + user + "@" + host + ":" + sshPort());
@@ -1649,14 +1657,29 @@ public class CloudProxyPlugin extends Plugin {
         s.setServerAliveInterval(15000);
         s.setServerAliveCountMax(4);
         s.setDaemonThread(true);
-        s.connect(12000);
-        s.setPortForwardingL("127.0.0.1", SOCKS_PORT, "127.0.0.1", SOCKS_PORT);
-        s.setPortForwardingL("127.0.0.1", HTTP_PROXY_PORT, "127.0.0.1", HTTP_PROXY_PORT);
+        try {
+            s.connect(12000);
+        } catch (Exception e) {
+            // Clave de host no fijada o cambiada → error accionable con la
+            // huella para que la UI pida confirmación antes de confiar
+            // (TOFU visible — nunca se acepta una clave nueva en silencio).
+            String hkErr = pendingHostKeyError(host);
+            if (hkErr != null) throw new RuntimeException(hkErr);
+            throw e;
+        }
         synchronized (PROCESS_LOCK) {
-            if (!connecting) {
+            if (!connecting || generation != connectionGeneration) {
                 s.disconnect();
                 throw new InterruptedException("connect cancelled");
             }
+            // Bind forwards while holding the generation lock. Otherwise a
+            // cancelled handshake could briefly claim the ports and make the
+            // replacement connection fail with EADDRINUSE.
+            // Forwards en puertos DEDICADOS (2819/2820 → VPS:1819/1820):
+            // el aether local usa 1819/1820 para el tráfico general, así
+            // que ambos transportes conviven sin chocar.
+            s.setPortForwardingL("127.0.0.1", VPS_SOCKS_PORT, "127.0.0.1", SOCKS_PORT);
+            s.setPortForwardingL("127.0.0.1", VPS_HTTP_PORT, "127.0.0.1", HTTP_PROXY_PORT);
             sshSession = s;
         }
         // Sesión SSH muerta → misma ruta que aether muerto: marca la sesión
@@ -1676,29 +1699,69 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     private void stopSshTunnel() {
-        sshMode = false;
-        Session s = sshSession;
-        sshSession = null;
+        stopSshTunnel(-1);
+    }
+
+    private boolean stopSshTunnel(long expectedGeneration) {
+        Session s;
+        synchronized (PROCESS_LOCK) {
+            if (expectedGeneration >= 0 && expectedGeneration != connectionGeneration) return false;
+            s = sshSession;
+            sshSession = null;
+            sshMode = false;
+        }
         if (s != null) {
-            try { s.delPortForwardingL("127.0.0.1", SOCKS_PORT); } catch (Throwable ignored) {}
-            try { s.delPortForwardingL("127.0.0.1", HTTP_PROXY_PORT); } catch (Throwable ignored) {}
+            try { s.delPortForwardingL("127.0.0.1", VPS_SOCKS_PORT); } catch (Throwable ignored) {}
+            try { s.delPortForwardingL("127.0.0.1", VPS_HTTP_PORT); } catch (Throwable ignored) {}
             try { s.disconnect(); } catch (Throwable ignored) {}
+        }
+        return true;
+    }
+
+    /** Huella OpenSSH-style de una clave de host b64 ("SHA256:…"). */
+    private static String keyFingerprint(String b64) {
+        try {
+            byte[] key = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP);
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(key);
+            return "SHA256:" + android.util.Base64.encodeToString(d, android.util.Base64.NO_WRAP)
+                    .replace("=", "");
+        } catch (Exception e) { return ""; }
+    }
+
+    /**
+     * "SSH_HOST_KEY_*:<huella>" si el último handshake dejó una clave
+     * pendiente para este host; null en cualquier otro fallo.
+     */
+    private String pendingHostKeyError(String host) {
+        synchronized (PROCESS_LOCK) {
+            if (pendingHostKeyHost == null || !pendingHostKeyHost.equals(host)
+                    || pendingHostKeyB64 == null) return null;
+            return (pendingHostKeyChanged ? "SSH_HOST_KEY_CHANGED:" : "SSH_HOST_KEY_UNKNOWN:")
+                    + keyFingerprint(pendingHostKeyB64);
         }
     }
 
-    /** Host-key store TOFU en SharedPreferences (sin prompts). */
+    /**
+     * Host-key store TOFU en SharedPreferences. Nada se fija en silencio:
+     * una clave nueva (o distinta de la guardada) se aparca como pendiente
+     * y la conexión se rechaza hasta que trustRemoteHost() la confirma.
+     */
     private class TofuHostKeys implements com.jcraft.jsch.HostKeyRepository {
         private final String host;
         TofuHostKeys(String host) { this.host = host; }
         public int check(String h, byte[] key) {
             String b64 = android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP);
             String stored = storedHostKey(host);
-            if (stored.isEmpty()) {
-                saveHostKey(host, b64);
-                Log.i(TAG, "SSH host key pinned (TOFU) for " + host);
-                return OK;
-            }
             if (stored.equals(b64)) return OK;
+            synchronized (PROCESS_LOCK) {
+                pendingHostKeyHost = host;
+                pendingHostKeyB64 = b64;
+                pendingHostKeyChanged = !stored.isEmpty();
+            }
+            if (stored.isEmpty()) {
+                Log.i(TAG, "SSH host key unknown for " + host + " — pending user confirmation");
+                return NOT_INCLUDED;
+            }
             Log.e(TAG, "SSH host key CHANGED for " + host + " — possible MITM, rejecting");
             return CHANGED;
         }
@@ -1713,8 +1776,13 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     private void stopAether() {
+        stopAether(-1);
+    }
+
+    private boolean stopAether(long expectedGeneration) {
         Process process;
         synchronized (PROCESS_LOCK) {
+            if (expectedGeneration >= 0 && expectedGeneration != connectionGeneration) return false;
             process = aetherProcess;
             aetherProcess = null;
             connected = false;
@@ -1731,6 +1799,7 @@ public class CloudProxyPlugin extends Plugin {
                 process.destroyForcibly();
             }
         }
+        return true;
     }
 
     /**
@@ -1776,6 +1845,7 @@ public class CloudProxyPlugin extends Plugin {
      */
     private void onTunnelDied(Process process) {
         boolean ours;
+        final long generation;
         synchronized (PROCESS_LOCK) {
             // Solo cuenta el proceso actual: logs de un proceso ya
             // sustituido o un connect() en vuelo no deben disparar nada.
@@ -1784,6 +1854,7 @@ public class CloudProxyPlugin extends Plugin {
             // justo ese el caso que debe escalar — si la marca bloquea la
             // escalada, el estado queda "caído" con el túnel zombi.
             ours = aetherProcess == process && !connecting;
+            generation = connectionGeneration;
         }
         if (!ours) return;
         long now = System.currentTimeMillis();
@@ -1792,13 +1863,9 @@ public class CloudProxyPlugin extends Plugin {
         tunnelFailStreak++;
         // ~5 muertes (~10s de túnel inválido) bastan para rendirse.
         if (tunnelFailStreak < 5 || protocolSwitching) return;
-        // Siguiente escalón: masque → masque-h2 (TCP, sobrevive a redes que
-        // bloquean UDP/QUIC) → wg. En wg no hay más adonde escalar. Con
-        // salida no-auto la cadena es gool → mim.
-        final String next = exitMode()
-                ? ("gool".equals(currentProtocol) ? "mim" : null)
-                : "masque".equals(currentProtocol) ? "masque-h2"
-                : "masque-h2".equals(currentProtocol) ? "wg" : null;
+        // Siguiente escalón de la cadena doble-salto: gool → mim.
+        // En mim no hay más adonde escalar.
+        final String next = "gool".equals(currentProtocol) ? "mim" : null;
         if (next == null) return;
         protocolSwitching = true;
         preferredProtocol = next;
@@ -1807,13 +1874,15 @@ public class CloudProxyPlugin extends Plugin {
         new Thread(() -> {
             try {
                 synchronized (PROCESS_LOCK) {
+                    if (generation != connectionGeneration || aetherProcess != process) return;
                     // startAether aborta si connecting=false (connect
                     // cancelado); mantenerlo true durante el swap y que
                     // getStatus informe "connecting", no "down".
                     connecting = true;
+                    connectingSince = System.currentTimeMillis();
                 }
-                stopAether();
-                startAether(next);
+                if (!stopAether(generation)) return;
+                startAether(next, generation);
                 synchronized (PROCESS_LOCK) {
                     connected = aetherProcess != null && aetherProcess.isAlive();
                     connecting = false;
@@ -1898,7 +1967,11 @@ public class CloudProxyPlugin extends Plugin {
         // bypassVpn (resolve TDT): URLs assinadas ligam-se ao IP que resolve —
         // qualquer host pode precisar de sair pela rede física.
         final boolean bypassVpn = call.getBoolean("bypassVpn", false);
-        if (url == null || (!bypassVpn && !isGeoBypassHost(url))) {
+        // vps=true: petición debrid — sale por el forward SSH al VPS
+        // (2820). No exige host de la lista geo ni red física: sin VPS
+        // configurado cae al proxy por defecto (aether), nunca en claro.
+        final boolean vps = call.getBoolean("vps", false);
+        if (url == null || (!vps && !bypassVpn && !isGeoBypassHost(url))) {
             call.reject("directFetch: host not in geo-bypass list");
             return;
         }
@@ -1914,10 +1987,21 @@ public class CloudProxyPlugin extends Plugin {
                 String current = url;
                 int hops = 0;
                 int code;
+                // Proxy del VPS para vps=true: solo con sesión SSH viva;
+                // si no, u.openConnection() usa el proxy del sistema
+                // (aether). La red física queda reservada al bypass geo.
+                java.net.Proxy vpsProxy = vps
+                        ? (getVpsHttpProxyAddr() != null
+                            ? new java.net.Proxy(java.net.Proxy.Type.HTTP,
+                                new java.net.InetSocketAddress("127.0.0.1", VPS_HTTP_PORT))
+                            : null)
+                        : null;
                 for (;;) {
                     java.net.URL u = new java.net.URL(current);
                     if (c != null) c.disconnect();
-                    c = (java.net.HttpURLConnection) (net != null ? net.openConnection(u) : u.openConnection());
+                    c = (java.net.HttpURLConnection) (vps
+                            ? (vpsProxy != null ? u.openConnection(vpsProxy) : u.openConnection())
+                            : (net != null ? net.openConnection(u) : u.openConnection()));
                     c.setConnectTimeout(ct); c.setReadTimeout(rt);
                     c.setInstanceFollowRedirects(false);
                     c.setRequestMethod(method);
@@ -1975,10 +2059,18 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     private boolean isSocksProxyUp() {
-        // Check both SOCKS5 (1819) and HTTP CONNECT (1820) proxy ports
-        for (int port : new int[]{SOCKS_PORT, HTTP_PROXY_PORT}) {
+        return isSocksProxyUp(proxyHost(), SOCKS_PORT, HTTP_PROXY_PORT);
+    }
+
+    // Variante por host/puertos: sonda también los forwards SSH del VPS
+    // (127.0.0.1:2819/2820) sin tocar el plano del tráfico general.
+    private boolean isSocksProxyUp(String host, int... ports) {
+        // Check both SOCKS5 (1819) and HTTP CONNECT (1820) proxy ports on
+        // the effective host (loopback, LAN remote, or SSH forward).
+        int timeout = "127.0.0.1".equals(host) ? 500 : 1500;
+        for (int port : ports) {
             try (java.net.Socket socket = new java.net.Socket()) {
-                socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
+                socket.connect(new java.net.InetSocketAddress(host, port), timeout);
             } catch (Exception e) {
                 return false;
             }

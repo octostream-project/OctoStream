@@ -20,6 +20,6 @@
     }
   },
   "android": {
-    "loggingBehavior": "debug"
+    "loggingBehavior": "none"
   }
 }

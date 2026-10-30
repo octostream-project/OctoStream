@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockYoutube = { search: vi.fn(), searchMore: vi.fn(), getChannel: vi.fn() }
+const mockYoutube = { search: vi.fn(), searchMore: vi.fn(), getChannel: vi.fn(), resolve: vi.fn() }
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -11,7 +11,13 @@ vi.mock('@capacitor/core', () => ({
 
 vi.mock('@octostream/youtube', () => ({ Youtube: mockYoutube }))
 
-const { searchYouTubeFull, dedupeYouTubeItems, youtubeVideoId, getChannelInfo } = await import('./youtube.js')
+const {
+  searchYouTubeFull,
+  dedupeYouTubeItems,
+  youtubeVideoId,
+  getChannelInfo,
+  resolveYouTubeStream,
+} = await import('./youtube.js')
 
 const item = (id, name = 'video') => ({
   name: `${name} ${id}`,
@@ -106,5 +112,16 @@ describe('getChannelInfo', () => {
   it('error nativo devuelve null', async () => {
     mockYoutube.getChannel.mockRejectedValue(new Error('channel not found'))
     expect(await getChannelInfo('https://www.youtube.com/@x')).toBeNull()
+  })
+})
+
+describe('resolveYouTubeStream', () => {
+  it('resuelve streams para que el player los envíe por WARP/VPS', async () => {
+    mockYoutube.resolve.mockResolvedValue({
+      title: 'Test',
+      streams: [{ url: 'https://googlevideo.example/stream', mimeType: 'video/mp4', quality: '720p' }],
+    })
+    const stream = await resolveYouTubeStream('https://www.youtube.com/watch?v=proxy12345')
+    expect(stream).toMatchObject({ url: 'https://googlevideo.example/stream', direct: false })
   })
 })

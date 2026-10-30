@@ -54,7 +54,11 @@ function debridErrorMessage(err) {
   if (/error scanning this link|offline or inaccessible|try a different link/i.test(e)) {
     return 'AllDebrid no puede acceder a este enlace original: puede estar caído, requerir sesión o no ser compatible. Prueba otro servidor.'
   }
-  if (/unavailable|hoster_unavailable|LINK_DOWN|LINK_TEMPORARY/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
+  // Enlace muerto: el archivo ya no existe en el hoster (borrado/DMCA).
+  if (/LINK_DOWN|LINK_TEMPORARY|not available on the file hoster|link is not available/i.test(e)) {
+    return 'El archivo fue eliminado en el servidor de origen — el enlace está muerto. Prueba otra fuente o calidad.'
+  }
+  if (/unavailable|hoster_unavailable/i.test(e)) return 'Enlace caído en el servidor de descarga. Prueba otro.'
   if (/token|apikey|auth|premium|MUST_BE_PREMIUM/i.test(e)) return 'Revisa la API key y tu suscripción de AllDebrid en Ajustes → Debrid.'
   // Diagnóstico: el mensaje genérico ocultaba el error real de la API
   // (p. ej. bloqueo por IP del túnel). Se muestra el motivo crudo.
@@ -781,8 +785,14 @@ export default function Details() {
       endResolving()
       if (!resolved) {
         console.warn(`[Details] Debrid unlock failed for ${urlHost(stream.url || '')}`)
-        setEpisodeError(debridErrorMessage(lastError)
-          + (candidates.length > 1 ? ` (${candidates.length} enlaces probados)` : ''))
+        // Todos muertos: los enlaces del listado están eliminados en el
+        // hoster (DMCA/caducados) — no vale reintentar el mismo servidor.
+        const allDead = errors.length > 1 && errors.every(er =>
+          /LINK_DOWN|LINK_TEMPORARY|not available on the file hoster|link is not available/i.test(String(er)))
+        setEpisodeError(allDead
+          ? `Todos los enlaces probados (${errors.length}) están eliminados en el servidor de origen — prueba otra fuente o calidad.`
+          : debridErrorMessage(lastError)
+            + (candidates.length > 1 ? ` (${candidates.length} enlaces probados)` : ''))
         return
       }
       stream = {

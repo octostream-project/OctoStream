@@ -68,7 +68,7 @@ function setWarpExitLoc(v) {
 function saveWarpPrefs() {
   try {
     fs.writeFileSync(path.join(app.getPath('userData'), 'warp-prefs.json'),
-      JSON.stringify({ exitLoc: aetherState.exitLoc, wiwInner: aetherState.wiwInner || '', remote: aetherState.remote || '', shareLan: !!aetherState.shareLan }))
+      JSON.stringify({ exitLoc: aetherState.exitLoc, wiwInner: aetherState.wiwInner || '', remote: aetherState.remote || '' }))
   } catch {}
 }
 function loadWarpPrefs() {
@@ -77,7 +77,6 @@ function loadWarpPrefs() {
     aetherState.exitLoc = p.exitLoc || 'auto'
     aetherState.wiwInner = p.wiwInner || ''
     aetherState.remote = p.remote || ''
-    aetherState.shareLan = !!p.shareLan
   } catch { aetherState.exitLoc = 'auto' }
 }
 function warpExitLoc() {
@@ -117,23 +116,20 @@ function learnInnerPeer() {
 const warpExitMode = () => true
 const warpExitSpec = () => warpExitLoc() === 'random' ? '' : warpExitLoc()
 
-// WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
-// dispositivos salen por la misma IP a la vez (cuentas que bloquean
-// multi-IP simultánea como AllDebrid). '' = aether local propio.
+// WARP remoto: usar un proxy externo ya accesible en :1819/:1820
+// (compatibilidad). '' = aether local propio.
 function warpRemote() {
   if (aetherState.remote === undefined) loadWarpPrefs()
   return aetherState.remote || ''
 }
 function setWarpRemote(v) { aetherState.remote = (v || '').trim(); saveWarpPrefs() }
-// Compartir el túnel local en la LAN: aether bindea 0.0.0.0 para que
-// otros OctoStream lo usen como proxy.
-function shareLan() {
-  if (aetherState.shareLan === undefined) loadWarpPrefs()
-  return !!aetherState.shareLan
-}
-function setShareLan(v) { aetherState.shareLan = !!v; saveWarpPrefs() }
 // Host del proxy efectivo: el remoto si hay uno, localhost si no.
 const proxyHost = () => warpRemote() || AETHER_SOCKS_HOST
+function aetherHttpProxyUrl() {
+  const host = proxyHost()
+  const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+  return `http://${authority}:${AETHER_HTTP_PORT}`
+}
 let mainWindow = null
 
 function probePort(port) {
@@ -154,7 +150,7 @@ async function isAetherProxyUp() {
 // :1819 con el data-plane muerto (handshake MASQUE ok, UDP descartado) y
 // adoptarlo enruta todo a un proxy roto. CONNECT SOCKS + TLS + GET mínimo
 // a cloudflare.com/cdn-cgi/trace; si no llegan bytes, el túnel está caído.
-let tunnelAliveCache = { ts: 0, ok: false }
+let tunnelAliveCache = { ts: 0, ok: false, host: '' }
 function probeTunnel(timeoutMs = 5000) {
   return new Promise((resolve) => {
     let done = false
@@ -181,11 +177,20 @@ function probeTunnel(timeoutMs = 5000) {
 }
 
 // Adopción de un aether externo: puerto vivo + túnel que pasa tráfico.
-// Caché de 15s — las llamadas de status son frecuentes y el probe no es gratis.
+// La caché solo amortigua el probe e2e; los puertos se comprueban siempre
+// y el host forma parte de la clave (cambiar de local a remoto/VPS no puede
+// reutilizar un resultado bueno de otro proxy).
 async function isAetherTunnelAlive() {
-  if (Date.now() - tunnelAliveCache.ts < 15000) return tunnelAliveCache.ok
-  const ok = (await isAetherProxyUp()) && (await probeTunnel())
-  tunnelAliveCache = { ts: Date.now(), ok }
+  const host = proxyHost()
+  if (!(await isAetherProxyUp())) {
+    tunnelAliveCache = { ts: Date.now(), ok: false, host }
+    return false
+  }
+  if (tunnelAliveCache.host === host && Date.now() - tunnelAliveCache.ts < 15000) {
+    return tunnelAliveCache.ok
+  }
+  const ok = await probeTunnel()
+  tunnelAliveCache = { ts: Date.now(), ok, host }
   return ok
 }
 
@@ -245,7 +250,7 @@ async function configureAetherProxy() {
 
 // Escalada a mitad de sesión (paridad con Android): una racha de
 // "tunnel ended/failed" reinicia aether con el siguiente transporte —
-// masque → masque-h2 → wg. En wg no hay más escalones.
+// gool → mim. En mim no hay más escalones.
 function aetherTunnelDied(proc) {
   if (aetherState.proc !== proc || aetherState.connecting || aetherState.switching) return
   const now = Date.now()
@@ -253,7 +258,7 @@ function aetherTunnelDied(proc) {
   aetherState.lastTunnelFailAt = now
   aetherState.tunnelFails++
   if (aetherState.tunnelFails < 5) return
-  const chain = warpExitMode() ? ['gool', 'mim'] : ['masque', 'masque-h2', 'wg']
+  const chain = ['gool', 'mim']
   const idx = chain.indexOf(aetherState.protocol)
   const next = idx >= 0 && idx < chain.length - 1 ? chain[idx + 1] : null
   if (!next) return
@@ -289,8 +294,7 @@ async function aetherConnect(preferred, exitLoc) {
   aetherState.connecting = true
   aetherState.error = ''
   try {
-    // MODO REMOTO: usar el túnel WARP de otro OctoStream en la LAN — sin
-    // aether local; todos los dispositivos salen por la misma IP a la vez.
+    // MODO REMOTO: usar un proxy WARP externo — sin aether local.
     if (warpRemote()) {
       if (aetherState.proc) { try { aetherState.proc.kill('SIGKILL') } catch {} aetherState.proc = null }
       let up = false
@@ -298,7 +302,7 @@ async function aetherConnect(preferred, exitLoc) {
         up = (await probePort(AETHER_SOCKS_PORT)) && (await probePort(AETHER_HTTP_PORT)) && await isAetherTunnelAlive()
         if (!up) await new Promise(r => setTimeout(r, 500))
       }
-      if (!up) throw new Error(`WARP remoto ${warpRemote()} no responde — ¿túnel activo y "Compartir en la red local" encendido en el otro OctoStream?`)
+      if (!up) throw new Error(`Proxy remoto ${warpRemote()} no responde en :${AETHER_SOCKS_PORT}/:${AETHER_HTTP_PORT}`)
       aetherState.protocol = 'remote'
       await applyAetherRouting()
       aetherState.connected = true
@@ -329,8 +333,8 @@ async function aetherConnect(preferred, exitLoc) {
         AETHER_IP: 'v4',
         AETHER_NOIZE: 'aggressive',
         AETHER_LOG_LEVEL: 'warn',
-        AETHER_SOCKS: shareLan() ? `0.0.0.0:${AETHER_SOCKS_PORT}` : `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
-        AETHER_HTTP_PROXY: shareLan() ? `0.0.0.0:${AETHER_HTTP_PORT}` : `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
+        AETHER_SOCKS: `${AETHER_SOCKS_HOST}:${AETHER_SOCKS_PORT}`,
+        AETHER_HTTP_PROXY: `${AETHER_SOCKS_HOST}:${AETHER_HTTP_PORT}`,
         AETHER_CONFIG: path.join(workDir, 'aether.toml'),
         AETHER_QUICK_RECONNECT: '1',
         AETHER_ROUTE_SNIFF: '1',
@@ -389,7 +393,7 @@ async function aetherConnect(preferred, exitLoc) {
       const deadline = Date.now() + timeoutMs
       while (Date.now() < deadline) {
         if (proc.exitCode !== null) break
-        if (await isAetherProxyUp()) {
+        if (await isAetherProxyUp() && await probeTunnel()) {
           aetherState.protocol = protocol
           await applyAetherRouting()
           return { status: 'connected', socks: `${proxyHost()}:${AETHER_SOCKS_PORT}`, http: `${proxyHost()}:${AETHER_HTTP_PORT}` }
@@ -399,15 +403,13 @@ async function aetherConnect(preferred, exitLoc) {
       return { error: `aether (${protocol}) no respondió en ${timeoutMs / 1000}s${stderrTail ? ': ' + stderrTail.slice(-200) : ''}` }
     }
 
-    // MASQUE va rápido cuando su peer fijado valida (~5-10s); si en 35s no
-    // hay proxies el protocolo está filtrado — se corta y se prueba el
-    // siguiente. Cadena: masque (QUIC/UDP) → masque-h2 (TCP, parece HTTPS)
-    // → wg, empezando por el último que funcionó. Con salida no-auto la
-    // cadena es de doble salto: gool (WireGuard-en-WARP) → mim.
-    const exitMode = warpExitMode()
-    const chain = exitMode ? ['gool', 'mim'] : ['masque', 'masque-h2', 'wg']
+    // Cadena siempre de doble salto (Cloudflare→Cloudflare): gool
+    // (WireGuard-en-WARP) → mim (MASQUE-en-MASQUE), empezando por el
+    // último que funcionó. No hay fallback a single-hop — la IP real no
+    // se expone nunca a Cloudflare ni al destino.
+    const chain = ['gool', 'mim']
     let startIdx = 0
-    const pref = preferred || aetherState.protocol || (exitMode ? 'gool' : 'masque')
+    const pref = preferred || aetherState.protocol || 'gool'
     for (let i = 0; i < chain.length; i++) {
       if (chain[i] === pref) { startIdx = i; break }
     }
@@ -461,7 +463,18 @@ async function aetherDisconnect(keepProxy) {
   } else {
     await clearAetherRouting()
   }
+  tunnelAliveCache = { ts: 0, ok: false, host: proxyHost() }
   return { status: 'disconnected' }
+}
+
+async function ensureAetherHttpProxy() {
+  if (!aetherState.connected || !(await isAetherTunnelAlive())) {
+    await aetherConnect()
+  }
+  if (!aetherState.connected || !(await isAetherTunnelAlive())) {
+    throw new Error('Proxy WARP/VPS no disponible')
+  }
+  return aetherHttpProxyUrl()
 }
 
 // ─── Agente SOCKS5 para las fetches Node del proxy local ────────────────────
@@ -582,6 +595,7 @@ function resolveYtdlp() {
 
 Youtube.init({
   resolver: resolveYtdlp,
+  proxyUrl: ensureAetherHttpProxy,
   agentFor: (url) => {
     try {
       const u = new URL(url)
@@ -1243,59 +1257,6 @@ ipcMain.on('get-proxy-config', (event) => {
 ipcMain.handle('player:open-external', (_event, arg) => openExternalPlayer(arg || {}))
 
 // Cloud-proxy WARP — misma superficie que el plugin CloudProxy de Android.
-// RiseupVPN (capa VPN alternativa): el renderer genera el .ovpn y aquí se
-// guarda/abre. En Linux se ofrece además importarlo a NetworkManager
-// (`nmcli connection import type openvpn` no requiere root para importar;
-// el sistema pide auth solo al activar la conexión).
-ipcMain.handle('riseup:save', async (_e, arg) => {
-  const conf = String(arg?.conf || '')
-  if (!conf) return { saved: false, error: 'conf vacía' }
-  const win = BrowserWindow.getAllWindows()[0]
-  const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: 'Guardar perfil RiseupVPN',
-    defaultPath: 'riseup-ovpn.conf',
-    filters: [{ name: 'OpenVPN profile', extensions: ['ovpn', 'conf'] }],
-  })
-  if (canceled || !filePath) return { saved: false }
-  try {
-    fs.writeFileSync(filePath, conf)
-    shell.showItemInFolder(filePath)
-    return { saved: true, path: filePath }
-  } catch (e) {
-    return { saved: false, error: e.message }
-  }
-})
-
-// OpenVPN embebido (Linux): tun0 vía pkexec — el túnel vive mientras la
-// app vive; al morir el proceso hijo, la VPN se apaga sola. Con el tun
-// arriba, aether/WARP enruta por Riseup automáticamente.
-const Openvpn = require('./openvpn.cjs')
-ipcMain.handle('riseup:connect', (_e, arg) => Openvpn.connect(String(arg?.conf || '')))
-ipcMain.handle('riseup:disconnect', () => Openvpn.disconnect())
-ipcMain.handle('riseup:status', () => Openvpn.status())
-ipcMain.handle('riseup:install', () => Openvpn.installOpenvpn())
-app.on('will-quit', () => { try { Openvpn.disconnect() } catch {} })
-
-ipcMain.handle('riseup:import', async (_e, arg) => {
-  const conf = String(arg?.conf || '')
-  if (!conf) return { imported: false, error: 'conf vacía' }
-  if (process.platform !== 'linux') return { imported: false, error: 'import solo en Linux' }
-  try {
-    const tmp = path.join(os.tmpdir(), `octostream-riseup-${Date.now()}.conf`)
-    fs.writeFileSync(tmp, conf, { mode: 0o600 })
-    const { execFile } = require('child_process')
-    return await new Promise((resolve) => {
-      execFile('nmcli', ['connection', 'import', 'type', 'openvpn', 'file', tmp], { timeout: 15000 }, (err, stdout, stderr) => {
-        try { fs.unlinkSync(tmp) } catch {}
-        if (err) return resolve({ imported: false, error: (stderr || err.message || '').trim() })
-        resolve({ imported: true, output: (stdout || '').trim() })
-      })
-    })
-  } catch (e) {
-    return { imported: false, error: e.message }
-  }
-})
-
 ipcMain.handle('cloud:connect', (_e, opts) => aetherConnect(null, opts?.exitLoc))
 ipcMain.handle('cloud:set-remote', (_e, opts) => {
   const host = (opts?.host || '').trim()
@@ -1303,15 +1264,11 @@ ipcMain.handle('cloud:set-remote', (_e, opts) => {
   setWarpRemote(host)
   return { remote: warpRemote() }
 })
-ipcMain.handle('cloud:set-share-lan', (_e, opts) => {
-  setShareLan(opts?.enabled)
-  return { enabled: shareLan() }
-})
 ipcMain.handle('cloud:disconnect', () => aetherDisconnect(false))
 ipcMain.handle('cloud:disconnect-background', () => aetherDisconnect(true))
 ipcMain.handle('cloud:status', async () => {
   const alive = aetherState.proc ? aetherState.proc.exitCode === null : false
-  const up = aetherState.connected && await isAetherProxyUp()
+  const up = aetherState.connected && await isAetherTunnelAlive()
   if (aetherState.connected && !up && !alive) aetherState.connected = false
   return {
     connected: up,
@@ -1323,7 +1280,6 @@ ipcMain.handle('cloud:status', async () => {
     tunnelFails: aetherState.tunnelFails || 0,
     exitLoc: warpExitLoc(),
     remote: warpRemote(),
-    shareLan: shareLan(),
   }
 })
 
@@ -1555,6 +1511,14 @@ ipcMain.handle('player:status', () => ({
   playing: !!mpvSession?.running,
   exe: Mpv.findMpv() || '',
 }))
+
+async function playerNetworkOptions(arg = {}) {
+  if (arg.direct === true || arg.bypassVpn === true) {
+    return { ...arg, httpProxy: '' }
+  }
+  return { ...arg, httpProxy: await ensureAetherHttpProxy() }
+}
+
 ipcMain.handle('player:open', async (e, arg = {}) => {
   if (!MPV_URL_OK(arg.url)) return { status: 'error', error: 'URL no válida' }
   const exe = Mpv.findMpv()
@@ -1566,8 +1530,8 @@ ipcMain.handle('player:open', async (e, arg = {}) => {
   if (mpvSession) { try { mpvSession.close() } catch {} mpvSession = null }
   const session = new Mpv.MpvSession(exe, mpvSendToRenderer, () => { mpvSession = null })
   mpvSession = session
-  arg.wid = wid
-  const r = await session.open(arg)
+  const playOptions = await playerNetworkOptions({ ...arg, wid })
+  const r = await session.open(playOptions)
   return { ...r, embedded: !!wid }
 })
 ipcMain.handle('player:switch', async (_e, arg = {}) => {
@@ -1575,7 +1539,8 @@ ipcMain.handle('player:switch', async (_e, arg = {}) => {
   const s = getMpv()
   console.log('[Mpv] IPC switch', hostOf(arg.url), 'session:', !!s)
   if (!s) return { status: 'error', error: 'no hay sesión' }
-  const r = await s.switch(arg)
+  const playOptions = await playerNetworkOptions(arg)
+  const r = await s.switch(playOptions)
   if (r && r.embedded === undefined) r.embedded = !!s.embedWid
   return r
 })

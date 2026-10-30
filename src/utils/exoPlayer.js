@@ -110,6 +110,8 @@ export async function playStream(options, onStateChange) {
     ensureMpvEvents()
     const arg = {
       url: safeUrl,
+      direct: options.direct === true,
+      bypassVpn: options.bypassVpn === true,
       headers: options.headers || {},
       title: options.title || '',
       startSec: options.startTime || 0,
@@ -145,6 +147,10 @@ export async function playStream(options, onStateChange) {
     // fuerza la misma ruta con esta marca.
     warpBound: isWarpConnected(),
     bypassVpn: options.bypassVpn === true,
+    // vps=true: stream debrid → el nativo lo rutea por el forward SSH al
+    // VPS (2820) en vez del proxy WARP general (1820). Solo se envía cuando
+    // aplica — los streams normales no llevan la marca.
+    ...(options.vps === true ? { vps: true } : {}),
     licenseUrl: options.licenseUrl || null,
     headers: options.headers || {},
     drmHeaders: options.drmHeaders || {},
@@ -297,6 +303,8 @@ export async function switchChannel(options) {
     if (!url) return
     return p.switch({
       url,
+      direct: options.direct === true,
+      bypassVpn: options.bypassVpn === true,
       headers: options.headers || {},
       title: options.title || '',
       channelIndex: options.channelIndex ?? -1,

@@ -14,13 +14,11 @@ vi.mock('./platform.js', () => ({
 vi.mock('./cloudProxy.js', () => ({
   CloudProxy: {
     directFetch: vi.fn(),
-    riseupTunnelStatus: vi.fn(),
   },
 }))
 
 vi.mock('./warpStatus.js', () => ({
   waitForWarp: vi.fn(async () => true),
-  warpAutoConnectEnabled: vi.fn(() => true),
 }))
 
 import { CapacitorHttp } from '@capacitor/core'
@@ -70,6 +68,44 @@ describe('httpGetJson', () => {
       readTimeout: 20000,
       bypassVpn: false,
     })
+  })
+
+  it('routes debrid API calls through the VPS forward when vps is set', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.directFetch.mockResolvedValue({ status: 200, data: '{"ok":true}' })
+
+    const data = await httpGetJson('https://alldebrid.example/api', {}, undefined, false, true, true)
+
+    expect(data).toEqual({ ok: true })
+    expect(CloudProxy.directFetch).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://alldebrid.example/api',
+      vps: true,
+    }))
+    expect(CapacitorHttp.request).not.toHaveBeenCalled()
+  })
+
+  it('does not bypass WARP by host for non-TDT traffic to broadcaster domains', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CapacitorHttp.request.mockResolvedValue({ status: 200, data: '{"ok":true}' })
+
+    await httpGetJson('https://api.rtve.es/data')
+
+    expect(CloudProxy.directFetch).not.toHaveBeenCalled()
+    expect(CapacitorHttp.request).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://api.rtve.es/data',
+      bypassVpn: false,
+    }))
+  })
+
+  it('uses the physical network only when the caller explicitly requests bypass', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.directFetch.mockResolvedValue({ status: 200, data: '{"ok":true}' })
+
+    const result = await httpGetJson('https://rtve.es/tdt-feed', {}, undefined, true)
+
+    expect(result).toEqual({ ok: true })
+    expect(CloudProxy.directFetch).toHaveBeenCalledOnce()
+    expect(CapacitorHttp.request).not.toHaveBeenCalled()
   })
 
   it('throws on HTTP error', async () => {

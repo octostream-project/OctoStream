@@ -30,17 +30,13 @@ export const CloudProxy = {
     typeof api().setStrictMode === 'function'
       ? api().setStrictMode({ enabled })
       : Promise.resolve({ enabled: false }),
-  // Usar el túnel WARP de otro OctoStream en la LAN (misma IP de salida
-  // para todos los dispositivos) — host = IP local; "" = modo local.
+  // Usar un proxy WARP remoto accesible en :1819/:1820 (compatibilidad) —
+  // con usuario SSH el host se interpreta como VPS alcanzado por túnel.
+  // "" = modo local.
   setRemoteHost: (host) =>
     typeof api().setRemoteHost === 'function'
       ? api().setRemoteHost({ host })
       : Promise.resolve({ remote: '' }),
-  // Compartir el túnel propio en la LAN (aether escucha 0.0.0.0).
-  setShareLan: (enabled) =>
-    typeof api().setShareLan === 'function'
-      ? api().setShareLan({ enabled })
-      : Promise.resolve({ enabled: false }),
   // Credenciales SSH del remoto: con user+pass el host remoto se alcanza
   // por túnel SSH (port-forward al proxy loopback del VPS) — misma IP de
   // salida para todos desde cualquier red, sin Tailscale ni apps extra.
@@ -49,14 +45,22 @@ export const CloudProxy = {
     typeof api().setRemoteSsh === 'function'
       ? api().setRemoteSsh(opts || {})
       : Promise.resolve({ ssh: false }),
-  // Fetch ligado à rede física (fora do túnel Riseup). Só existe no
+  // Credenciales SSH guardadas en el plugin (la clave se descifra del
+  // almacenamiento cifrado con Android Keystore). Solo Android.
+  getRemoteSsh: () =>
+    typeof api().getRemoteSsh === 'function'
+      ? api().getRemoteSsh()
+      : Promise.resolve({ user: '', pass: '', port: 22 }),
+  // Fija la host key pendiente del VPS tras la confirmación del usuario
+  // (TOFU visible — la huella se mostró en el diálogo). Solo Android.
+  trustRemoteHost: () =>
+    typeof api().trustRemoteHost === 'function'
+      ? api().trustRemoteHost()
+      : Promise.reject(new Error('trustRemoteHost unsupported')),
+  // Fetch ligado a la red física (hosts con geo-bypass). Só existe en
   // Android; rejeita noutras plataformas — o chamador deve fazer fallback.
   directFetch: (opts) =>
     typeof api().directFetch === 'function'
       ? api().directFetch(opts)
       : Promise.reject(new Error('directFetch unsupported')),
-  riseupTunnelStatus: () =>
-    typeof api().riseupTunnelStatus === 'function'
-      ? api().riseupTunnelStatus()
-      : Promise.resolve({ connected: false, connecting: false }),
 }

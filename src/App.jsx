@@ -96,10 +96,8 @@ export default function App() {
   // Arranque en frío: con túnel en autoconnect la UI arranca YA bloqueada
   // hasta el primer chequeo de estado — si no, Home monta y las <img> de
   // TMDB salen por la IP real antes del CONNECTED (fuga).
-  const [warpBlocking, setWarpBlocking] = useState(() =>
-    isAndroidNative() && localStorage.getItem('octostream_warp_autoconnect') !== 'false')
-  const [vpnBlocking, setVpnBlocking] = useState(() =>
-    isAndroidNative() && localStorage.getItem('octostream_riseup_autoconnect') === 'true')
+  const [warpBlocking, setWarpBlocking] = useState(() => isAndroidNative())
+  const [warpSkipped, setWarpSkipped] = useState(false)
   const [exitPromptAt, setExitPromptAt] = useState(0)
   const exitBackAtRef = useRef(0)
   const initPlugins = useStore(s => s.initPlugins)
@@ -121,26 +119,10 @@ export default function App() {
     if (isAndroidNative() || isElectron()) {
       initTvNavigation()
     }
-    // Auto-connect WARP by default on first launch.
-    // If the user disables it in Settings, it stays disabled.
-    if (localStorage.getItem('octostream_warp_autoconnect') === null) {
-      localStorage.setItem('octostream_warp_autoconnect', 'true')
-    }
-    // RiseupVPN tiene prioridad sobre WARP cuando está en autoconnect:
-    // se conecta primero y WARP queda en espera (el gate de httpClient
-    // enruta todo por el túnel).
-    if (localStorage.getItem('octostream_riseup_autoconnect') === 'true'
-        && (isAndroidNative() || isElectron())) {
-      import('./utils/riseupVpn.js').then(({ connectRiseupTunnel, riseupTunnelStatus }) => {
-        riseupTunnelStatus().then(s => {
-          if (!s.connected) connectRiseupTunnel().catch(e => console.warn('[App] Riseup autoconnect:', e?.message))
-        }).catch(() => connectRiseupTunnel().catch(() => {}))
-      }).catch(() => {})
-    }
+    // WARP siempre activado: auto-connect en cada arranque, sin opción de
+    // apagarlo — toda la app sale por el túnel (doble salto Cloudflare→
+    // Cloudflare en aether, o la IP del VPS en modo remoto-SSH).
     const startWarp = async () => {
-      const warpAuto = localStorage.getItem('octostream_warp_autoconnect')
-      console.log('[App] WARP auto-connect flag:', warpAuto)
-      if (warpAuto !== 'true') return
       CloudProxy.getStatus().then(s => {
         console.log('[App] WARP status:', s.connected)
         if (!s.connected) {
@@ -236,15 +218,9 @@ export default function App() {
       // Recalentar las cachés si el plan lleva >10 min sin correr (las de
       // deportes caducan en minutos). No-op si está corriendo o es reciente.
       startLoadPlan()
-      if (localStorage.getItem('octostream_warp_autoconnect') === 'false') {
-        setWarpBlocking(false)
-        try {
-          const s = await CloudProxy.getStatus()
-          if (token !== lifecycleToken || paused) return
-          if (!s.connected) await CloudProxy.disconnect()
-        } catch { /* sin estado o ya desconectado */ }
-        return
-      }
+      // WARP siempre-activo: al volver a foreground se reconecta si cayó —
+      // solo el "Continuar sin WARP" de sesión se respeta hasta aquí.
+      setWarpSkipped(false)
 
       try {
         // Do not flash the blocking overlay while WARP is already connected.
@@ -415,43 +391,13 @@ export default function App() {
   useEffect(() => {
     if (!android) return
     const unsub = subscribeWarpStatus(connected => {
-      const autoConnect = localStorage.getItem('octostream_warp_autoconnect') !== 'false'
-      // Only show overlay if auto-connect is on (WARP is expected to be active).
-      // If user manually disconnected, they chose to go without WARP —
-      // Home/Details waitForWarp will timeout after 15s and proceed
-      // (TDT Spain works direct).
-      setWarpBlocking(autoConnect && !connected)
+      // WARP es siempre-activo: con el túnel caído el overlay bloquea toda
+      // la UI salvo que el usuario haya pulsado "Continuar sin WARP" en
+      // esta sesión (se resetea al volver a foreground).
+      setWarpBlocking(!connected && !warpSkipped)
     })
     return unsub
-  }, [android])
-
-  // Gate de Riseup VPN: no hay evento de estado como warpStatus — sondeo
-  // ligero mientras la preferencia de autoconnect esté activa. Con el
-  // túnel caído la UI queda bloqueada igual que con WARP (fail-closed).
-  useEffect(() => {
-    if (!android) return
-    let alive = true
-    let timer = null
-    const poll = async () => {
-      if (!alive) return
-      if (localStorage.getItem('octostream_riseup_autoconnect') !== 'true') {
-        setVpnBlocking(false)
-        timer = setTimeout(poll, 10000)
-        return
-      }
-      try {
-        const { riseupTunnelStatus } = await import('./utils/riseupVpn.js')
-        const st = await riseupTunnelStatus().catch(() => null)
-        if (!alive) return
-        setVpnBlocking(!st?.connected)
-        timer = setTimeout(poll, st?.connected ? 8000 : 1500)
-      } catch {
-        timer = setTimeout(poll, 5000)
-      }
-    }
-    poll()
-    return () => { alive = false; if (timer) clearTimeout(timer) }
-  }, [android])
+  }, [android, warpSkipped])
 
   // Escape del overlay: si WARP no conecta en 25s (ISP bloquea Cloudflare,
   // aether muerto, etc.) se muestran opciones — sin esto la app quedaba
@@ -464,13 +410,21 @@ export default function App() {
     setPrevBlocking(warpBlocking)
     if (!warpBlocking) { setWarpStuck(false); setWarpError('') }
   }
+  // Los códigos SSH_HOST_KEY_* se traducen: la huella del VPS se confirma
+  // desde Ajustes → Red → servidor remoto.
+  const warpErrText = (m) => {
+    const s = String(m || '')
+    if (s.includes('SSH_HOST_KEY_CHANGED')) return 'La clave SSH del VPS cambió — confírmala en Ajustes → Red'
+    if (s.includes('SSH_HOST_KEY_UNKNOWN')) return 'Confirma la huella SSH del VPS en Ajustes → Red'
+    return s
+  }
   useEffect(() => {
     if (!warpBlocking) return
     const t = setTimeout(async () => {
       setWarpStuck(true)
       try {
         const s = await CloudProxy.getStatus()
-        if (s?.error) setWarpError(s.error)
+        if (s?.error) setWarpError(warpErrText(s.error))
       } catch { /* estado del proxy no disponible */ }
     }, 25000)
     return () => clearTimeout(t)
@@ -483,60 +437,20 @@ export default function App() {
       await CloudProxy.connect()
       await refreshWarpStatus()
     } catch (e) {
-      setWarpError(e?.message || String(e))
+      setWarpError(warpErrText(e?.message || String(e)))
       setWarpStuck(true)
     }
     setWarpRetrying(false)
   }
 
   const skipWarp = async () => {
-    // El usuario elige seguir sin WARP: desactiva autoconnect, limpia el
-    // proxy (dead-port o no) para que el tráfico vaya directo y cierra el
-    // overlay. Desde Ajustes → VPN puede volver a activarlo.
-    localStorage.setItem('octostream_warp_autoconnect', 'false')
+    // El usuario elige seguir sin WARP solo en ESTA sesión: limpia el proxy
+    // y cierra el overlay. En el próximo arranque vuelve a conectar solo
+    // (WARP es siempre activado — no hay apagado persistente).
+    setWarpSkipped(true)
     try { await CloudProxy.disconnect() } catch { /* best-effort */ }
     resetWarpReady()
     setWarpBlocking(false)
-  }
-
-  // Escape del gate de Riseup: mismas opciones que WARP — sin ellas un
-  // túnel que nunca conecta bricka la app en "Conectando VPN".
-  const [vpnStuck, setVpnStuck] = useState(false)
-  const [vpnError, setVpnError] = useState('')
-  const [vpnRetrying, setVpnRetrying] = useState(false)
-  const [prevVpnBlocking, setPrevVpnBlocking] = useState(false)
-  if (vpnBlocking !== prevVpnBlocking) {
-    setPrevVpnBlocking(vpnBlocking)
-    if (!vpnBlocking) { setVpnStuck(false); setVpnError('') }
-  }
-  useEffect(() => {
-    if (!vpnBlocking) return
-    const t = setTimeout(() => setVpnStuck(true), 25000)
-    return () => clearTimeout(t)
-  }, [vpnBlocking])
-
-  const retryVpn = async () => {
-    setVpnRetrying(true)
-    setVpnError('')
-    try {
-      const { connectRiseupTunnel } = await import('./utils/riseupVpn.js')
-      await connectRiseupTunnel()
-    } catch (e) {
-      setVpnError(e?.message || String(e))
-      setVpnStuck(true)
-    }
-    setVpnRetrying(false)
-  }
-
-  const skipVpn = async () => {
-    // Continuar sin Riseup: apaga la autoconexión y desbloquea la UI —
-    // el tráfico pasa a WARP si está activo, si no va directo.
-    localStorage.setItem('octostream_riseup_autoconnect', 'false')
-    try {
-      const { disconnectRiseupTunnel } = await import('./utils/riseupVpn.js')
-      await disconnectRiseupTunnel()
-    } catch { /* best-effort */ }
-    setVpnBlocking(false)
   }
 
   // Las rutas NO se montan hasta el primer desbloqueo del túnel: montar
@@ -544,8 +458,10 @@ export default function App() {
   // catálogo por la IP física — esa era la fuga. Una vez montadas se
   // conservan (si el túnel cae a mitad de sesión el overlay bloquea la
   // interacción pero la página conserva su estado).
-  const [routesMounted, setRoutesMounted] = useState(() => !(warpBlocking || vpnBlocking))
-  if (!routesMounted && !warpBlocking && !vpnBlocking) setRoutesMounted(true)
+  // "Continuar sin WARP" solo libera ESTA sesión — el próximo arranque o
+  // vuelta a foreground vuelve a intentar el túnel (siempre-activo).
+  const [routesMounted, setRoutesMounted] = useState(() => !warpBlocking)
+  if (!routesMounted && !warpBlocking) setRoutesMounted(true)
 
   return (
     <ErrorBoundary>
@@ -578,41 +494,6 @@ export default function App() {
                     className="px-5 py-2.5 rounded-xl bg-dark-700 border border-white/15 text-white/80 text-sm"
                   >
                     Continuar sin WARP
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Riseup VPN connecting overlay: prioridad sobre WARP (Riseup va primero) */}
-        {vpnBlocking && android && (
-          <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center px-8" data-vpn-overlay>
-            <img
-              src="/logo-symbol.png"
-              alt="OctoStream"
-              className="w-20 h-20 object-contain mb-6 animate-warp-pulse"
-              draggable={false}
-            />
-            <h2 className="text-white text-xl font-bold mb-2">Conectando VPN</h2>
-            <p className="text-white/60 text-sm">Levantando el túnel seguro…</p>
-            {vpnStuck && (
-              <div className="mt-8 flex flex-col items-center gap-3 max-w-xs text-center">
-                {vpnError && <p className="text-red-400/80 text-xs break-words">{vpnError}</p>}
-                <p className="text-white/50 text-xs">La conexión está tardando más de lo normal.</p>
-                <div className="flex gap-3 mt-1">
-                  <button
-                    onClick={retryVpn}
-                    disabled={vpnRetrying}
-                    className="px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-semibold disabled:opacity-50"
-                  >
-                    {vpnRetrying ? 'Conectando…' : 'Reintentar'}
-                  </button>
-                  <button
-                    onClick={skipVpn}
-                    className="px-5 py-2.5 rounded-xl bg-dark-700 border border-white/15 text-white/80 text-sm"
-                  >
-                    Continuar sin VPN
                   </button>
                 </div>
               </div>

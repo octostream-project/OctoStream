@@ -54,17 +54,6 @@ contextBridge.exposeInMainWorld('octostream', {
     disconnectBackground: () => ipcRenderer.invoke('cloud:disconnect-background'),
     getStatus: () => ipcRenderer.invoke('cloud:status'),
     setRemoteHost: (opts) => ipcRenderer.invoke('cloud:set-remote', opts),
-    setShareLan: (opts) => ipcRenderer.invoke('cloud:set-share-lan', opts),
-  },
-  // RiseupVPN — guardar el .ovpn generado / importarlo a NetworkManager /
-  // levantar el túnel con openvpn del sistema (Linux).
-  riseup: {
-    save: (conf) => ipcRenderer.invoke('riseup:save', { conf }),
-    import: (conf) => ipcRenderer.invoke('riseup:import', { conf }),
-    connect: (conf) => ipcRenderer.invoke('riseup:connect', { conf }),
-    disconnect: () => ipcRenderer.invoke('riseup:disconnect'),
-    status: () => ipcRenderer.invoke('riseup:status'),
-    install: () => ipcRenderer.invoke('riseup:install'),
   },
   // Fullscreen de la ventana (mismo comportamiento que el player Android).
   setFullscreen: (on) => ipcRenderer.invoke('win:fullscreen', on),

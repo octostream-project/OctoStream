@@ -10,11 +10,19 @@ vi.mock('./cloudProxy.js', () => ({
     getStatus: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
+    directFetch: vi.fn(),
+  },
+}))
+
+vi.mock('@capacitor/core', () => ({
+  CapacitorHttp: {
+    get: vi.fn(),
   },
 }))
 
 import { CloudProxy } from './cloudProxy.js'
-import { waitForWarp, isWarpConnected, resetWarpReady } from './warpStatus.js'
+import { CapacitorHttp } from '@capacitor/core'
+import { waitForWarp, isWarpConnected, resetWarpReady, checkIpLeak } from './warpStatus.js'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -48,5 +56,15 @@ describe('warpStatus', () => {
     up = true
     expect(await waitForWarp(100)).toBe(true)
     expect(CloudProxy.connect).not.toHaveBeenCalled()
+  })
+
+  it('la prueba de fugas acepta JSON ya parseado por CapacitorHttp', async () => {
+    CapacitorHttp.get.mockResolvedValue({ data: { ip: '187.7.203.116' } })
+    CloudProxy.directFetch.mockResolvedValue({ data: '{"ip":"80.10.20.30"}' })
+
+    const result = await checkIpLeak()
+
+    expect(result.tunnel.ip).toBe('187.7.203.116')
+    expect(result.direct.ip).toBe('80.10.20.30')
   })
 })

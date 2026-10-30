@@ -118,10 +118,6 @@ let warpConnectAttemptAt = 0
 async function connectWarpForBlocked() {
   if (isWarpConnected()) return false
   if (!isAndroidNative()) return false
-  // Respect the user's WARP auto-connect preference
-  try {
-    if (localStorage.getItem('octostream_warp_autoconnect') === 'false') return false
-  } catch { return false }
   if (Date.now() - warpConnectAttemptAt < DOWN_TTL_MS) return false
   warpConnectAttemptAt = Date.now()
   try {

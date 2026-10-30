@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
-import { RefreshCw, Wifi, Check, AlertCircle, Download, X, MonitorSmartphone } from 'lucide-react'
+import { RefreshCw, Wifi, Check, AlertCircle, Download, X, MonitorSmartphone, ListChecks } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from './OctoLoader.jsx'
 import Modal from './ui/Modal.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
-import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
+import { mergeRemoteData, localSyncPayload, SYNC_CATEGORIES, loadSyncCategories, saveSyncCategories } from '../utils/syncMerge.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
 // red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
@@ -27,6 +27,7 @@ export default function SyncDevices() {
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
   const [pairedDevices, setPairedDevices] = useState([])
   const [confirmForget, setConfirmForget] = useState(false)
+  const [syncCats, setSyncCats] = useState(loadSyncCategories)
   const syncListenerRef = useRef(null)
 
   // El merge es una UNIÓN por clave (lo remoto se junta con lo local, gana el
@@ -35,12 +36,33 @@ export default function SyncDevices() {
   // pushes aunque este panel esté cerrado.
   const mergeData = (remoteData) => mergeRemoteData(remoteData)
 
+  const toggleSyncCategory = (id) => {
+    const next = syncCats.includes(id)
+      ? syncCats.filter(c => c !== id)
+      : [...syncCats, id]
+    if (!next.length) return
+    setSyncCats(saveSyncCategories(next))
+  }
+
+  const syncCountsText = (counts) => [
+    counts.favs ? `+${counts.favs} favoritos` : '',
+    counts.watchlist ? `+${counts.watchlist} mi lista` : '',
+    counts.hist ? `+${counts.hist} historial` : '',
+    counts.eps ? `+${counts.eps} episodios` : '',
+    counts.settings ? `+${counts.settings} ajustes` : '',
+  ].filter(Boolean).join(', ')
+
+  const selectedCategoryLabels = () => SYNC_CATEGORIES
+    .filter(c => syncCats.includes(c.id))
+    .map(c => c.label)
+    .join(' · ')
+
   const handleReceivedData = (dataStr) => {
     try {
       const remoteData = JSON.parse(dataStr)
-      mergeData(remoteData)
+      const counts = mergeData(remoteData)
       setStatus('done')
-      setMessage('Datos recibidos y unidos a los tuyos')
+      setMessage(`Datos recibidos y unidos a los tuyos${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ''}`)
       const now = new Date().toLocaleString('es-ES')
       localStorage.setItem('octostream_last_sync', now)
       setLastSync(now)
@@ -131,7 +153,7 @@ export default function SyncDevices() {
     }
   }, [])
 
-  useEffect(() => { updateLocalData() }, [favorites, watchHistory, watchedEpisodes])
+  useEffect(() => { updateLocalData() }, [favorites, watchHistory, watchedEpisodes, syncCats])
 
   // Push autorizado tras aceptar el diálogo de emparejamiento.
   useEffect(() => {
@@ -207,7 +229,7 @@ export default function SyncDevices() {
         return
       }
       const counts = mergeData(remoteData)
-      finishOk(`Descargado y unido (+${counts.favs} favoritos, ${counts.hist} historial, ${counts.eps} episodios nuevos)`)
+      finishOk(`Descargado y unido${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ' — sin cambios'}`)
     } catch (e) {
       failWith(e, 'descargar')
     }
@@ -225,7 +247,7 @@ export default function SyncDevices() {
     try {
       setStatus('syncing')
       setMessage('Enviando tus datos...')
-      const r = await pushSync(url, dev, localSyncPayload())
+      const r = await pushSync(url, dev, localSyncPayload(syncCats))
       if (r === 'denied') {
         setStatus('error')
         setMessage('El otro dispositivo rechazó el emparejamiento.')
@@ -239,7 +261,7 @@ export default function SyncDevices() {
         return
       }
       const counts = mergeData(remoteData)
-      finishOk(`Sincronizado: enviado y recibido (+${counts.favs} favoritos, ${counts.hist} historial, ${counts.eps} episodios nuevos)`)
+      finishOk(`Sincronizado: enviado y recibido${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ' — sin cambios'}`)
     } catch (e) {
       failWith(e, 'sincronizar')
     }
@@ -271,6 +293,40 @@ export default function SyncDevices() {
             <p className="text-dark-400 text-sm">Iniciando servidor...</p>
           </div>
         )}
+      </div>
+
+      {/* Secciones sincronizadas */}
+      <div className="card p-4">
+        <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+          <ListChecks size={18} className="text-primary-400" />
+          Qué se sincroniza
+        </h3>
+        <p className="text-xs text-dark-500 mb-3">
+          Elige las secciones que se envían y se aplican al sincronizar.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {SYNC_CATEGORIES.map(cat => (
+            <label
+              key={cat.id}
+              data-tv-card
+              tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSyncCategory(cat.id) } }}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none text-sm transition-colors ${syncCats.includes(cat.id) ? 'bg-primary-600/20 border-primary-500 text-white' : 'bg-dark-900 border-dark-700 text-dark-400'}`}
+            >
+              <input
+                type="checkbox"
+                tabIndex={-1}
+                checked={syncCats.includes(cat.id)}
+                onChange={() => toggleSyncCategory(cat.id)}
+                className="accent-primary-500"
+              />
+              {cat.label}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-dark-500 mt-3">
+          «Cuentas y claves» y «Ajustes» pueden incluir credenciales/API (AllDebrid, HDFull, WARP/VPS…): actívalas solo con dispositivos tuyos.
+        </p>
       </div>
 
       {/* Dispositivos encontrados */}
@@ -428,7 +484,8 @@ export default function SyncDevices() {
                 <X size={18} />
               </button>
             </div>
-            <p className="text-sm text-dark-400 mb-4">¿Qué quieres hacer con este dispositivo?</p>
+            <p className="text-sm text-dark-400 mb-1">¿Qué quieres hacer con este dispositivo?</p>
+            <p className="text-xs text-dark-500 mb-4">Secciones activas: {selectedCategoryLabels()}</p>
             <div className="space-y-2">
               <button
                 data-tv-card

@@ -144,10 +144,9 @@ export async function resolveYouTubeStream(url, { force = false } = {}) {
     // Directos → HLS. VOD → manifest DASH (adaptativo: todas las calidades y
     // pistas de audio → selector de calidad real en ExoPlayer). Fallback al
     // mejor MP4 progresivo si el vídeo no expone manifest.
-    // direct: true → YouTube NUNCA va por el proxy WARP: googlevideo y el
-    // endpoint timedtext de subtítulos devuelven 429 desde IPs de datacenter
-    // (Cloudflare WARP). YouTube no está bloqueado por ISP, no lo necesita.
-    const direct = true
+    // Mantener resolución y reproducción por el mismo proxy WARP/VPS: YouTube
+    // firma sus URLs de googlevideo con la IP que las resolvió.
+    const direct = false
     if (result.hlsUrl) {
       // isLive solo lo informa el backend de escritorio (yt-dlp); en Android
       // hlsUrl implica directo — mantener la etiqueta 'Live' en ese caso.
@@ -251,5 +250,4 @@ export async function suggestYouTube(query) {
     return null
   }
 }
-
 

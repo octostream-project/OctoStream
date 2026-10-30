@@ -169,6 +169,10 @@ public class ExoPlayerPlugin extends Plugin {
     private String currentStreamType = "hls";
     private boolean currentDirect = false;
     private boolean currentBypassVpn = false;
+    // Stream desbloqueado por debrid: se rutea por el forward SSH al VPS
+    // (2820) en vez del proxy WARP general (1820) — la URL quedó IP-bound
+    // a la salida del VPS al desbloquear.
+    private boolean currentVps = false;
     // Ruta con la que JS resolvió el enlace (null = sin marcar): si salió
     // por WARP la URL quedó ligada a la IP de salida del túnel y debe
     // reproducirse por el proxy aunque la sonda falle; si salió por la
@@ -226,6 +230,11 @@ public class ExoPlayerPlugin extends Plugin {
     private Runnable nextEpCountdownRunnable = null;
     private int nextEpCountdown = 0;
     private boolean nextEpShown = false;
+    // Temporizador de apagado (estilo TV): cierra la app por completo —
+    // player, WebView, aether y el túnel SSH mueren con el proceso.
+    private Runnable sleepTimerRunnable = null;
+    private int sleepTimerMinutes = 0;
+    private long sleepTimerAtMs = 0;
     // When true, closePlayer() will NOT emit a "closed" event. Used by
     // openPlayer() so the JS side doesn't unmount the VideoPlayer when
     // switching episodes (closePlayer + openPlayer = seamless transition).
@@ -576,7 +585,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Origin", origin);
                             }
                             currentBypassVpn = false;
-                            boundToWarp = null;
+                            boundToWarp = null; currentVps = false;
                             openPlayer(directUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
                         return;
@@ -695,7 +704,7 @@ public class ExoPlayerPlugin extends Plugin {
                 relayKeepAlive = true;
                 try {
                     currentBypassVpn = false;
-                    boundToWarp = null;
+                    boundToWarp = null; currentVps = false;
                     openPlayer(relayUrl, "hls", false, null, new JSObject(), new JSObject(),
                             title, mode, null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 } finally {
@@ -2213,7 +2222,7 @@ public class ExoPlayerPlugin extends Plugin {
                                 headers.put("Cookie", cookies);
                             }
                             currentBypassVpn = false;
-                            boundToWarp = null;
+                            boundToWarp = null; currentVps = false;
                             openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                         });
             }
@@ -2260,7 +2269,7 @@ public class ExoPlayerPlugin extends Plugin {
                                     relayKeepAlive = true;
                                     try {
                                         currentBypassVpn = false;
-                                        boundToWarp = null;
+                                        boundToWarp = null; currentVps = false;
                                         openPlayer(relayUrl, "hls", false, null,
                                                 new JSObject(), new JSObject(), embedTitle, "live",
                                                 null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
@@ -2284,7 +2293,7 @@ public class ExoPlayerPlugin extends Plugin {
                     if (origin != null && origin.startsWith("http")) headers.put("Origin", origin);
                     if (cookies != null && !cookies.isEmpty()) headers.put("Cookie", cookies);
                     currentBypassVpn = false;
-                    boundToWarp = null;
+                    boundToWarp = null; currentVps = false;
                     openPlayer(videoUrl, st, false, null, headers, new JSObject(), embedTitle, "live", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
                 });
             }
@@ -3708,7 +3717,7 @@ public class ExoPlayerPlugin extends Plugin {
                 headers.put("Cookie", cookies);
             }
             currentBypassVpn = false;
-            boundToWarp = null;
+            boundToWarp = null; currentVps = false;
             openPlayer(url, st, false, null, headers, new JSObject(), title, "vod", null, -1, null, null, 0, 0, null, "", 0, 0, null, -1, null);
         });
     }
@@ -4089,6 +4098,7 @@ public class ExoPlayerPlugin extends Plugin {
         boolean direct = call.getBoolean("direct", false);
         boolean bypassVpn = call.getBoolean("bypassVpn", false);
         boundToWarp = call.getBoolean("warpBound");
+        currentVps = Boolean.TRUE.equals(call.getBoolean("vps", false));
         String licenseUrl = call.getString("licenseUrl", null);
         JSONObject headersJson = call.getObject("headers", new JSObject());
         JSONObject drmHeadersJson = call.getObject("drmHeaders", new JSObject());
@@ -5579,6 +5589,15 @@ public class ExoPlayerPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "quality cap failed: " + e.getMessage());
         }
+        // Aviso a JS: en progresivos (mp4/mkv debrid) el cap no tiene
+        // variantes que recortar y el usuario debe elegir otra fuente —
+        // sin este aviso la imagen a saltos parecía un fallo de red.
+        boolean adaptive = "hls".equals(currentStreamType) || "dash".equals(currentStreamType);
+        JSObject ev = new JSObject();
+        ev.put("state", "qualityCapped");
+        ev.put("reason", reason);
+        ev.put("adaptive", adaptive);
+        notifyListeners("playbackState", ev);
     }
 
     private void emitBufferingTimeout() {
@@ -5605,14 +5624,7 @@ public class ExoPlayerPlugin extends Plugin {
             if (host == null) return false;
             host = host.toLowerCase(java.util.Locale.ROOT);
             return host.equals("tdtspain.com") || host.endsWith(".tdtspain.com")
-                    || host.equals("tdtchannels.com") || host.endsWith(".tdtchannels.com")
-                    || host.equals("rtve.es") || host.endsWith(".rtve.es")
-                    || host.equals("mediaset.net") || host.endsWith(".mediaset.net")
-                    || host.equals("mediasetinfinity.es") || host.endsWith(".mediasetinfinity.es")
-                    || host.equals("atresplayer.com") || host.endsWith(".atresplayer.com")
-                    || host.equals("atresmedia.com") || host.endsWith(".atresmedia.com")
-                    || host.equals("dai.google.com") || host.endsWith(".dai.google.com")
-                    || host.equals("doubleclick.net") || host.endsWith(".doubleclick.net");
+                    || host.equals("tdtchannels.com") || host.endsWith(".tdtchannels.com");
         } catch (Exception ignored) {
             return false;
         }
@@ -7098,6 +7110,7 @@ public class ExoPlayerPlugin extends Plugin {
                 String streamType = call.getString("streamType", "hls");
                 boolean direct = call.getBoolean("direct", false);
         boolean bypassVpn = call.getBoolean("bypassVpn", false);
+                currentVps = Boolean.TRUE.equals(call.getBoolean("vps", false));
                 String title = call.getString("title", "");
                 int idx = call.getInt("channelIndex", channelIndex);
                 String now = call.getString("epgNow", null);
@@ -7278,29 +7291,13 @@ public class ExoPlayerPlugin extends Plugin {
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
         if (isTdtSpainDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
-        // La resolución del enlace salió por una ruta concreta y la URL quedó
-        // ligada a la IP de salida de esa ruta (error "opened on a different
-        // connection / expected ip"). Reproducirla por la otra siempre falla:
-        // si JS la marcó, respetarla aunque la sonda diga lo contrario — la
-        // sonda solo sirve para mantener el estado WARP honesto y disparar
-        // la reconexión.
-        if (boundToWarp != null) {
-            if (!com.octostream.cloudproxy.CloudProxyPlugin.isLocalProxyUp()) {
-                com.octostream.cloudproxy.CloudProxyPlugin.markDisconnected();
-            }
-            return boundToWarp;
-        }
-        String httpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
-        if (httpProxy == null || httpProxy.isEmpty()) return false;
-        // 'connected' tiene histéresis (~30s) para no caer por misses sueltos,
-        // así que antes de rutar el stream se verifica el puerto local de
-        // verdad: con el proxy muerto el stream colgaría ~15s y fallaría igual
-        // con cualquier servidor hasta reiniciar la app. Puerto caído → marca
-        // desconectado (el overlay reconecta WARP) y este stream va directo.
+        // La única salida física permitida para streams externos es la marcada
+        // explícitamente como TDT/direct arriba. Si WARP cae, conservar la ruta
+        // del proxy hace que el stream falle y active la reconexión, en vez de
+        // filtrar la IP real o reproducir con una IP distinta a la resolución.
         if (!com.octostream.cloudproxy.CloudProxyPlugin.isLocalProxyUp()) {
-            Log.w(TAG, "WARP proxy local no responde — stream directo y estado marcado caído");
+            Log.w(TAG, "WARP proxy no responde — manteniendo el stream ligado al proxy");
             com.octostream.cloudproxy.CloudProxyPlugin.markDisconnected();
-            return false;
         }
         return true;
     }
@@ -7312,54 +7309,44 @@ public class ExoPlayerPlugin extends Plugin {
     private DataSource.Factory buildStreamDataSourceFactory(String url, Map<String, String> headers,
             boolean direct, boolean forceBypassProxy) {
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-        // Directos geo-bloqueados (TDT/RTVE/Atresmedia…) salen por la red
-        // física; el resto, incluidos TorBox y YouTube, usa Aether/WARP.
-        if ((isTdtSpainDomain(url) || currentBypassVpn)
-                && com.octostream.cloudproxy.OctoVpnService.isRunning()) {
-            javax.net.SocketFactory sf =
-                com.octostream.cloudproxy.CloudProxyPlugin.physicalSocketFactory(getContext());
-            if (sf != null) {
-                try {
-                    OkHttpClient.Builder geoClient = new OkHttpClient.Builder()
-                            .connectTimeout(15, TimeUnit.SECONDS)
-                            .readTimeout(30, TimeUnit.SECONDS)
-                            .followRedirects(true)
-                            .followSslRedirects(true)
-                            .socketFactory(sf);
-                    OkHttpDataSource.Factory geoFactory = new OkHttpDataSource.Factory((Call.Factory) geoClient.build())
-                            .setUserAgent(ua);
-                    if (!headers.isEmpty()) geoFactory.setDefaultRequestProperties(headers);
-                    Log.i(TAG, "Geo-bypass: stream atado à rede física (fora do túnel VPN)");
-                    return new DefaultDataSource.Factory(getContext(), geoFactory);
-                } catch (Exception e) {
-                    Log.e(TAG, "geo-bypass factory failed — stream segue o caminho normal", e);
-                }
-            }
-        }
-        if (shouldUseWarpProxy(url, direct, forceBypassProxy)) {
+        boolean useWarpProxy = shouldUseWarpProxy(url, direct, forceBypassProxy);
+        if (useWarpProxy || direct || forceBypassProxy || isTdtSpainDomain(url)) {
             try {
-                String socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
-                // URL ligada a WARP con el estado marcado caído: getHttpProxy()
-                // da null pero el proxy debe usarse igualmente — la IP de la
-                // firma del enlace es la del túnel, no la física.
-                if (socksProxy == null) socksProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr();
-                String[] parts = socksProxy.split(":", 2);
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                         .connectTimeout(15, TimeUnit.SECONDS)
                         .readTimeout(30, TimeUnit.SECONDS)
                         .followRedirects(true)
-                        .followSslRedirects(true)
-                        .proxy(new java.net.Proxy(
-                                java.net.Proxy.Type.HTTP,
-                                new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
-                Log.i(TAG, "Using WARP HTTP proxy " + socksProxy + " for movie/stream URL (remote DNS)");
+                        .followSslRedirects(true);
+                if (useWarpProxy) {
+                    // Debrid (vps): forward SSH dedicado al VPS (2820) — la
+                    // URL quedó IP-bound a esa salida. Sin VPS vivo cae al
+                    // proxy WARP normal: nunca en claro.
+                    String proxyAddr = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr();
+                    if (currentVps) {
+                        String vpsAddr = com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr();
+                        if (vpsAddr != null) {
+                            proxyAddr = vpsAddr;
+                            Log.i(TAG, "Using VPS SSH proxy for debrid stream (remote DNS)");
+                        }
+                    }
+                    String[] parts = proxyAddr.split(":", 2);
+                    clientBuilder.proxy(new java.net.Proxy(
+                            java.net.Proxy.Type.HTTP,
+                            new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+                    if (!currentVps) Log.i(TAG, "Using WARP/VPS HTTP proxy for movie/stream URL (remote DNS)");
+                } else {
+                    // Direct/TDT links must ignore the JVM-wide proxy setting.
+                    clientBuilder.proxy(java.net.Proxy.NO_PROXY);
+                }
                 OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
                         .setUserAgent(ua);
                 if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
                 return new DefaultDataSource.Factory(getContext(), okHttpFactory);
             } catch (Exception e) {
-                Log.e(TAG, "Failed to create OkHttpDataSource with WARP proxy: " + e.getMessage());
-                // cae al factory directo de abajo
+                Log.e(TAG, "Failed to create OkHttpDataSource with WARP/VPS proxy: " + e.getMessage());
+                if (useWarpProxy) {
+                    throw new IllegalStateException("No se pudo crear el proxy WARP/VPS del stream", e);
+                }
             }
         }
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
@@ -7388,19 +7375,23 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     private DataSource.Factory makePipDsFactory(String url, Map<String, String> headers, boolean direct) {
-        String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxy();
+        String warpProxy = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr();
         boolean loopback = isLoopbackUrl(url) || isLanUrl(url);
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-        if (!direct && !loopback && warpProxy != null && !warpProxy.isEmpty()) {
+        if (!loopback) {
             String[] parts = warpProxy.split(":", 2);
             OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                     .connectTimeout(15, TimeUnit.SECONDS)
                     .readTimeout(30, TimeUnit.SECONDS)
                     .followRedirects(true)
-                    .followSslRedirects(true)
-                    .proxy(new java.net.Proxy(
-                            java.net.Proxy.Type.HTTP,
-                            new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+                    .followSslRedirects(true);
+            if (direct) {
+                clientBuilder.proxy(java.net.Proxy.NO_PROXY);
+            } else {
+                clientBuilder.proxy(new java.net.Proxy(
+                        java.net.Proxy.Type.HTTP,
+                        new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+            }
             OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
                     .setUserAgent(ua);
             if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
@@ -7850,7 +7841,8 @@ public class ExoPlayerPlugin extends Plugin {
         // Controles poco frecuentes plegados aquí — la fila principal queda
         // solo con iconos (estilo Stremio): CC±/1x/Fit/boost viven en este menú.
         String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad",
-                "Relación de aspecto", "Sincronía de subtítulos", "Amplificador de volumen"};
+                "Relación de aspecto", "Sincronía de subtítulos", "Amplificador de volumen",
+                "Temporizador de apagado"};
         showInPlayerMenu("Ajustes de reproducción", options, -1, (which) -> {
             switch (which) {
                 case 0: showQualityMenu(); break;
@@ -7860,8 +7852,63 @@ public class ExoPlayerPlugin extends Plugin {
                 case 4: showAspectRatioMenu(); break;
                 case 5: showSubtitleDelayMenu(); break;
                 case 6: showBoostMenu(); break;
+                case 7: showSleepTimerMenu(); break;
             }
         });
+    }
+
+    // Apagar la app al cabo de X minutos (película/dormir). El título del
+    // menú muestra el tiempo restante para que se vea el estado al reabrir.
+    private void showSleepTimerMenu() {
+        final int[] vals = {0, 10, 30, 60, 90, 120};
+        String[] labels = {"Desactivado", "10 minutos", "30 minutos", "60 minutos",
+                "90 minutos", "120 minutos"};
+        int sel = 0;
+        for (int i = 0; i < vals.length; i++) {
+            if (vals[i] == sleepTimerMinutes) { sel = i; break; }
+        }
+        String title = "Temporizador de apagado";
+        if (sleepTimerMinutes > 0 && sleepTimerAtMs > 0) {
+            long remain = Math.max(1, (sleepTimerAtMs - System.currentTimeMillis()) / 60_000L);
+            title += " (quedan " + remain + " min)";
+        }
+        showInPlayerMenu(title, labels, sel, which -> setSleepTimer(vals[which]));
+    }
+
+    private void setSleepTimer(int minutes) {
+        sleepTimerMinutes = minutes;
+        sleepTimerAtMs = minutes > 0 ? System.currentTimeMillis() + minutes * 60_000L : 0;
+        if (sleepTimerRunnable != null) {
+            mainHandler.removeCallbacks(sleepTimerRunnable);
+            sleepTimerRunnable = null;
+        }
+        if (minutes <= 0) {
+            Toast.makeText(getContext(), "Temporizador de apagado desactivado", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        sleepTimerRunnable = this::executeSleepTimer;
+        mainHandler.postDelayed(sleepTimerRunnable, minutes * 60_000L);
+        Toast.makeText(getContext(), "OctoStream se cerrará en " + minutes + " min", Toast.LENGTH_LONG).show();
+        resetControlsTimer();
+    }
+
+    private void executeSleepTimer() {
+        sleepTimerRunnable = null;
+        sleepTimerMinutes = 0;
+        sleepTimerAtMs = 0;
+        Log.i(TAG, "sleepTimer: firing — shutting down app");
+        try {
+            Toast.makeText(getContext(), "Apagando OctoStream…", Toast.LENGTH_SHORT).show();
+            closePlayer();
+            android.app.Activity activity = getActivity();
+            if (activity != null) activity.finishAffinity();
+            // Pequeño margen para que el finishAffinity y el "closed" event
+            // lleguen antes de matar el proceso (aether/SSH mueren con él).
+            mainHandler.postDelayed(() -> Runtime.getRuntime().exit(0), 400);
+        } catch (Exception e) {
+            Log.e(TAG, "sleepTimer: shutdown error: " + e.getMessage());
+            Runtime.getRuntime().exit(0);
+        }
     }
 
     // Menú de niveles del amplificador de volumen (el slider popup sigue

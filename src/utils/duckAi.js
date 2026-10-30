@@ -10,8 +10,7 @@
 
 import { getItemSync } from './storage.js'
 import { isAndroidNative } from './platform.js'
-import { waitForVpnTunnel } from './httpClient.js'
-import { waitForWarp, warpAutoConnectEnabled } from './warpStatus.js'
+import { waitForWarp } from './warpStatus.js'
 
 const DUCK = 'https://duck.ai'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
@@ -73,12 +72,11 @@ const commonHeaders = () => ({
   referer: `${DUCK}/`,
 })
 
-// Misma política fail-closed que httpClient: con Riseup o WARP en
-// autoconnect nada sale por la física antes del CONNECTED.
-async function gateVpn() {
+// Misma política fail-closed que httpClient: con WARP siempre-activo
+// nada sale por la física antes del CONNECTED.
+async function gateWarp() {
   if (!isAndroidNative()) return
-  await waitForVpnTunnel()
-  if (warpAutoConnectEnabled() && !(await waitForWarp(30000))) {
+  if (!(await waitForWarp(30000))) {
     const error = new Error('Aether/WARP no está conectado; la petición se bloqueó.')
     error.code = 'WARP_NOT_CONNECTED'
     throw error
@@ -92,7 +90,7 @@ async function duckFetch(url, { method = 'GET', headers = {}, body, signal } = {
   if (!isAndroidNative() && octo?.duckFetch) {
     return octo.duckFetch({ url, method, headers, body })
   }
-  await gateVpn()
+  await gateWarp()
   const res = await fetch(url, { method, headers, body, signal })
   const text = await res.text()
   const hdrs = {}

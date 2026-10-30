@@ -21,10 +21,6 @@ vi.mock('./platform.js', () => ({
   isElectron: vi.fn(() => false),
 }))
 
-vi.mock('./httpClient.js', () => ({
-  waitForVpnTunnel: vi.fn(),
-}))
-
 import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import {
@@ -107,6 +103,19 @@ describe('playStream', () => {
       fastStart: false,
       loadingText: null,
     })
+  })
+
+  it('forwards the vps flag so debrid streams use the SSH forward', async () => {
+    isAndroidNative.mockReturnValue(true)
+    ExoPlayer.play.mockResolvedValue({ status: 'ok' })
+
+    await playStream({
+      url: 'https://cdn.example.com/file.mkv',
+      streamType: 'mp4',
+      vps: true,
+    })
+
+    expect(ExoPlayer.play).toHaveBeenCalledWith(expect.objectContaining({ vps: true }))
   })
 })
 

@@ -1,6 +1,7 @@
-// Lista canónica de hosts que DEBEN salir por la red física: geobloqueo
-// regional o URLs firmadas ligadas a la IP que resuelve (error "opened on
-// a different connection" si resuelven por WARP y reproducen directo).
+// Lista canónica de hosts usados por TDT/TV con geobloqueo o URLs ligadas a la
+// IP. Android requiere que el caller marque bypassVpn explícitamente. Electron
+// conserva el bypass por host en Chromium, cuya API de proxy no permite decidir
+// por petición en la sesión compartida.
 // La MISMA lista vive duplicada en dos sitios que JS no puede importar:
 //   - capacitor-plugins/cloud-proxy/android/.../CloudProxyPlugin.java
 //     (GEO_HOST + http.nonProxyHosts + ProxyConfig bypass rules)

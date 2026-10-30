@@ -3,8 +3,12 @@ export interface CloudProxyStatus {
   /** True while the Aether tunnel handshake is in progress. */
   connecting?: boolean;
   error: string;
-  /** Active transport protocol: masque | masque-h2 | wg. */
+  /** Active transport protocol for general traffic: gool | mim | remote.
+   *  (SSH/VPS mode also runs aether locally — protocol stays gool|mim; see
+   *  `vps` for whether the dedicated debrid forward is up.) */
   protocol?: string;
+  socks?: string;
+  http?: string;
   /** Foreground guard service running (anti phantom-kill, background only). */
   guard?: boolean;
   /** Tunnel death streak before protocol escalation. */
@@ -15,6 +19,18 @@ export interface CloudProxyStatus {
   reconnects?: number;
   /** Milliseconds the tunnel has been continuously up. */
   uptimeMs?: number;
+  /** Requested exit location (auto/random/ISO) and observed exit metadata. */
+  exitLoc?: string;
+  exitIp?: string;
+  exitCountry?: string;
+  exitColo?: string;
+  /** Effective remote host and whether SSH mode is configured. */
+  remote?: string;
+  ssh?: boolean;
+  /** SSH forward to the VPS is live (debrid-only egress on
+   *  127.0.0.1:2819/2820). False while reconnecting — debrid streams then
+   *  fall back to the WARP proxy, never to the physical network. */
+  vps?: boolean;
 }
 
 export interface CloudProxyPlugin {
@@ -22,7 +38,7 @@ export interface CloudProxyPlugin {
    * Start the Aether local proxy for Cloudflare WARP.
    * Routes app traffic through the WARP tunnel (MASQUE over QUIC).
    */
-  connect(): Promise<{ status: string }>;
+  connect(options?: { exitLoc?: string }): Promise<{ status: string }>;
 
   /**
    * Stop the Aether proxy and clear routing.
@@ -49,27 +65,35 @@ export interface CloudProxyPlugin {
   setStrictMode(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
 
   /**
-   * Write an OpenVPN profile to the app cache and open it with the
-   * system's OpenVPN client (RiseupVPN alternative VPN layer).
+   * Remote proxy host. Empty string returns to the local Aether tunnel.
+   * Android also accepts host:ssh-port / ssh://user@host:port input.
    */
-  exportOvpn(options: { config: string; name?: string }): Promise<{ opened: boolean; name: string }>;
+  setRemoteHost(options: { host: string }): Promise<{ remote: string }>;
 
   /**
-   * Connect the RiseupVPN tunnel via the OpenVPN for Android remote API
-   * (de.blinkt.openvpn must be installed). Status: connected | consent |
-   * need-vpn-permission. Rejects 'no-openvpn-app' when the app is missing.
+   * SSH credentials for a VPS remote (Android only). An empty user returns
+   * to the legacy plain remote-proxy mode. The password is persisted
+   * encrypted with an Android Keystore AES key — never as plaintext.
    */
-  riseupConnect(options: { config: string }): Promise<{ status: string }>;
+  setRemoteSsh(options: { user?: string; pass?: string; port?: number }): Promise<{ ssh: boolean }>;
 
-  /** Disconnect the RiseupVPN tunnel (remote API). */
-  riseupDisconnect(): Promise<{ status: string }>;
+  /**
+   * Saved SSH credentials for the remote (Android only). The plugin
+   * decrypts the password from its Keystore-backed store so the settings
+   * UI can repopulate without keeping it in localStorage.
+   */
+  getRemoteSsh(): Promise<{ user: string; pass: string; port: number }>;
 
-  /** RiseupVPN remote-API status. */
-  riseupTunnelStatus(): Promise<{ installed: boolean; connected: boolean; hasEngine: boolean }>;
+  /**
+   * Confirm the pending SSH host key for the configured remote (Android
+   * only, TOFU): pins exactly the key whose fingerprint was shown to the
+   * user. Rejects when no pending key exists for that host.
+   */
+  trustRemoteHost(): Promise<{ trusted: boolean; fingerprint?: string }>;
 
   /**
    * Fetch a URL bound to the physical network (WiFi/cellular), bypassing
-   * the Riseup VPN tunnel. Restricted to geo-blocked hosts (TDT/RTVE/
+   * the local proxy. Restricted to geo-blocked hosts (TDT/RTVE/
    * Atresmedia/Mediaset…) so live TV keeps working while the VPN is on.
    * Returns a CapacitorHttp-shaped {status, headers, data} response.
    */
@@ -81,5 +105,10 @@ export interface CloudProxyPlugin {
     responseType?: string;
     connectTimeout?: number;
     readTimeout?: number;
+    /** Debrid traffic: route via the SSH forward to the VPS (127.0.0.1:2820)
+     *  instead of the physical network or the general WARP proxy. Falls back
+     *  to the default proxy (aether) when no VPS tunnel is up — never goes
+     *  out in the clear. Not restricted to the geo-bypass host list. */
+    vps?: boolean;
   }): Promise<{ status: number; headers: Record<string, string>; data: unknown; url?: string }>;
 }

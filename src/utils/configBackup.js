@@ -58,7 +58,7 @@ export const BACKUP_CATEGORIES = [
 
 export const ALL_CATEGORIES = BACKUP_CATEGORIES.map(c => c.id)
 
-function categoryOf(key) {
+export function categoryOf(key) {
   for (const cat of BACKUP_CATEGORIES) {
     if (cat.id === 'settings') continue
     if (cat.keys.includes(key)) return cat.id
@@ -67,12 +67,22 @@ function categoryOf(key) {
   return 'settings'
 }
 
-function collectSettings(categories) {
+function storageKeys() {
+  const keys = []
+  for (let i = 0; i < (localStorage.length || 0); i++) {
+    const k = localStorage.key(i)
+    if (k) keys.push(k)
+  }
+  // El mock de Vitest no implementa length/key — fallback por propiedades.
+  if (!keys.length && typeof localStorage === 'object') keys.push(...Object.keys(localStorage))
+  return keys
+}
+
+export function collectSettings(categories, excludedKeys = null) {
   const wanted = categories ? new Set(categories) : null
   const settings = {}
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)
-    if (!k?.startsWith(PREFIX)) continue
+  for (const k of storageKeys()) {
+    if (!k?.startsWith(PREFIX) || excludedKeys?.has(k)) continue
     if (wanted && !wanted.has(categoryOf(k))) continue
     settings[k] = localStorage.getItem(k)
   }

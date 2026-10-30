@@ -5,10 +5,10 @@ import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import Toggle from '../components/ui/Toggle.jsx'
+import Modal from '../components/ui/Modal.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
-import { connectRiseupTunnel, disconnectRiseupTunnel, riseupTunnelStatus } from '../utils/riseupVpn.js'
 import { getPin as adGetPin, checkPin as adCheckPin } from '../plugins/bundled/alldebrid.js'
 import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails, warpStrictEnabled, checkIpLeak } from '../utils/warpStatus.js'
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
@@ -31,6 +31,35 @@ function getDefaultLangPriority() {
     if (Array.isArray(saved) && saved.length === 4) return saved
   } catch {}
   return ['ESP', 'LAT', 'SUB', 'ENG']
+}
+
+function parseRemoteHostInput(value) {
+  let host = (value || '').trim()
+  let port = null
+  if (!host) return { host: '', port }
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) {
+      const url = new URL(host)
+      host = url.hostname
+      port = url.port ? parseInt(url.port, 10) : null
+    } else {
+      host = host.slice(host.lastIndexOf('@') + 1).split(/[/?#]/, 1)[0].trim()
+      if (host.startsWith('[')) {
+        const end = host.indexOf(']')
+        const suffix = end > 1 ? host.slice(end + 1) : ''
+        if (end > 1) host = host.slice(1, end)
+        if (/^:\d{1,5}$/.test(suffix)) port = parseInt(suffix.slice(1), 10)
+      } else {
+        const hostPort = host.match(/^([^:]+):(\d{1,5})$/)
+        if (hostPort) {
+          host = hostPort[1]
+          port = parseInt(hostPort[2], 10)
+        }
+      }
+    }
+  } catch {}
+  if (!(port >= 1 && port <= 65535)) port = null
+  return { host, port }
 }
 
 const TABS = [
@@ -124,10 +153,6 @@ export default function Settings() {
   const [adPinError, setAdPinError] = useState('')
   const adPinTimerRef = useRef(null)
   const adPinPollingRef = useRef(false)
-  const [riseupState, setRiseupState] = useState('disconnected')
-  const [riseupBusy, setRiseupBusy] = useState(false)
-  const [riseupMsg, setRiseupMsg] = useState('')
-
   // HDFull credentials
   const [hdfullUser, setHdfullUser] = useState(localStorage.getItem('octostream_hdfull_username') || '')
   const [hdfullPass, setHdfullPass] = useState(localStorage.getItem('octostream_hdfull_password') || '')
@@ -157,22 +182,24 @@ export default function Settings() {
   // WARP VPN state
   const [vpnStatus, setVpnStatus] = useState('disconnected') // disconnected | connecting | connected
   const [vpnError, setVpnError] = useState('')
-  const [vpnAutoConnect, setVpnAutoConnect] = useState(localStorage.getItem('octostream_warp_autoconnect') !== 'false')
   const [warpStrict, setWarpStrict] = useState(warpStrictEnabled())
   // Salida WARP: 'auto' = colo cercano (tu país); 'random' = segundo salto
   // (WARP-en-WARP, otro país cualquiera); o país fijado que el propio
   // aether verifica contra el trace de Cloudflare antes de aceptar el túnel.
   const [warpExitLoc, setWarpExitLoc] = useState(localStorage.getItem('octostream_warp_exit') || 'auto')
-  // Túnel compartido: IP de otro OctoStream en la LAN que presta su WARP
-  // (todos salen por la misma IP a la vez) y si ESTE dispositivo lo presta.
+  // Salida remota: IP/dominio del VPS al que se llega por túnel SSH.
+  // Vacío = WARP local doble-salto de este dispositivo.
   const [warpRemote, setWarpRemote] = useState(localStorage.getItem('octostream_warp_remote') || '')
-  const [warpShareLan, setWarpShareLan] = useState(localStorage.getItem('octostream_warp_sharelan') === 'true')
   // SSH del remoto: con usuario+clave el host se alcanza por túnel SSH al
   // VPS (port-forward al proxy loopback) — funciona fuera de casa, sin
   // Tailscale ni apps extra. Vacío = remoto plano en la misma WiFi.
   const [warpSshUser, setWarpSshUser] = useState(localStorage.getItem('octostream_warp_ssh_user') || '')
-  const [warpSshPass, setWarpSshPass] = useState(localStorage.getItem('octostream_warp_ssh_pass') || '')
+  const [warpSshPass, setWarpSshPass] = useState('')
   const [warpSshPort, setWarpSshPort] = useState(localStorage.getItem('octostream_warp_ssh_port') || '22')
+  // Host key SSH pendiente de confirmación (TOFU): {fingerprint, changed}.
+  const [hostKeyPrompt, setHostKeyPrompt] = useState(null)
+  const [vpsTest, setVpsTest] = useState(null)
+  const [vpsTestBusy, setVpsTestBusy] = useState(false)
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
   const [leakBusy, setLeakBusy] = useState(false)
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
@@ -422,19 +449,41 @@ export default function Settings() {
     }
   }, [])
 
-  useEffect(() => {
-    riseupTunnelStatus().then(st => {
-      if (st.connected) setRiseupState('connected')
-      else if (st.connecting) setRiseupState('connecting')
-    }).catch(() => {})
-  }, [])
-
   // Refleja el estado real del túnel WARP/Aether (también si se conecta o cae
   // desde otra pantalla). No pisa 'connecting' mientras el handshake arranca.
   useEffect(() => {
     return subscribeWarpStatus(connected => {
       setVpnStatus(prev => connected ? 'connected' : prev === 'connecting' ? prev : 'disconnected')
     })
+  }, [])
+
+  // Credenciales SSH del VPS: la clave vive cifrada en el plugin nativo
+  // (Android Keystore), no en localStorage. Al entrar se precarga para
+  // repintar el formulario y migra el valor legacy en claro si quedara.
+  useEffect(() => {
+    if (!isAndroidNative()) return
+    let dead = false
+    ;(async () => {
+      try {
+        const creds = await CloudProxy.getRemoteSsh()
+        if (dead) return
+        if (creds?.user) setWarpSshUser(creds.user)
+        if (creds?.port) setWarpSshPort(String(creds.port))
+        const legacy = localStorage.getItem('octostream_warp_ssh_pass')
+        if (creds?.pass) {
+          setWarpSshPass(creds.pass)
+        } else if (legacy) {
+          setWarpSshPass(legacy)
+          await CloudProxy.setRemoteSsh({
+            user: creds?.user || localStorage.getItem('octostream_warp_ssh_user') || '',
+            pass: legacy,
+            port: creds?.port || parseInt(localStorage.getItem('octostream_warp_ssh_port') || '22', 10),
+          })
+        }
+      } catch {}
+      localStorage.removeItem('octostream_warp_ssh_pass')
+    })()
+    return () => { dead = true }
   }, [])
 
   // Detalle del túnel para el indicador (transporte, guardián, caídas).
@@ -458,16 +507,12 @@ export default function Settings() {
     setVpnError('')
     try {
       if (vpnStatus === 'connected') {
-        // Apagar WARP: desconecta y desactiva el auto-arranque para que no
-        // vuelva a levantarse solo en el próximo inicio.
-        localStorage.setItem('octostream_warp_autoconnect', 'false')
-        setVpnAutoConnect(false)
+        // Desconexión solo de sesión: WARP es siempre-activo y volverá a
+        // conectarse solo en el próximo arranque o al volver a foreground.
         await CloudProxy.disconnect()
         await refreshWarpStatus()
         setVpnStatus('disconnected')
       } else {
-        localStorage.setItem('octostream_warp_autoconnect', 'true')
-        setVpnAutoConnect(true)
         setVpnStatus('connecting')
         await CloudProxy.connect({ exitLoc: warpExitLoc })
         // El handshake puede tardar (hasta ~3min en modo doble salto la
@@ -488,14 +533,6 @@ export default function Settings() {
     }
   }
 
-  const toggleVpnAutoConnect = () => {
-    const next = !vpnAutoConnect
-    setVpnAutoConnect(next)
-    localStorage.setItem('octostream_warp_autoconnect', next ? 'true' : 'false')
-    // Al desactivar la auto-conexión con el túnel activo, también se apaga.
-    if (!next && vpnStatus !== 'disconnected') toggleVpn()
-  }
-
   const toggleWarpStrict = () => {
     const next = !warpStrict
     setWarpStrict(next)
@@ -504,9 +541,10 @@ export default function Settings() {
   }
 
   const applyWarpRemote = async (host) => {
-    const h = (host || '').trim()
+    const { host: h, port: embeddedPort } = parseRemoteHostInput(host)
     setWarpRemote(h)
     localStorage.setItem('octostream_warp_remote', h)
+    if (embeddedPort) await applyWarpRemoteSsh(warpSshUser, warpSshPass, embeddedPort)
     try { await CloudProxy.setRemoteHost(h) } catch {}
     // Con el túnel vivo el cambio de origen solo aplica reconectando.
     if (vpnStatus === 'connected') {
@@ -524,25 +562,15 @@ export default function Settings() {
     setWarpSshPass(pass)
     setWarpSshPort(String(prt))
     localStorage.setItem('octostream_warp_ssh_user', user)
-    localStorage.setItem('octostream_warp_ssh_pass', pass)
+    // La clave la persiste el plugin nativo cifrada con Android Keystore —
+    // no duplicarla en claro en localStorage.
+    localStorage.removeItem('octostream_warp_ssh_pass')
     localStorage.setItem('octostream_warp_ssh_port', String(prt))
     try { await CloudProxy.setRemoteSsh({ user, pass, port: prt }) } catch {}
     if (vpnStatus === 'connected') {
       try { await CloudProxy.disconnect() } catch {}
       setVpnStatus('disconnected')
       setVpnError('Reconecta para aplicar el modo remoto')
-    }
-  }
-
-  const toggleWarpShareLan = async () => {
-    const next = !warpShareLan
-    setWarpShareLan(next)
-    localStorage.setItem('octostream_warp_sharelan', next ? 'true' : 'false')
-    try { await CloudProxy.setShareLan(next) } catch {}
-    if (vpnStatus === 'connected' && !warpRemote) {
-      try { await CloudProxy.disconnect() } catch {}
-      setVpnStatus('disconnected')
-      setVpnError('Reconecta WARP para aplicar el cambio de escucha')
     }
   }
 
@@ -582,24 +610,84 @@ export default function Settings() {
     setLeakBusy(false)
   }
 
-  const toggleRiseup = async () => {
-    setRiseupBusy(true); setRiseupMsg('')
+  const testVpsConnection = async () => {
+    const { host, port: embeddedPort } = parseRemoteHostInput(warpRemote)
+    const user = warpSshUser.trim()
+    const pass = warpSshPass
+    const port = embeddedPort || parseInt(warpSshPort, 10) || 22
+    if (!isAndroidNative()) {
+      setVpsTest({ ok: false, message: 'La prueba SSH del VPS está disponible en Android.' })
+      return
+    }
+    if (!host || !user || !pass) {
+      setVpsTest({ ok: false, message: 'Introduce la IP o dominio del VPS, el usuario y la contraseña SSH.' })
+      return
+    }
+
+    setWarpRemote(host)
+    setWarpSshPort(String(port))
+    setVpsTestBusy(true)
+    setVpsTest(null)
+    setVpnStatus('connecting')
     try {
-      if (riseupState === 'connected' || riseupState === 'connecting') {
-        await disconnectRiseupTunnel()
-        localStorage.setItem('octostream_riseup_autoconnect', 'false')
-        setRiseupState('disconnected')
-      } else {
-        localStorage.setItem('octostream_riseup_autoconnect', 'true')
-        setRiseupState('connecting')
-        await connectRiseupTunnel()
-        setRiseupState('connected')
-        setRiseupMsg('Túnel RiseupVPN activo — todo el tráfico sale por él.')
+      localStorage.setItem('octostream_warp_remote', host)
+      localStorage.setItem('octostream_warp_ssh_user', user)
+      // La clave la guarda el plugin cifrada — no dejar copia en claro.
+      localStorage.removeItem('octostream_warp_ssh_pass')
+      localStorage.setItem('octostream_warp_ssh_port', String(port))
+      await CloudProxy.setRemoteHost(host)
+      await CloudProxy.setRemoteSsh({ user, pass, port })
+      await CloudProxy.disconnect()
+      await CloudProxy.connect({ exitLoc: warpExitLoc })
+
+      const status = await CloudProxy.getStatus()
+      // vps = forward SSH al VPS vivo; el protocolo muestra el aether
+      // local (gool/mim) — ambos transportes corren a la vez.
+      if (!status?.connected || !status?.vps || status.remote !== host) {
+        throw new Error(status?.error || 'El túnel SSH o el proxy SOCKS del VPS no responde.')
       }
+      setVpnStatus('connected')
+      setWarpDetails(await getWarpDetails())
+      setVpsTest({ ok: true, message: 'Conexión SSH correcta; el proxy del VPS responde y alcanza Internet.' })
     } catch (e) {
-      setRiseupMsg(e?.message || 'Error con RiseupVPN')
-      setRiseupState('disconnected')
-    } finally { setRiseupBusy(false) }
+      setVpnStatus('disconnected')
+      // Clave de host nueva/cambiada → pedir confirmación de la huella
+      // (TOFU) antes de fijarla; no se confía en silencio.
+      const hk = String(e?.message || '').match(/SSH_HOST_KEY_(UNKNOWN|CHANGED):(\S+)/)
+      if (hk) {
+        setHostKeyPrompt({ fingerprint: hk[2], changed: hk[1] === 'CHANGED' })
+      } else {
+        setVpsTest({ ok: false, message: e?.message || 'No se pudo conectar con el VPS.' })
+      }
+    } finally {
+      setVpsTestBusy(false)
+    }
+  }
+
+  // El usuario aceptó la huella mostrada → fijar la host key pendiente y
+  // reintentar el túnel (ya no vuelve a preguntar para esta clave).
+  const trustPendingHostKey = async () => {
+    setHostKeyPrompt(null)
+    setVpsTestBusy(true)
+    setVpsTest(null)
+    setVpnStatus('connecting')
+    try {
+      await CloudProxy.trustRemoteHost()
+      await CloudProxy.disconnect()
+      await CloudProxy.connect({ exitLoc: warpExitLoc })
+      const status = await CloudProxy.getStatus()
+      if (!status?.connected || !status?.vps) {
+        throw new Error(status?.error || 'El túnel SSH o el proxy SOCKS del VPS no responde.')
+      }
+      setVpnStatus('connected')
+      setWarpDetails(await getWarpDetails())
+      setVpsTest({ ok: true, message: 'Clave del servidor fijada; el proxy del VPS responde y alcanza Internet.' })
+    } catch (e) {
+      setVpnStatus('disconnected')
+      setVpsTest({ ok: false, message: e?.message || 'No se pudo conectar con el VPS.' })
+    } finally {
+      setVpsTestBusy(false)
+    }
   }
 
   // --- Trakt PIN flow (OAuth device auth) ---
@@ -1751,26 +1839,6 @@ export default function Settings() {
       {/* Tab: Red */}
       {activeTab === 'red' && (
         <div className="space-y-6">
-          <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <h3 className="text-white font-bold">RiseupVPN</h3>
-                <p className="text-dark-400 text-sm">
-                  Túnel OpenVPN integrado — todo el tráfico sale por Francia cuando está activo
-                </p>
-              </div>
-              <Toggle
-                checked={riseupState !== 'disconnected'}
-                onChange={toggleRiseup}
-                disabled={riseupBusy}
-                label="RiseupVPN"
-              />
-            </div>
-            {riseupState === 'connecting' && <p className="text-amber-300 text-sm">Conectando…</p>}
-            {riseupState === 'connected' && <p className="text-green-400 text-sm">Conectado — tráfico por el túnel</p>}
-            {riseupMsg && <p className="text-dark-400 text-sm mt-1">{riseupMsg}</p>}
-          </div>
-
           {/* Cloudflare WARP */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
@@ -1780,8 +1848,7 @@ export default function Settings() {
               <div>
                 <h3 className="text-white font-bold">Cloudflare WARP</h3>
                 <p className="text-dark-400 text-sm">
-                  Proxy local (SOCKS5) para desbloquear películas y series bloqueadas por el ISP.
-                  No afecta a otras apps ni a TDT Spain.
+                  Conexión WARP propia o salida remota por VPS.
                 </p>
               </div>
             </div>
@@ -1807,6 +1874,7 @@ export default function Settings() {
                   {warpDetails.protocol
                     ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : warpDetails.protocol === 'remote' ? `WARP remoto (${warpDetails.remote})` : warpDetails.protocol === 'remote-ssh' ? `SSH remoto (${warpDetails.remote})` : 'MASQUE (QUIC)'}`
                     : 'Transporte: —'}
+                  {warpDetails.vps ? ` + VPS·debrid (${warpDetails.remote})` : ''}
                   {warpDetails.exitCountry ? ` · salida ${warpDetails.exitCountry}${warpDetails.exitColo ? '/' + warpDetails.exitColo : ''}` : ''}
                   {warpDetails.guard ? ' · guardián activo' : ''}
                   {warpDetails.tunnelFails > 0 ? ` · inestable (${warpDetails.tunnelFails} caídas)` : ''}
@@ -1814,13 +1882,12 @@ export default function Settings() {
                   {warpDetails.uptimeMs > 0 ? ` · arriba ${Math.round(warpDetails.uptimeMs / 60000)} min` : ''}
                 </p>
               )}
-              <div className="pt-1">
+              <details className="rounded-lg border border-dark-700 px-3 py-2">
+                <summary className="cursor-pointer text-sm text-dark-300">País de salida</summary>
+                <div className="pt-2">
                 <p className="text-sm text-dark-300">
-                  Ubicación de salida
                   <span className="block text-xs text-dark-500">
-                    WARP siempre enmascara la IP detrás de un segundo salto
-                    (Cloudflare→Cloudflare). Elige el país de salida o
-                    "Automático" para dejarlo al azar.
+                    Doble salto Cloudflare. Automático suele ser la mejor opción.
                   </span>
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -1845,56 +1912,38 @@ export default function Settings() {
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="pt-2 border-t border-dark-700/50">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm text-dark-300">
-                    Compartir este túnel en la red local
-                    <span className="block text-xs text-dark-500">
-                      Otros OctoStream en la misma WiFi salen por la IP de este dispositivo
-                      — misma IP a la vez (activa solo en redes de confianza)
-                    </span>
-                  </span>
-                  <Toggle
-                    checked={warpShareLan}
-                    onChange={toggleWarpShareLan}
-                    label="Compartir túnel WARP en la LAN"
-                    color="yellow"
-                  />
-                </label>
-                <div className="mt-3">
+                </div>
+              </details>
+              {isAndroidNative() && <div className="pt-2 border-t border-dark-700/50">
+                <div>
                   <p className="text-sm text-dark-300">
-                    Usar el WARP de otro OctoStream
+                    Servidor remoto (VPS)
                     <span className="block text-xs text-dark-500">
-                      IP del dispositivo que comparte su túnel — o IP pública
-                      del VPS si usas SSH (vacío = WARP propio)
+                      Déjalo vacío para usar WARP en este dispositivo.
                     </span>
                   </p>
-                  <input
-                    type="text"
-                    value={warpRemote}
-                    onChange={e => setWarpRemote(e.target.value)}
+                    <input
+                      type="text"
+                      value={warpRemote}
+                    onChange={e => { setWarpRemote(e.target.value); setVpsTest(null) }}
                     onBlur={e => applyWarpRemote(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && applyWarpRemote(e.target.value)}
-                    placeholder="192.168.1.50 o IP del VPS"
-                    inputMode="decimal"
+                    placeholder="IP o dominio del VPS"
                     className="input w-full mt-1"
                   />
                 </div>
                 <div className="mt-3">
                   <p className="text-sm text-dark-300">
-                    Túnel SSH al remoto (opcional)
+                    Acceso SSH al VPS
                     <span className="block text-xs text-dark-500">
-                      Con usuario y clave, la IP de arriba se alcanza por SSH —
-                      funciona desde cualquier red (VPS con setup-octo-node.sh).
-                      Vacío = remoto plano, solo misma WiFi
+                      Usuario, contraseña y puerto SSH del VPS.
                     </span>
                   </p>
                   <div className="grid grid-cols-3 gap-2 mt-1">
                     <input
                       type="text"
                       value={warpSshUser}
-                      onChange={e => setWarpSshUser(e.target.value)}
+                      onChange={e => { setWarpSshUser(e.target.value); setVpsTest(null) }}
                       onBlur={e => applyWarpRemoteSsh(e.target.value, warpSshPass, warpSshPort)}
                       placeholder="usuario (octo)"
                       autoComplete="off"
@@ -1903,7 +1952,7 @@ export default function Settings() {
                     <input
                       type="password"
                       value={warpSshPass}
-                      onChange={e => setWarpSshPass(e.target.value)}
+                      onChange={e => { setWarpSshPass(e.target.value); setVpsTest(null) }}
                       onBlur={e => applyWarpRemoteSsh(warpSshUser, e.target.value, warpSshPort)}
                       placeholder="contraseña"
                       autoComplete="new-password"
@@ -1912,26 +1961,60 @@ export default function Settings() {
                     <input
                       type="text"
                       value={warpSshPort}
-                      onChange={e => setWarpSshPort(e.target.value)}
+                      onChange={e => { setWarpSshPort(e.target.value); setVpsTest(null) }}
                       onBlur={e => applyWarpRemoteSsh(warpSshUser, warpSshPass, e.target.value)}
                       placeholder="22"
                       inputMode="numeric"
                       className="input w-full"
                     />
                   </div>
+                  <button
+                    type="button"
+                    onClick={testVpsConnection}
+                    disabled={vpsTestBusy}
+                    className="mt-3 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {vpsTestBusy ? 'Probando conexión…' : 'Probar y conectar con el VPS'}
+                  </button>
+                  {vpsTest && (
+                    <p className={`mt-2 text-sm ${vpsTest.ok ? 'text-green-400' : 'text-red-400'}`}>
+                      {vpsTest.message}
+                    </p>
+                  )}
                 </div>
-              </div>
-              <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">
-                <span className="text-sm text-dark-300">
-                  Auto-conectar al iniciar
-                </span>
-                <Toggle
-                  checked={vpnAutoConnect}
-                  onChange={toggleVpnAutoConnect}
-                  label="Auto-conectar WARP al iniciar"
-                  color="green"
-                />
-              </label>
+              </div>}
+              {hostKeyPrompt && (
+                <Modal onClose={() => setHostKeyPrompt(null)} labelledBy="ssh-hostkey-title">
+                  <h3 id="ssh-hostkey-title" className="text-lg font-semibold text-dark-100 mb-2">
+                    {hostKeyPrompt.changed ? 'La clave del servidor cambió' : 'Verificar el servidor VPS'}
+                  </h3>
+                  <p className="text-sm text-dark-300">
+                    {hostKeyPrompt.changed
+                      ? 'La clave SSH que presenta el VPS es distinta de la guardada. Si reinstalaste el servidor es normal; si no, puede ser un intento de interceptar la conexión.'
+                      : 'Primera conexión con este VPS. Comprueba que la huella coincide con la clave del servidor antes de confiar.'}
+                  </p>
+                  <p className="mt-3 rounded-lg bg-dark-900 px-3 py-2 font-mono text-xs text-primary-300 break-all select-all">
+                    {hostKeyPrompt.fingerprint}
+                  </p>
+                  <div className="mt-4 flex gap-2 justify-end">
+                    <button
+                      onClick={() => setHostKeyPrompt(null)}
+                      className="rounded-lg bg-dark-700 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={trustPendingHostKey}
+                      className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${hostKeyPrompt.changed ? 'bg-red-600 hover:bg-red-500' : 'bg-primary-600 hover:bg-primary-500'}`}
+                    >
+                      Confiar y conectar
+                    </button>
+                  </div>
+                </Modal>
+              )}
+              <details className="rounded-lg border border-dark-700 px-3 py-2">
+                <summary className="cursor-pointer text-sm text-dark-300">Protección y diagnóstico</summary>
+                <div className="space-y-3 pt-3">
               <label className="flex items-center justify-between cursor-pointer">
                 <span className="text-sm text-dark-300">
                   Kill-switch estricto
@@ -1962,7 +2045,7 @@ export default function Settings() {
                       ) : (
                         <>
                           <p className="text-dark-300">
-                            Por el túnel: {leakTest.tunnel?.ip || '—'}
+                            Por la app (IPv4): {leakTest.tunnel?.ip || '—'}
                             {leakTest.tunnel?.colo ? ` (${leakTest.tunnel.colo})` : ''}
                             {leakTest.tunnel?.warp ? ` · warp=${leakTest.tunnel.warp}` : ''}
                             {leakTest.tunnel?.error ? ` · ${leakTest.tunnel.error}` : ''}
@@ -1986,6 +2069,8 @@ export default function Settings() {
                   )}
                 </div>
               )}
+                </div>
+              </details>
             </div>
           </div>
 

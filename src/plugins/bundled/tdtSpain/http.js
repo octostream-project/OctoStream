@@ -1,6 +1,11 @@
 // HTTP helpers for TDT Spain (platform-aware).
 
-import { httpGetJson, httpGetText, httpPostJson as httpPostJsonImpl } from '../../../utils/httpClient.js'
+import {
+  httpGetJson,
+  httpGetText,
+  httpPostJson as httpPostJsonImpl,
+  httpPostText as httpPostTextImpl,
+} from '../../../utils/httpClient.js'
 import { logWarn } from '../../../utils/logger.js'
 import { isAndroidNative } from '../../../utils/platform.js'
 import { proxied } from './constants.js'
@@ -38,4 +43,8 @@ export async function fetchText(url, headers = {}) {
 
 export function httpPostJson(url, body, headers = {}, form = false, signal) {
   return httpPostJsonImpl(url, body, headers, form, signal, true)
+}
+
+export function httpPostText(url, body, headers = {}, signal) {
+  return httpPostTextImpl(url, body, headers, signal, true)
 }

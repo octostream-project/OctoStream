@@ -13,6 +13,7 @@ describe('resolveLiveStream', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       text: async () => JSON.stringify({ m3u8: '//cdn.example.com/live/playlist.m3u8' }),
+      headers: { forEach: vi.fn() },
     })
     const headers = { Origin: 'https://provider.example', Referer: 'https://provider.example/' }
 

@@ -775,6 +775,10 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         direct: stream.direct === true || isTorrent,
         // Solo los streams de TV geobloqueados evitan Aether/WARP.
         bypassVpn: stream.bypassVpn === true,
+        // Enlace desbloqueado por debrid (viaDebrid=AllDebrid): sale por el
+        // forward SSH al VPS — la URL quedó IP-bound al desbloquear y el VPS
+        // tiene cuota limitada, así que solo este tráfico lo usa.
+        vps: !!stream.viaDebrid,
         longBuffering: isTorrent,
         // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
         // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.
@@ -878,6 +882,15 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         else if (state.state === 'ready' || state.state === 'ended' || state.state === 'error') playerStalledRef.current = false
         if (state.state === 'playing') setPlaying(true)
         else if (state.state === 'paused' || state.state === 'ended') setPlaying(false)
+        if (state.state === 'qualityCapped') {
+          // Decoder saturado o rebuffer crónico: en HLS el player ya bajó a
+          // 720p; en progresivo (mp4/mkv debrid) no hay variantes y la
+          // única salida real es otra fuente/calidad — avisar por OSD.
+          const msg = state.adaptive
+            ? 'Calidad limitada a 720p: el dispositivo no llega a esta fuente'
+            : 'Este dispositivo no llega a decodificar esta fuente — prueba otra calidad u otro servidor'
+          ExoPlayer.osdMessage({ text: msg }).catch(() => {})
+        }
         if (state.state === 'error') {
           // Sin fallback a reproductor web: el nativo cubre todos los tipos
           // y un segundo player con otra UI confunde.

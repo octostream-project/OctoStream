@@ -1,7 +1,7 @@
 // Stream resolution for TDT Spain: live channels and U7D programs.
 
-import { UA, normKey, tlog, twarn, proxied, unproxied } from './constants.js'
-import { fetchJson, fetchText, httpPostJson } from './http.js'
+import { UA, normKey, tlog, twarn, unproxied } from './constants.js'
+import { fetchJson, fetchText, httpPostJson, httpPostText } from './http.js'
 import { getRtveHls, getU7d } from './data.js'
 import { logWarn } from '../../../utils/logger.js'
 
@@ -140,12 +140,12 @@ async function resolveGetUrl(ch) {
   const url = String(ch.url || '')
   try {
     const origin = new URL(url).origin
-    const res = await fetch(proxied(url), {
-      headers: { 'User-Agent': UA, Origin: origin, Referer: origin + '/', ...(ch.headers || {}) },
-      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+    const text = await fetchText(url, {
+      'User-Agent': UA,
+      Origin: origin,
+      Referer: origin + '/',
+      ...(ch.headers || {}),
     })
-    if (!res.ok) return null
-    const text = await res.text()
     try {
       const json = JSON.parse(text)
       const jsonStr = JSON.stringify(json)
@@ -163,14 +163,12 @@ async function resolveGetUrl(ch) {
 
 async function resolvePostUrl(url) {
   try {
-    const res = await fetch(proxied(url), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-      body: 'ppid=' + Date.now() + '&vpa=auto&wta=1&vpmute=0',
-      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
-    })
-    if (!res.ok) return null
-    const data = await res.json().catch(() => null)
+    const text = await httpPostText(
+      url,
+      'ppid=' + Date.now() + '&vpa=auto&wta=1&vpmute=0',
+      { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+    )
+    const data = JSON.parse(text)
     const manifest = data?.stream_manifest
     if (manifest) return { url: manifest, streamType: 'hls', quality: 'LIVE' }
     return null

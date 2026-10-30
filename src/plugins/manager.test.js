@@ -137,4 +137,28 @@ describe('PluginManager', () => {
 
     expect(plugin.getStreams).toHaveBeenCalledTimes(2)
   })
+
+  it('marks TDT streams as direct in progressive batches too', async () => {
+    const stream = { url: 'https://cdn.example/live.m3u8' }
+    const tdtPlugin = {
+      id: 'tdtspain',
+      name: 'TDT Spain',
+      manifest: { types: ['live'] },
+      getStreams: vi.fn(async ({ onBatch }) => {
+        onBatch?.([stream])
+        return [stream]
+      }),
+    }
+    const manager = new PluginManager([], [])
+    manager.plugins = [tdtPlugin]
+    manager._readyPromise = Promise.resolve()
+    const batches = []
+
+    const result = await manager.getStreamsProgressive(
+      'live', 'tdtspain:la1', 'La 1', undefined, batch => batches.push(batch),
+    )
+
+    expect(result[0]).toMatchObject({ direct: true, bypassVpn: true })
+    expect(batches[0][0]).toMatchObject({ direct: true, bypassVpn: true })
+  })
 })

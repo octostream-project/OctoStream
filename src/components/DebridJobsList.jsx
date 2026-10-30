@@ -61,7 +61,7 @@ export default function DebridJobsList() {
         toast.error('Listo pero no se pudo desbloquear el enlace')
         return
       }
-      await playStream({ url, title: m.filename || 'Debrid', streamType: 'mp4' })
+      await playStream({ url, title: m.filename || 'Debrid', streamType: 'mp4', vps: true })
     } catch (e) {
       toast.error(e?.message || 'No se pudo reproducir')
     } finally {

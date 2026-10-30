@@ -11,6 +11,20 @@ import { getJsonSync, setJsonSync, removeItemSync, getItemSync } from '../utils/
 const META_TIMEOUT_MS = 8000
 const SEARCH_TIMEOUT_MS = 15000
 const STREAMS_TIMEOUT_MS = 25000 // resolvers pueden encadenar varios scrapes
+
+// Fuentes 4K/2160p/UHD descartadas: casi ningún dispositivo decodifica HEVC
+// a esa resolución en tiempo real y los archivos debrid llegan a 80 GB —
+// el usuario solo ve fuentes reproducibles de verdad.
+const RE_4K = /\b(4k|2160p|uhd)\b/i
+function is4kStream(s) {
+  if (!s) return false
+  if (RE_4K.test(String(s.quality || ''))) return true
+  if (RE_4K.test(String(s.name || '')) || RE_4K.test(String(s.title || ''))) return true
+  try {
+    const file = decodeURIComponent(String(s.url || '').split('?')[0].split('/').pop() || '')
+    return RE_4K.test(file)
+  } catch { return false }
+}
 const EPG_TIMEOUT_MS = 12000
 const EXTERNAL_PLUGINS_KEY = 'octostream_external_plugins'
 const INSTALLED_PLUGINS_KEY = 'octostream_installed_plugins'
@@ -409,6 +423,8 @@ export class PluginManager {
       allStreams = allStreams.filter(s =>
         s.streamType !== 'torrent' && !/magnet:|\.torrent(\?|$)/i.test(String(s.url || '')))
     }
+    // Fuentes 4K fuera: bitrate/tamaño inasumible en casi todo hardware.
+    allStreams = allStreams.filter(s => !is4kStream(s))
 
     // Only cache non-empty results (don't cache failures). Streams marked
     // _noCache carry short-lived signed URLs (p.ej. DLive, ~4 min) — caching
@@ -445,11 +461,18 @@ export class PluginManager {
     const torrentsOff = getItemSync('octostream_torrent_search') === 'false'
     const noTorrent = (s) => !(torrentsOff &&
       (s.streamType === 'torrent' || /magnet:|\.torrent(\?|$)/i.test(String(s.url || ''))))
+    const keep = (s) => noTorrent(s) && !is4kStream(s)
 
     const promises = candidates.map(async plugin => {
       try {
         const pluginOnBatch = onBatch ? (batch) => {
-          const tagged = batch.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name })).filter(noTorrent)
+          const tagged = batch.map(s => ({
+            ...s,
+            pluginId: plugin.id,
+            pluginName: plugin.name,
+            direct: s.direct === true || plugin.id === 'tdtspain',
+            bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain',
+          })).filter(keep)
           allStreams = allStreams.filter(s => s.pluginId !== plugin.id)
           allStreams = allStreams.concat(tagged)
           onBatch(allStreams)
@@ -458,7 +481,7 @@ export class PluginManager {
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch: pluginOnBatch }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
         if (streams && streams.length > 0) {
-          const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' })).filter(noTorrent)
+          const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' })).filter(keep)
           allStreams = allStreams.filter(s => s.pluginId !== plugin.id)
           allStreams = allStreams.concat(tagged)
           if (onBatch) onBatch(allStreams)

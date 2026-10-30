@@ -7,10 +7,12 @@ const https = require('https')
 
 let ytdlpResolver = null
 let proxyAgentFor = null // (url) => agent | undefined — lo inyecta main.cjs
+let proxyUrlFor = null // () => Promise<string> — HTTP CONNECT activo de Aether/VPS
 
-function init({ resolver, agentFor }) {
+function init({ resolver, agentFor, proxyUrl }) {
   ytdlpResolver = resolver
   proxyAgentFor = agentFor
+  proxyUrlFor = proxyUrl
 }
 
 function ytdlpPath() {
@@ -19,13 +21,13 @@ function ytdlpPath() {
   return exe
 }
 
-function runYtDlp(args, timeoutMs = 90000) {
+async function runYtDlp(args, timeoutMs = 90000) {
+  if (!proxyUrlFor) throw new Error('Proxy WARP/VPS de YouTube no configurado')
+  const proxyUrl = await proxyUrlFor()
   return new Promise((resolve, reject) => {
-    // YouTube NUNCA va por WARP: las URLs firmadas de googlevideo llevan la IP
-    // de quien resuelve horneada (parametro ip=). Si yt-dlp resolviera por el
-    // tunel y mpv/Google reprodujeran directo, el fetch fallaria por mismatch
-    // (y de paso googlevideo devuelve 429 desde IPs de datacenter).
-    const proc = spawn(ytdlpPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    // Resolver y reproducir con el mismo egress: las URLs de googlevideo
+    // pueden quedar ligadas a la IP que las obtuvo.
+    const proc = spawn(ytdlpPath(), ['--proxy', proxyUrl, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
     let out = ''
     let err = ''
     const timer = setTimeout(() => {
@@ -121,10 +123,11 @@ async function searchMore({ query, nextPage }) {
   return { items, hasNextPage: items.length >= PAGE_SIZE, nextPage: { offset: start + items.length - 1 } }
 }
 
-// Sugerencias: endpoint público de YouTube (el que usa la web). Va directo
-// igual que el resto de YouTube (ver runYtDlp) — no toca el túnel WARP.
+// Sugerencias: igual que búsqueda y reproducción, usa el proxy activo.
 async function suggest({ query }) {
   const target = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(query)}`
+  if (!proxyUrlFor) throw new Error('Proxy WARP/VPS de YouTube no configurado')
+  await proxyUrlFor()
   return new Promise((resolve, reject) => {
     const agent = proxyAgentFor ? proxyAgentFor(target) : undefined
     const req = https.get(target, { agent, timeout: 15000 }, (res) => {

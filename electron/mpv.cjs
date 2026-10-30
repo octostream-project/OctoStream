@@ -377,6 +377,7 @@ class MpvSession {
     if (ref && !/[\r\n]/.test(ref)) await this._cmd('set_property', 'referrer', String(ref)).catch(() => {})
     const hdrs = this._headersOption(headers)
     if (hdrs) await this._cmd('set_property', 'http-header-fields', hdrs).catch(() => {})
+    await this._cmd('set_property', 'http-proxy', opts.httpProxy || '').catch(() => {})
     if (opts.title) await this._cmd('set_property', 'force-media-title', String(opts.title)).catch(() => {})
   }
 
