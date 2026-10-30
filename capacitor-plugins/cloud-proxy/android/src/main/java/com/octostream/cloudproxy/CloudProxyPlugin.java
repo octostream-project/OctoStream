@@ -539,21 +539,39 @@ public class CloudProxyPlugin extends Plugin {
                 // sigue por el aether local que arranca debajo en
                 // 1819/1820 — el VPS no recibe el volumen de fútbol,
                 // YouTube ni servidores gratuitos.
+                boolean sshPlaneUp = false;
                 if (sshRemote()) {
-                    sshMode = true;
-                    startSshTunnel(generation);
-                    boolean up = false;
-                    for (int i = 0; i < 30 && !up; i++) {
-                        synchronized (PROCESS_LOCK) {
-                            if (!connecting) throw new InterruptedException("connect cancelled");
+                    try {
+                        sshMode = true;
+                        // Sin credenciales no insistir: una tormenta de
+                        // auth-failures dispara el fail2ban del VPS.
+                        if (sshUser() == null || sshUser().isEmpty()
+                                || sshPass() == null || sshPass().isEmpty()) {
+                            throw new RuntimeException("SSH: falta usuario o contraseña — configúralos en Ajustes → Red");
                         }
-                        up = isSocksProxyUp("127.0.0.1", VPS_SOCKS_PORT, VPS_HTTP_PORT)
-                                && isTunnelAlive("127.0.0.1", VPS_SOCKS_PORT);
-                        if (!up) Thread.sleep(500);
-                    }
-                    if (!up) {
-                        stopSshTunnel(generation);
-                        throw new RuntimeException("Túnel SSH a " + warpRemote() + " caído o proxy del VPS no responde");
+                        startSshTunnel(generation);
+                        boolean up = false;
+                        for (int i = 0; i < 30 && !up; i++) {
+                            synchronized (PROCESS_LOCK) {
+                                if (!connecting) throw new InterruptedException("connect cancelled");
+                            }
+                            up = isSocksProxyUp("127.0.0.1", VPS_SOCKS_PORT, VPS_HTTP_PORT)
+                                    && isTunnelAlive("127.0.0.1", VPS_SOCKS_PORT);
+                            if (!up) Thread.sleep(500);
+                        }
+                        if (!up) {
+                            throw new RuntimeException("Túnel SSH a " + warpRemote() + " caído o proxy del VPS no responde");
+                        }
+                        sshPlaneUp = true;
+                    } catch (InterruptedException ie) {
+                        throw ie;
+                    } catch (Exception e) {
+                        // Plano VPS caído no tumba el plano WARP: aether
+                        // arranca igual y el estado informa el error.
+                        Log.e(TAG, "SSH plane failed (aether continues): " + e.getMessage());
+                        lastError = "VPS: " + e.getMessage();
+                        sshMode = false;
+                        try { stopSshTunnel(generation); } catch (Exception ignored) {}
                     }
                 }
                 // Cadena siempre de doble salto Cloudflare→Cloudflare:
@@ -597,8 +615,21 @@ public class CloudProxyPlugin extends Plugin {
                 }
                 // Memoria del edge interior que funcionó (salida pegajosa).
                 if (started && "gool".equals(preferredProtocol)) learnInnerPeer();
-                if (!started) throw lastErr != null ? lastErr
-                        : new RuntimeException("no aether protocol worked");
+                if (!started) {
+                    // Plano WARP caído con VPS vivo: sesión degradada —
+                    // connected por el plano SSH, error visible, el proxy
+                    // del sistema queda apuntando al puerto muerto
+                    // (fail-closed: las peticiones fallan, nunca salen
+                    // en claro por la IP física).
+                    if (sshPlaneUp) {
+                        Log.e(TAG, "Aether plane failed (SSH continues): "
+                                + (lastErr != null ? lastErr.getMessage() : "?"));
+                        lastError = "WARP: " + (lastErr != null ? lastErr.getMessage() : "no aether protocol worked");
+                    } else {
+                        throw lastErr != null ? lastErr
+                                : new RuntimeException("no aether protocol worked");
+                    }
+                }
                 Process startedProcess = aetherProcess;
                 boolean cancelled;
                 synchronized (PROCESS_LOCK) {
