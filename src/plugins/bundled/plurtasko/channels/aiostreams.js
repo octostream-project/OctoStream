@@ -326,6 +326,22 @@ function langFromFlags(text) {
   return langs.length > 1 ? 'Dual' : (langs[0] || '')
 }
 
+// Bandera visible por idioma — la etiqueta (Esp/Lat/Eng) ya viajaba en el
+// nombre pero era difícil de distinguir en la lista; el emoji se lee de un
+// vistazo. Se antepone al nombre del release en TODAS las entradas
+// AIOStreams (listas para reproducir y "descargando").
+export const LANG_FLAG = {
+  Esp: '🇪🇸', Lat: '🌎', VOSE: '🇬🇧+💬', Eng: '🇬🇧', Dual: '🌐',
+  Fra: '🇫🇷', Ale: '🇩🇪', Ita: '🇮🇹', Por: '🇵🇹', Jap: '🇯🇵', Cor: '🇰🇷',
+  Cat: '🇪🇸', Chi: '🇨🇳', Rus: '🇷🇺', Hin: '🇮🇳', Tur: '🇹🇷', Pol: '🇵🇱',
+  Hol: '🇳🇱', Sue: '🇸🇪', Heb: '🇮🇱', Gre: '🇬🇷', Che: '🇨🇿', Hun: '🇭🇺',
+  Rum: '🇷🇴', Ucr: '🇺🇦', Tai: '🇹🇭', Vie: '🇻🇳', Ind: '🇮🇩', Dan: '🇩🇰',
+  Nor: '🇳🇴', Fin: '🇫🇮',
+}
+const flagOf = (lang) => LANG_FLAG[lang] || (lang ? '🏳️' : '')
+const aioName = (release, serverLabel, lang, quality) =>
+  `${flagOf(lang) ? flagOf(lang) + ' ' : ''}${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
+
 // Idioma del archivo real: primero el filename de behaviorHints (lleva los
 // códigos del release, "…ESP.LATINO…"), luego el bingeGroup (nombres en
 // inglés: "Spanish", "English"…) y por último la descripción.
@@ -417,7 +433,7 @@ function stremioToStream(s) {
   if (meta.cached === false) {
     return {
       processing: true,
-      name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
+      name: aioName(release, serverLabel, lang, quality),
       server: serverLabel,
       lang,
       quality,
@@ -437,7 +453,7 @@ function stremioToStream(s) {
   if (hash) {
     if (!validHash) return null
     const stream = makeTorrentStream(serverLabel, withDefaultTrackers(magnet), quality, release)
-    stream.name = `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`
+    stream.name = aioName(release, serverLabel, lang, quality)
     stream.lang = lang
     stream.title = release
     stream.releaseTitle = release || undefined
@@ -462,7 +478,7 @@ function stremioToStream(s) {
   // instancia confirma listas (cached === true) o que AllDebrid confirme
   // por /magnet/instant en applyDebridAvailability.
   const stream = {
-    name: `${release || serverLabel}${lang ? ` (${lang})` : ''} ${quality}`,
+    name: aioName(release, serverLabel, lang, quality),
     url: okUrl,
     streamType: inferStreamType(okUrl, 'mp4'),
     quality,

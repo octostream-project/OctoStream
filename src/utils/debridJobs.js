@@ -49,6 +49,24 @@ export function trackMagnet(id, infoHash, name) {
   return job
 }
 
+// Hashes ya solicitados (trigger enviado a la instancia AIOStreams o
+// magnet subido). La instancia tarda unos segundos en materializar el
+// magnet en la cola — sin esta marca un segundo toque en la ventana
+// subía el mismo torrent otra vez (descarga doble).
+const TRIGGER_TTL_MS = 10 * 60 * 1000
+const triggeredHashes = new Map() // infoHash → timestamp
+export function markDebridTriggered(infoHash) {
+  const h = String(infoHash || '').toLowerCase()
+  if (h) triggeredHashes.set(h, Date.now())
+}
+export function isDebridTriggered(infoHash) {
+  const h = String(infoHash || '').toLowerCase()
+  const ts = triggeredHashes.get(h)
+  if (ts == null) return false
+  if (Date.now() - ts > TRIGGER_TTL_MS) { triggeredHashes.delete(h); return false }
+  return true
+}
+
 // Empareja entradas "descargando" con los magnets ya presentes en la
 // cola de AllDebrid (subidos por la instancia AIOStreams, no por la app).
 let _adoptInflight = null

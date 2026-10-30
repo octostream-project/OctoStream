@@ -273,8 +273,24 @@ export async function instantAvailability(hashes) {
   }
 }
 
-// Upload a magnet link and return the magnet ID
+// Upload a magnet link and return the magnet ID.
+// Dedup por infoHash: si el magnet ya está en la cola de la cuenta (lo
+// subió la app antes, la instancia AIOStreams u otro dispositivo) se
+// reutiliza su magnetId en vez de crear una entrada duplicada — AllDebrid
+// no deduplica por sí mismo y cada copia gasta cuota de descarga.
 export async function uploadMagnet(magnetUrl) {
+  const hash = String(magnetUrl || '').match(/btih:([a-zA-Z0-9]{32,40})/i)?.[1]?.toLowerCase() || ''
+  if (hash && isAlldebridEnabled()) {
+    try {
+      const existing = (await listMagnets()).find(
+        x => String(x.hash || '').toLowerCase() === hash && !x.error
+      )
+      if (existing) {
+        console.log(`[AllDebrid] magnet ${hash.slice(0, 8)}… ya en cola (id ${existing.id}) — sin subir de nuevo`)
+        return existing.id
+      }
+    } catch { /* si listMagnets falla, se sube igual */ }
+  }
   try {
     const data = await apiFetch('/magnet/upload', { magnet: magnetUrl })
     if (!data || !data.magnets || !data.magnets.length) return null

@@ -71,6 +71,17 @@ export function qualityColorClass(q) {
   return 'bg-dark-600'
 }
 
+// Bandera emoji por código de idioma normalizado (parseStreamLang).
+// '' si no hay código conocido — el chip no se renderiza sin flag.
+const LANG_FLAGS = {
+  ESP: '🇪🇸', LAT: '🌎', SUB: '🇬🇧💬', VOSE: '🇬🇧💬', ENG: '🇬🇧', DUAL: '🌐',
+  JAP: '🇯🇵', CAT: '🇪🇸', FRA: '🇫🇷', ALE: '🇩🇪', GER: '🇩🇪', ITA: '🇮🇹',
+  POR: '🇵🇹', COR: '🇰🇷', CHI: '🇨🇳', RUS: '🇷🇺',
+}
+export function langFlag(lang) {
+  return LANG_FLAGS[String(lang || '').toUpperCase()] || ''
+}
+
 export function langColorClass(lang) {
   if (lang === 'ESP' || lang === 'CAST') return 'text-green-400'
   if (lang === 'LAT') return 'text-blue-400'

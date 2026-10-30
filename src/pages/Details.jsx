@@ -14,7 +14,7 @@ import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { isAlldebridEnabled, hasAnyDebrid, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
-import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob } from '../utils/debridJobs.js'
+import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob, markDebridTriggered, isDebridTriggered } from '../utils/debridJobs.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { httpGetText } from '../utils/httpClient.js'
@@ -625,17 +625,29 @@ export default function Details() {
   // instancia AIOStreams (pedirla es lo que dispara el procesamiento).
   const startDebridDownload = async (stream) => {
     try {
+      const hash = (btihOf(stream._magnet) || stream._infoHash || '').toLowerCase()
+      // Dedup local: ya trackeado en la cola o trigger enviado hace
+      // segundos — ni la subida ni el disparo a la instancia deben
+      // repetirse (descarga doble).
+      const existing = hash ? getDebridJob(hash) : null
+      if ((existing && existing.status !== 'failed' && existing.status !== 'error')
+          || (hash && isDebridTriggered(hash))) {
+        toast('Esta fuente ya está en cola del debrid — aparecerá al estar lista')
+        return
+      }
       if (stream._magnet && isAlldebridEnabled()) {
         toast('Enviando el magnet a AllDebrid…')
+        if (hash) markDebridTriggered(hash)
         const id = await adUploadMagnet(stream._magnet)
         if (id) {
-          trackMagnet(id, btihOf(stream._magnet) || stream._infoHash, stream.releaseTitle || stream.name)
+          trackMagnet(id, hash || stream._infoHash, stream.releaseTitle || stream.name)
           toast('Añadido a AllDebrid — verás el progreso aquí y aparecerá al estar listo')
         } else {
           toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
         }
       } else if (stream._triggerUrl) {
         toast('Solicitando la descarga a AIOStreams…')
+        if (hash) markDebridTriggered(hash)
         httpGetText(stream._triggerUrl).catch(() => {})
         toast('Descarga solicitada — la ficha se actualiza sola')
       } else {

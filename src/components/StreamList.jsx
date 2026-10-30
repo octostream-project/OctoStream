@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
-import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, isDownloadableDirect } from '../utils/streamMeta.js'
+import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
 import { isAlldebridEnabled, hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
 
@@ -57,6 +57,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
         <span className={`${st.ready ? 'text-emerald-400' : 'text-amber-400'} flex-shrink-0`}>
           {st.ready ? <Zap size={14} /> : <Hourglass size={14} />}
         </span>
+        {langFlag(parseStreamLang(s)) && (
+          <span className={`text-sm font-bold ${langColorClass(parseStreamLang(s))} flex-shrink-0`}>
+            {langFlag(parseStreamLang(s))} {parseStreamLang(s)}
+          </span>
+        )}
         {s.quality && (
           <span className={`text-xs ${qualityColorClass(s.quality)} text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0`}>{s.quality}</span>
         )}
@@ -102,7 +107,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             >
               <div className="flex items-center gap-2">
                 {lang && (
-                  <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{lang}</span>
+                  <span className={`text-sm font-bold ${langColorClass(lang)} flex-shrink-0`}>{langFlag(lang)} {lang}</span>
                 )}
                 {stream.cached === true && (
                   <span className="text-emerald-400 flex-shrink-0" title="Cacheado en debrid"><Zap size={14} /></span>
@@ -151,7 +156,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
             onKeyDown={e => keyHandler(e, stream)}
           >
             {lang && (
-              <span className={`text-sm font-bold ${langColorClass(lang)} w-12 text-center flex-shrink-0`}>{lang}</span>
+              <span className={`text-sm font-bold ${langColorClass(lang)} w-16 text-center flex-shrink-0`}>{langFlag(lang)} {lang}</span>
             )}
             {stream.pluginName === 'AIOStreams' && (
               <span className="text-xs bg-violet-600 text-white px-2 py-1 rounded font-bold flex-shrink-0">AIO</span>
