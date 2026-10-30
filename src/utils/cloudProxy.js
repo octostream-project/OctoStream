@@ -41,6 +41,14 @@ export const CloudProxy = {
     typeof api().setShareLan === 'function'
       ? api().setShareLan({ enabled })
       : Promise.resolve({ enabled: false }),
+  // Credenciales SSH del remoto: con user+pass el host remoto se alcanza
+  // por túnel SSH (port-forward al proxy loopback del VPS) — misma IP de
+  // salida para todos desde cualquier red, sin Tailscale ni apps extra.
+  // user '' = remoto plano LAN.
+  setRemoteSsh: (opts) =>
+    typeof api().setRemoteSsh === 'function'
+      ? api().setRemoteSsh(opts || {})
+      : Promise.resolve({ ssh: false }),
   // Fetch ligado à rede física (fora do túnel Riseup). Só existe no
   // Android; rejeita noutras plataformas — o chamador deve fazer fallback.
   directFetch: (opts) =>

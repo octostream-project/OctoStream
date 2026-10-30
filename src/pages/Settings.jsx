@@ -167,6 +167,12 @@ export default function Settings() {
   // (todos salen por la misma IP a la vez) y si ESTE dispositivo lo presta.
   const [warpRemote, setWarpRemote] = useState(localStorage.getItem('octostream_warp_remote') || '')
   const [warpShareLan, setWarpShareLan] = useState(localStorage.getItem('octostream_warp_sharelan') === 'true')
+  // SSH del remoto: con usuario+clave el host se alcanza por túnel SSH al
+  // VPS (port-forward al proxy loopback) — funciona fuera de casa, sin
+  // Tailscale ni apps extra. Vacío = remoto plano en la misma WiFi.
+  const [warpSshUser, setWarpSshUser] = useState(localStorage.getItem('octostream_warp_ssh_user') || '')
+  const [warpSshPass, setWarpSshPass] = useState(localStorage.getItem('octostream_warp_ssh_pass') || '')
+  const [warpSshPort, setWarpSshPort] = useState(localStorage.getItem('octostream_warp_ssh_port') || '22')
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
   const [leakBusy, setLeakBusy] = useState(false)
   const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
@@ -507,6 +513,24 @@ export default function Settings() {
       try { await CloudProxy.disconnect() } catch {}
       setVpnStatus('disconnected')
       setVpnError(h ? 'Reconecta para usar el WARP remoto' : 'Reconecta para usar el WARP local')
+    }
+  }
+
+  const applyWarpRemoteSsh = async (u, p, port) => {
+    const user = (u || '').trim()
+    const pass = p || ''
+    const prt = parseInt(port, 10) || 22
+    setWarpSshUser(user)
+    setWarpSshPass(pass)
+    setWarpSshPort(String(prt))
+    localStorage.setItem('octostream_warp_ssh_user', user)
+    localStorage.setItem('octostream_warp_ssh_pass', pass)
+    localStorage.setItem('octostream_warp_ssh_port', String(prt))
+    try { await CloudProxy.setRemoteSsh({ user, pass, port: prt }) } catch {}
+    if (vpnStatus === 'connected') {
+      try { await CloudProxy.disconnect() } catch {}
+      setVpnStatus('disconnected')
+      setVpnError('Reconecta para aplicar el modo remoto')
     }
   }
 
@@ -1781,7 +1805,7 @@ export default function Settings() {
               {vpnStatus !== 'disconnected' && warpDetails && (
                 <p className="text-dark-400 text-xs">
                   {warpDetails.protocol
-                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : warpDetails.protocol === 'remote' ? `WARP remoto (${warpDetails.remote})` : 'MASQUE (QUIC)'}`
+                    ? `Transporte: ${warpDetails.protocol === 'masque-h2' ? 'MASQUE/HTTP2 (TCP)' : warpDetails.protocol === 'wg' ? 'WireGuard' : warpDetails.protocol === 'gool' ? 'WARP·WARP (doble salto)' : warpDetails.protocol === 'mim' ? 'MASQUE·MASQUE (doble salto)' : warpDetails.protocol === 'remote' ? `WARP remoto (${warpDetails.remote})` : warpDetails.protocol === 'remote-ssh' ? `SSH remoto (${warpDetails.remote})` : 'MASQUE (QUIC)'}`
                     : 'Transporte: —'}
                   {warpDetails.exitCountry ? ` · salida ${warpDetails.exitCountry}${warpDetails.exitColo ? '/' + warpDetails.exitColo : ''}` : ''}
                   {warpDetails.guard ? ' · guardián activo' : ''}
@@ -1794,8 +1818,9 @@ export default function Settings() {
                 <p className="text-sm text-dark-300">
                   Ubicación de salida
                   <span className="block text-xs text-dark-500">
-                    "Otro país" o un país fijado enmascara la IP detrás de un segundo
-                    salto WARP — más privacidad a cambio de más latencia.
+                    WARP siempre enmascara la IP detrás de un segundo salto
+                    (Cloudflare→Cloudflare). Elige el país de salida o
+                    "Automático" para dejarlo al azar.
                   </span>
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -1841,7 +1866,8 @@ export default function Settings() {
                   <p className="text-sm text-dark-300">
                     Usar el WARP de otro OctoStream
                     <span className="block text-xs text-dark-500">
-                      IP local del dispositivo que comparte su túnel (vacío = WARP propio)
+                      IP del dispositivo que comparte su túnel — o IP pública
+                      del VPS si usas SSH (vacío = WARP propio)
                     </span>
                   </p>
                   <input
@@ -1850,10 +1876,49 @@ export default function Settings() {
                     onChange={e => setWarpRemote(e.target.value)}
                     onBlur={e => applyWarpRemote(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && applyWarpRemote(e.target.value)}
-                    placeholder="192.168.1.50"
+                    placeholder="192.168.1.50 o IP del VPS"
                     inputMode="decimal"
                     className="input w-full mt-1"
                   />
+                </div>
+                <div className="mt-3">
+                  <p className="text-sm text-dark-300">
+                    Túnel SSH al remoto (opcional)
+                    <span className="block text-xs text-dark-500">
+                      Con usuario y clave, la IP de arriba se alcanza por SSH —
+                      funciona desde cualquier red (VPS con setup-octo-node.sh).
+                      Vacío = remoto plano, solo misma WiFi
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 mt-1">
+                    <input
+                      type="text"
+                      value={warpSshUser}
+                      onChange={e => setWarpSshUser(e.target.value)}
+                      onBlur={e => applyWarpRemoteSsh(e.target.value, warpSshPass, warpSshPort)}
+                      placeholder="usuario (octo)"
+                      autoComplete="off"
+                      className="input w-full"
+                    />
+                    <input
+                      type="password"
+                      value={warpSshPass}
+                      onChange={e => setWarpSshPass(e.target.value)}
+                      onBlur={e => applyWarpRemoteSsh(warpSshUser, e.target.value, warpSshPort)}
+                      placeholder="contraseña"
+                      autoComplete="new-password"
+                      className="input w-full"
+                    />
+                    <input
+                      type="text"
+                      value={warpSshPort}
+                      onChange={e => setWarpSshPort(e.target.value)}
+                      onBlur={e => applyWarpRemoteSsh(warpSshUser, warpSshPass, e.target.value)}
+                      placeholder="22"
+                      inputMode="numeric"
+                      className="input w-full"
+                    />
+                  </div>
                 </div>
               </div>
               <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-dark-700/50">

@@ -50,4 +50,7 @@ dependencies {
     implementation "com.google.code.findbugs:jsr305:3.0.2"
     implementation "androidx.webkit:webkit:1.10.0"
     implementation "androidx.activity:activity:1.9.3"
+    // SSH client puro-Java para el modo remoto-via-túnel: port-forward
+    // local 1819/1820 al proxy del VPS (sin Tailscale ni binarios nativos).
+    implementation "com.github.mwiede:jsch:0.2.26"
 }

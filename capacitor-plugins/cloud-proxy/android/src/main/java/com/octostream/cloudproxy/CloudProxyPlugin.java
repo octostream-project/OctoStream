@@ -10,6 +10,8 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.Session;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -84,15 +86,27 @@ public class CloudProxyPlugin extends Plugin {
                     .putString("exit_loc", exitLoc).apply();
         } catch (Throwable ignored) {}
     }
-    // "auto"/"random" → cadena WARP normal / doble salto sin país fijado;
-    // "XX" → AETHER_EXIT_LOC=XX (allowlist de aether).
-    private boolean exitMode() { return !"auto".equals(warpExitLoc()); }
+    // Siempre doble salto (gool → mim = Cloudflare→Cloudflare): la IP sale
+    // enmascarada detrás de un segundo hop WARP en todo arranque de aether,
+    // no solo cuando el usuario fija ubicación. warpExitLoc sigue decidiendo
+    // el spec de país (AETHER_EXIT_LOC) cuando hay uno fijado.
+    private boolean exitMode() { return true; }
     private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
 
     // WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
     // dispositivos salen por la misma IP a la vez (cuentas que bloquean
     // multi-IP como AllDebrid). "" = modo local (aether propio).
     private static volatile String remoteIp = null;
+    // Remoto-via-SSH: si hay usuario SSH configurado, el host remoto se
+    // alcanza por un túnel SSH (JSch) que hace port-forward de
+    // 127.0.0.1:1819/1820 al proxy loopback del VPS — sin Tailscale ni
+    // apps extra. El host remoto es entonces la IP PÚBLICA del VPS.
+    private static volatile String remoteSshUser = null;
+    private static volatile String remoteSshPass = null;
+    private static volatile Integer remoteSshPort = null;
+    private static volatile Session sshSession = null;
+    // true mientras el modo remoto activo es SSH (proxyHost→127.0.0.1).
+    private static volatile boolean sshMode = false;
     // Compartir el túnel local en la LAN: aether escucha 0.0.0.0 en vez de
     // 127.0.0.1 para que otros OctoStream lo usen como proxy.
     private static volatile Boolean shareLan = null;
@@ -109,6 +123,60 @@ public class CloudProxyPlugin extends Plugin {
         try {
             getContext().getSharedPreferences(PREFS_WARP, 0).edit()
                     .putString("remote", remoteIp).apply();
+        } catch (Throwable ignored) {}
+    }
+    private String sshUser() {
+        if (remoteSshUser != null) return remoteSshUser;
+        try {
+            remoteSshUser = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("remote_ssh_user", "");
+        } catch (Throwable t) { remoteSshUser = ""; }
+        return remoteSshUser;
+    }
+    private String sshPass() {
+        if (remoteSshPass != null) return remoteSshPass;
+        try {
+            remoteSshPass = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("remote_ssh_pass", "");
+        } catch (Throwable t) { remoteSshPass = ""; }
+        return remoteSshPass;
+    }
+    private int sshPort() {
+        if (remoteSshPort != null) return remoteSshPort;
+        try {
+            remoteSshPort = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getInt("remote_ssh_port", 22);
+        } catch (Throwable t) { remoteSshPort = 22; }
+        return remoteSshPort;
+    }
+    private void setSshCreds(String user, String pass, int port) {
+        remoteSshUser = user == null ? "" : user.trim();
+        remoteSshPass = pass == null ? "" : pass;
+        remoteSshPort = port > 0 && port < 65536 ? port : 22;
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("remote_ssh_user", remoteSshUser)
+                    .putString("remote_ssh_pass", remoteSshPass)
+                    .putInt("remote_ssh_port", remoteSshPort)
+                    .apply();
+        } catch (Throwable ignored) {}
+    }
+    // El remoto es SSH si hay host + usuario configurados.
+    private boolean sshRemote() {
+        return !warpRemote().isEmpty() && !sshUser().isEmpty();
+    }
+    // Host key SSH del VPS (TOFU: la primera vista se acepta y se guarda;
+    // si luego cambia la conexión se rechaza — MITM visible).
+    private String storedHostKey(String host) {
+        try {
+            return getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("remote_ssh_hostkey_" + host, "");
+        } catch (Throwable t) { return ""; }
+    }
+    private void saveHostKey(String host, String b64) {
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("remote_ssh_hostkey_" + host, b64).apply();
         } catch (Throwable ignored) {}
     }
     private boolean shareLan() {
@@ -129,6 +197,8 @@ public class CloudProxyPlugin extends Plugin {
     // Host del proxy efectivo: el remoto si hay uno configurado, localhost
     // en modo local. Los puertos son fijos (1819 SOCKS / 1820 HTTP).
     private static String proxyHost() {
+        // Modo SSH: los forwards viven en loopback local.
+        if (sshMode) return "127.0.0.1";
         String r = remoteIp;
         return (r == null || r.isEmpty()) ? "127.0.0.1" : r;
     }
@@ -580,8 +650,17 @@ public class CloudProxyPlugin extends Plugin {
                 // MODO REMOTO: usar el túnel WARP de otro OctoStream en la
                 // LAN — sin aether local; todos los dispositivos salen por
                 // la MISMA IP a la vez (AllDebrid castiga multi-IP).
+                // Si hay credenciales SSH, el remoto es un VPS alcanzado por
+                // túnel SSH (port-forward loopback) — mismo efecto desde
+                // cualquier red, sin apps ni cuentas extra.
                 if (!warpRemote().isEmpty()) {
-                    currentProtocol = "remote";
+                    if (sshRemote()) {
+                        sshMode = true;
+                        startSshTunnel();
+                        currentProtocol = "remote-ssh";
+                    } else {
+                        currentProtocol = "remote";
+                    }
                     boolean up = false;
                     for (int i = 0; i < 30 && !up; i++) {
                         synchronized (PROCESS_LOCK) {
@@ -590,8 +669,12 @@ public class CloudProxyPlugin extends Plugin {
                         up = isSocksProxyUp() && isTunnelAlive();
                         if (!up) Thread.sleep(500);
                     }
-                    if (!up) throw new RuntimeException(
-                            "WARP remoto " + warpRemote() + " no responde — ¿túnel activo y 'Compartir en la red local' encendido en el otro OctoStream?");
+                    if (!up) {
+                        stopSshTunnel();
+                        throw new RuntimeException(sshRemote()
+                            ? "Túnel SSH a " + warpRemote() + " caído o proxy del VPS no responde"
+                            : "WARP remoto " + warpRemote() + " no responde — ¿túnel activo y 'Compartir en la red local' encendido en el otro OctoStream?");
+                    }
                     setAppProxy(() -> {
                         synchronized (PROCESS_LOCK) {
                             if (generation != connectionGeneration) {
@@ -720,6 +803,7 @@ public class CloudProxyPlugin extends Plugin {
                 // retener PROCESS_LOCK segundos congela el fast-path de
                 // connect() y las sondas de ExoPlayer.
                 if (own) {
+                    stopSshTunnel();
                     stopAether();
                     // Con kill-switch estricto el proxy muerto se conserva
                     // (fail-closed) — sin él se abre la red para no dejar
@@ -797,6 +881,7 @@ public class CloudProxyPlugin extends Plugin {
             connectionGeneration++;
             connecting = false;
         }
+        stopSshTunnel();
         stopAether();
         stopAetherGuard();
         connected = false;
@@ -906,6 +991,7 @@ public class CloudProxyPlugin extends Plugin {
         // Modo remoto (túnel prestado de otro OctoStream en la LAN) y si
         // este dispositivo comparte su túnel a otros.
         result.put("remote", warpRemote());
+        result.put("ssh", sshRemote());
         result.put("shareLan", shareLan());
         call.resolve(result);
     }
@@ -1031,6 +1117,31 @@ public class CloudProxyPlugin extends Plugin {
         setWarpRemote(host);
         Log.i(TAG, "remote WARP host: " + (host.isEmpty() ? "(local)" : host));
         call.resolve(new JSObject().put("remote", warpRemote()));
+    }
+
+    /**
+     * Credenciales SSH del remoto: con usuario+clave el modo remoto abre un
+     * túnel SSH al VPS (port-forward loopback al proxy) en vez de esperar
+     * un proxy plano en la LAN. user "" = remoto plano (LAN).
+     * La clave NO se loguea.
+     */
+    @PluginMethod
+    public void setRemoteSsh(PluginCall call) {
+        String user = call.getString("user", "");
+        user = user == null ? "" : user.trim();
+        String pass = call.getString("pass", "");
+        int port = call.getInt("port", 22);
+        if (!user.isEmpty() && !user.matches("[0-9a-zA-Z._\\-]{1,32}")) {
+            call.reject("usuario inválido");
+            return;
+        }
+        if (port <= 0 || port > 65535) port = 22;
+        setSshCreds(user, pass == null ? "" : pass, port);
+        // Cambio de host/usuario → olvidar la host key vieja es peligroso
+        // (la invalidaría un MITM); se conserva hasta que el usuario la
+        // resetee cambiando el host.
+        Log.i(TAG, "remote SSH: " + (user.isEmpty() ? "(desactivado)" : user + "@:" + port));
+        call.resolve(new JSObject().put("ssh", !user.isEmpty()));
     }
 
     /**
@@ -1511,6 +1622,96 @@ public class CloudProxyPlugin extends Plugin {
     /**
      * Stops the Aether binary.
      */
+    /**
+     * Túnel SSH al VPS remoto (modo remoto-via-SSH): sesión JSch con
+     * port-forward local 127.0.0.1:1819/1820 → 127.0.0.1 del VPS, donde
+     * vive el proxy compartido. Auth por contraseña + host key TOFU
+     * guardada en prefs (si la clave del servidor cambia se rechaza).
+     */
+    private void startSshTunnel() throws Exception {
+        String host = warpRemote();
+        String user = sshUser();
+        Log.i(TAG, "SSH tunnel: " + user + "@" + host + ":" + sshPort());
+        JSch jsch = new JSch();
+        jsch.setHostKeyRepository(new TofuHostKeys(host));
+        final Session s = jsch.getSession(user, host, sshPort());
+        s.setPassword(sshPass());
+        // promptYesNo=false → ningún prompt interactivo se auto-acepta: un
+        // host key distinto rechaza la conexión en vez de pasar un MITM.
+        s.setUserInfo(new com.jcraft.jsch.UserInfo() {
+            public String getPassphrase() { return null; }
+            public String getPassword() { return sshPass(); }
+            public boolean promptPassword(String m) { return true; }
+            public boolean promptPassphrase(String m) { return false; }
+            public boolean promptYesNo(String m) { return false; }
+            public void showMessage(String m) {}
+        });
+        s.setServerAliveInterval(15000);
+        s.setServerAliveCountMax(4);
+        s.setDaemonThread(true);
+        s.connect(12000);
+        s.setPortForwardingL("127.0.0.1", SOCKS_PORT, "127.0.0.1", SOCKS_PORT);
+        s.setPortForwardingL("127.0.0.1", HTTP_PROXY_PORT, "127.0.0.1", HTTP_PROXY_PORT);
+        synchronized (PROCESS_LOCK) {
+            if (!connecting) {
+                s.disconnect();
+                throw new InterruptedException("connect cancelled");
+            }
+            sshSession = s;
+        }
+        // Sesión SSH muerta → misma ruta que aether muerto: marca la sesión
+        // caída y el guardián reconecta (fail-closed si strictKill).
+        new Thread(() -> {
+            while (sshSession == s && s.isConnected()) {
+                try { Thread.sleep(2000); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            if (sshSession == s && connected) {
+                Log.w(TAG, "SSH session dropped");
+                markDisconnected();
+            }
+        }, "ssh-watch").start();
+    }
+
+    private void stopSshTunnel() {
+        sshMode = false;
+        Session s = sshSession;
+        sshSession = null;
+        if (s != null) {
+            try { s.delPortForwardingL("127.0.0.1", SOCKS_PORT); } catch (Throwable ignored) {}
+            try { s.delPortForwardingL("127.0.0.1", HTTP_PROXY_PORT); } catch (Throwable ignored) {}
+            try { s.disconnect(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /** Host-key store TOFU en SharedPreferences (sin prompts). */
+    private class TofuHostKeys implements com.jcraft.jsch.HostKeyRepository {
+        private final String host;
+        TofuHostKeys(String host) { this.host = host; }
+        public int check(String h, byte[] key) {
+            String b64 = android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP);
+            String stored = storedHostKey(host);
+            if (stored.isEmpty()) {
+                saveHostKey(host, b64);
+                Log.i(TAG, "SSH host key pinned (TOFU) for " + host);
+                return OK;
+            }
+            if (stored.equals(b64)) return OK;
+            Log.e(TAG, "SSH host key CHANGED for " + host + " — possible MITM, rejecting");
+            return CHANGED;
+        }
+        public void add(com.jcraft.jsch.HostKey hk, com.jcraft.jsch.UserInfo ui) {}
+        public void remove(String h, String type) {}
+        public void remove(String h, String type, byte[] key) {}
+        public String getKnownHostsRepositoryID() { return "octo-tofu"; }
+        public com.jcraft.jsch.HostKey[] getHostKey() { return new com.jcraft.jsch.HostKey[0]; }
+        public com.jcraft.jsch.HostKey[] getHostKey(String h, String type) {
+            return new com.jcraft.jsch.HostKey[0];
+        }
+    }
+
     private void stopAether() {
         Process process;
         synchronized (PROCESS_LOCK) {

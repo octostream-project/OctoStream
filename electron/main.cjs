@@ -111,7 +111,10 @@ function learnInnerPeer() {
     }
   } catch {}
 }
-const warpExitMode = () => warpExitLoc() !== 'auto'
+// Siempre doble salto (gool → mim = Cloudflare→Cloudflare) en todo arranque
+// de aether — la IP sale enmascarada detrás de un segundo hop WARP también
+// en modo "auto". exitLoc solo decide el spec de país cuando hay uno fijado.
+const warpExitMode = () => true
 const warpExitSpec = () => warpExitLoc() === 'random' ? '' : warpExitLoc()
 
 // WARP remoto: usar el túnel de OTRO OctoStream en la LAN — todos los
