@@ -25,12 +25,28 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-echo "==> [1/5] Paquetes base"
+echo "==> [0/6] Limpiando restos de Tailscale / versiones anteriores"
+# Desinstala TODO lo que montó la versión antigua del script: Tailscale
+# (servicio, paquete, estado, config), forwarding, el proxy viejo en la IP
+# del tailnet y overrides de danted/tinyproxy si quedaron.
+tailscale logout 2>/dev/null || true   # desregistra el nodo del tailnet
+systemctl stop tailscaled octo-proxy danted tinyproxy 2>/dev/null || true
+systemctl disable tailscaled danted tinyproxy 2>/dev/null || true
+apt-get purge -y -qq tailscale 2>/dev/null || true
+apt-get autoremove -y -qq 2>/dev/null || true
+rm -rf /var/lib/tailscale /run/tailscale /etc/default/tailscaled \
+       /etc/3proxy-octo.cfg /etc/sysctl.d/99-octo-forward.conf \
+       /etc/systemd/system/danted.service.d /etc/systemd/system/tinyproxy.service.d
+systemctl daemon-reload
+sysctl --system >/dev/null 2>&1 || true
+echo "    Tailscale eliminado (el túnel ahora es SSH puro)"
+
+echo "==> [1/6] Paquetes base"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates python3 ufw
 
-echo "==> [2/5] Usuario dedicado 'octo' (solo para el tunel)"
+echo "==> [2/6] Usuario dedicado 'octo' (solo para el tunel)"
 if ! id octo >/dev/null 2>&1; then
   useradd -m -s /bin/bash octo
 fi
@@ -44,7 +60,7 @@ PasswordAuthentication yes
 EOF
 systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 
-echo "==> [3/5] Proxy SOCKS5 :1819 + HTTP :1820 (solo localhost)"
+echo "==> [3/6] Proxy SOCKS5 :1819 + HTTP :1820 (solo localhost)"
 mkdir -p /opt/octo-proxy
 
 cat >/opt/octo-proxy/octo_proxy.py <<'PYEOF'
@@ -222,14 +238,14 @@ EOF
 systemctl daemon-reload
 systemctl enable --now octo-proxy
 
-echo "==> [4/5] Firewall (solo SSH abierto)"
+echo "==> [4/6] Firewall (solo SSH abierto)"
 ufw allow OpenSSH >/dev/null
 ufw --force enable >/dev/null
 ufw reload >/dev/null
 
 PUB_IP="$(curl -s https://api.ipify.org || echo '<IP-DEL-VPS>')"
 
-echo "==> [5/5] Verificacion del proxy"
+echo "==> [5/6] Verificacion del proxy"
 sleep 1
 curl -s --socks5 127.0.0.1:1819 --max-time 8 https://api.ipify.org >/dev/null \
   && echo "    SOCKS5 OK (sale por la IP del VPS)" \
