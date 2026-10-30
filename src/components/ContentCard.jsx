@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Star, Play, Tv } from 'lucide-react'
+import { useStore } from '../store/useStore.js'
+import { isAllowedInProfile } from '../utils/profiles.js'
 
 // Cache de blobs para pósters de AniList (evitan re-fetch con hotlink-block).
 // LRU acotado: sin límite ni revokeObjectURL las URLs blob se acumulaban
@@ -72,6 +74,7 @@ function Poster({ item }) {
 
 function ContentCard({ item }) {
   const navigate = useNavigate()
+  const profile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
 
   const handleClick = useCallback(() => {
     // YouTube channels are favorited with type 'youtube_channel' and id 'ytchannel:<url>'
@@ -88,9 +91,11 @@ function ContentCard({ item }) {
     navigate(`/details/${item.type}/${item.id}`)
   }, [navigate, item])
 
+  if (!isAllowedInProfile(item, profile)) return null
+
   return (
     <div
-      className="card group"
+      className="card group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 focus-visible:ring-offset-dark-900"
       data-tv-card
       tabIndex={0}
       role="button"
@@ -114,9 +119,9 @@ function ContentCard({ item }) {
             )}
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent opacity-75 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-300" />
         <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-300">
-          <div className="flex items-center justify-center bg-primary-600 rounded-lg py-2 text-sm font-medium">
+          <div className="flex items-center justify-center bg-primary-600 rounded-lg py-2 text-sm font-semibold shadow-lg">
             <Play size={16} className="mr-1" /> Ver ahora
           </div>
         </div>
@@ -127,8 +132,8 @@ function ContentCard({ item }) {
           </div>
         )}
       </div>
-      <div className="p-2">
-        <h3 className="text-xs font-medium text-white truncate">{item.name}</h3>
+      <div className="p-2.5">
+        <h3 className="text-sm font-semibold text-white truncate" title={item.name}>{item.name}</h3>
         {item.nowPlaying ? (
           <p className="text-xs text-primary-400 truncate mt-0.5 flex items-center gap-1" title={item.nowPlaying}>
             <Play size={10} className="flex-shrink-0 fill-primary-400" /> {item.nowPlaying}

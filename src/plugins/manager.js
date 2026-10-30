@@ -29,6 +29,17 @@ function is4kStream(s) {
 const EPG_TIMEOUT_MS = 12000
 const EXTERNAL_PLUGINS_KEY = 'octostream_external_plugins'
 const INSTALLED_PLUGINS_KEY = 'octostream_installed_plugins'
+const PLUGIN_PERF_KEY = 'octostream_plugin_perf_metrics'
+function recordPluginPerf(operation, pluginId, durationMs, count = 0, error = '') {
+  const metric = { operation, pluginId, durationMs, count, error, ts: Date.now() }
+  try {
+    const recent = getJsonSync(PLUGIN_PERF_KEY, [])
+    setJsonSync(PLUGIN_PERF_KEY, [metric, ...(Array.isArray(recent) ? recent : [])].slice(0, 40))
+  } catch { /* métricas opcionales */ }
+  try {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('octostream:plugin-perf', { detail: metric }))
+  } catch { /* sin eventos en runtimes headless */ }
+}
 const DEFAULT_INSTALLED = ['tmdb', 'embed-stream', 'tdtspain', 'plurtasko', 'anilist', 'fctv', 'opensubtitles', 'screensaver']
 
 // Solo se conservan plugins incluidos en la aplicación. Los manifiestos
@@ -445,14 +456,18 @@ export class PluginManager {
         const streams = await withCancelTimeout(
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
-        console.log(`[PM perf] getStreams ${plugin.id}: ${Date.now() - t0}ms (${streams?.length || 0})`)
+        const duration = Date.now() - t0
+        recordPluginPerf('getStreams', plugin.id, duration, streams?.length || 0)
+        console.log(`[PM perf] getStreams ${plugin.id}: ${duration}ms (${streams?.length || 0})`)
         if (streams && streams.length > 0) {
           return streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' }))
         }
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
-        console.warn(`[PM perf] getStreams ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
+        const duration = Date.now() - t0
+        recordPluginPerf('getStreams', plugin.id, duration, 0, e?.message || String(e))
+        console.warn(`[PM perf] getStreams ${plugin.id}: falló tras ${duration}ms - ${e?.message || e}`)
         logError(`getStreams failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }
@@ -526,7 +541,9 @@ export class PluginManager {
         const streams = await withCancelTimeout(
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch: pluginOnBatch }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
-        console.log(`[PM perf] getStreams* ${plugin.id}: ${Date.now() - t0}ms (${streams?.length || 0})`)
+        const duration = Date.now() - t0
+        recordPluginPerf('getStreams*', plugin.id, duration, streams?.length || 0)
+        console.log(`[PM perf] getStreams* ${plugin.id}: ${duration}ms (${streams?.length || 0})`)
         if (streams && streams.length > 0) {
           const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' })).filter(keep)
           allStreams = allStreams.filter(s => s.pluginId !== plugin.id)
@@ -537,7 +554,9 @@ export class PluginManager {
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
-        console.warn(`[PM perf] getStreams* ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
+        const duration = Date.now() - t0
+        recordPluginPerf('getStreams*', plugin.id, duration, 0, e?.message || String(e))
+        console.warn(`[PM perf] getStreams* ${plugin.id}: falló tras ${duration}ms - ${e?.message || e}`)
         logError(`getStreams failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }
@@ -586,7 +605,9 @@ export class PluginManager {
           `search timeout in ${plugin.id}`
         )
         anyPluginOk = true
-        console.log(`[PM perf] search ${plugin.id}: ${Date.now() - t0}ms (${items?.length || 0})`)
+        const duration = Date.now() - t0
+        recordPluginPerf('search', plugin.id, duration, items?.length || 0)
+        console.log(`[PM perf] search ${plugin.id}: ${duration}ms (${items?.length || 0})`)
         if (items && items.length > 0) {
           const tagged = items.map(item => ({ ...item, pluginId: plugin.id, pluginName: plugin.name }))
           results.push(...tagged)
@@ -596,7 +617,9 @@ export class PluginManager {
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
-        console.warn(`[PM perf] search ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
+        const duration = Date.now() - t0
+        recordPluginPerf('search', plugin.id, duration, 0, e?.message || String(e))
+        console.warn(`[PM perf] search ${plugin.id}: falló tras ${duration}ms - ${e?.message || e}`)
         logError(`search failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }

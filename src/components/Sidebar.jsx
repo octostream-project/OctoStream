@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
-import { Home, Search, Heart, Radio, Film, Tv, Clock, Link2, Settings as SettingsIcon, Antenna, Calendar as CalendarIcon, Trophy } from 'lucide-react'
+import { Home, Search, Heart, Radio, Film, Tv, Clock, Link2, Settings as SettingsIcon, Antenna, Calendar as CalendarIcon, Trophy, Users } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { pluginManager } from '../plugins/manager.js'
 
 export default function Sidebar({ open, onClose }) {
   const favorites = useStore(s => s.favorites)
   const watchHistory = useStore(s => s.watchHistory)
+  const activeProfile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   // Los plugins se cargan lazy: recomputar catálogos cuando la lista cambia
   const installedPlugins = useStore(s => s.installedPlugins)
   // Los catálogos de deportes (FCTV, DLive) tienen su propia sección: no
@@ -128,8 +129,20 @@ export default function Sidebar({ open, onClose }) {
           </div>
         </nav>
 
-        <div className="p-3 border-t border-dark-800 text-xs text-dark-500 text-center">
-          v1.0.0 · Multiplataforma
+        <div className="border-t border-dark-800 p-3">
+          <NavLink
+            to="/settings"
+            state={{ settingsTab: 'profiles' }}
+            onClick={onClose}
+            className="flex items-center gap-2 rounded-xl bg-dark-800/80 px-3 py-2 text-left hover:bg-dark-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+          >
+            <Users size={16} className="text-primary-300" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[10px] uppercase tracking-wider text-dark-500">Perfil activo</span>
+              <span className="block truncate text-xs font-medium text-white">{activeProfile?.name || 'Principal'} · Gestionar</span>
+            </span>
+          </NavLink>
+          <p className="mt-2 text-center text-[10px] text-dark-600">Multiplataforma</p>
         </div>
       </aside>
     </>

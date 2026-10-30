@@ -5,12 +5,14 @@ import { Play, Clock, CheckCircle2 } from 'lucide-react'
 import { useTranslation } from '../i18n/index.js'
 import { formatDuration } from '../utils/format.js'
 import { prefetchYouTubeStream } from '../utils/youtube.js'
+import { isAllowedInProfile } from '../utils/profiles.js'
 
 export default function ContinueWatching() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const watchHistory = useStore(s => s.watchHistory)
   const watchedEpisodes = useStore(s => s.watchedEpisodes)
+  const profile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   // Prefetch YouTube con debounce: moverse rápido por la fila no debe lanzar
   // un resolve de NewPipe por cada tarjeta tocada.
   const prefetchTimer = useRef(null)
@@ -35,7 +37,7 @@ export default function ContinueWatching() {
   // newest on the left, oldest on the right.
   // Los directos de deportes (FCTV) no se muestran: no son reanudables.
   const recent = [...watchHistory]
-    .filter(item => item.server !== 'FCTV')
+    .filter(item => item.server !== 'FCTV' && isAllowedInProfile(item, profile))
     .sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0))
     .slice(0, 12)
 
@@ -69,7 +71,7 @@ export default function ContinueWatching() {
                   navigate(`/details/${item.type}/${item.id}`, { state: { autoplay: true } })
                 }
               }}
-              className="card group cursor-pointer flex-shrink-0 w-28 sm:w-32"
+              className="card group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 focus-visible:ring-offset-dark-900 cursor-pointer flex-shrink-0 w-28 sm:w-32"
               tabIndex={0}
               data-tv-card
               role="button"
@@ -124,6 +126,11 @@ export default function ContinueWatching() {
                 <h3 className="text-xs font-semibold text-white truncate">{item.name}</h3>
                 {hasProgress ? (
                   <div className="mt-1">
+                    {isSeries && (item.season || item.episode) && (
+                      <p className="mb-1 truncate text-[11px] font-medium text-primary-300" title={item.episodeName || ''}>
+                        T{item.season || 1} · E{item.episode || 1}{item.episodeName ? ` — ${item.episodeName}` : ''}
+                      </p>
+                    )}
                     <div className="h-1 bg-dark-700 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full ${isDone ? 'bg-green-500' : 'bg-primary-500'}`}

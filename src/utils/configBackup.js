@@ -90,6 +90,7 @@ export function collectSettings(categories, excludedKeys = null) {
   const settings = {}
   for (const k of storageKeys()) {
     if (!k?.startsWith(PREFIX) || excludedKeys?.has(k)) continue
+    if (k === 'octostream_profiles' || k === 'octostream_active_profile' || k.startsWith('octostream_profile_')) continue
     if (wanted && !wanted.has(categoryOf(k))) continue
     settings[k] = localStorage.getItem(k)
   }

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp, Users } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -17,6 +17,7 @@ import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/conf
 import { setItemSync, removeItemSync } from '../utils/storage.js'
 import { invalidateLangPriority } from '../utils/streamMeta.js'
 import { getSubStyle, saveSubStyle } from '../utils/subStyle.js'
+import ProfileSettings from '../components/ProfileSettings.jsx'
 
 const LANG_LABELS = {
   ESP: 'Castellano',
@@ -69,12 +70,14 @@ const TABS = [
   { id: 'debrid', name: 'Debrid', icon: Download },
   { id: 'red', name: 'Red', icon: Globe },
   { id: 'sync', name: 'Sincronizar', icon: RefreshCw },
+  { id: 'profiles', name: 'Perfiles', icon: Users },
   { id: 'misc', name: 'Miscelánea', icon: Monitor },
 ]
 
 export default function Settings() {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('autoplay')
+  const location = useLocation()
+  const [activeTab, setActiveTab] = useState(() => location.state?.settingsTab || 'autoplay')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
   const [backupMsg, setBackupMsg] = useState('')
@@ -2188,6 +2191,8 @@ export default function Settings() {
       )}
 
       {/* Tab: Miscelánea */}
+      {activeTab === 'profiles' && <ProfileSettings />}
+
       {activeTab === 'misc' && (
         <div className="space-y-6">
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">

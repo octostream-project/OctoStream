@@ -76,6 +76,7 @@ export default function Details() {
   // Selecting the isFavorite function does NOT re-render when favorites change
   // (the function reference is stable), so the heart color never updates.
   const favorites = useStore(s => s.favorites)
+  const activeProfile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   const watchlist = useStore(s => s.watchlist)
   const toggleFavorite = useStore(s => s.toggleFavorite)
   const toggleWatchlist = useStore(s => s.toggleWatchlist)
@@ -459,6 +460,14 @@ export default function Details() {
       }
 
       if (m) {
+        // El bloqueo infantil debe ocurrir antes de pedir streams/autoplay;
+        // ocultar solo la ficha visual permitiría que "Seguir viendo"
+        // iniciara una fuente marcada como adulta tras el retardo.
+        if (activeProfile?.kids && (m.adult === true || m.adult === 1 || m.adult === 'true' || m.isAdult === true)) {
+          setMeta(m)
+          setLoading(false)
+          return
+        }
         // For series with seasons, DON'T search for streams at the series
         // level — each episode has its own streams and they're only searched
         // when the user picks an episode (handlePlayEpisode). Searching at
@@ -1510,6 +1519,14 @@ export default function Details() {
     )
   }
 
+  if (activeProfile?.kids && (meta.adult === true || meta.adult === 1 || meta.adult === 'true' || meta.isAdult === true || meta.nsfw === true)) {
+    return (
+      <EmptyState minH="min-h-[60vh]" action="Volver" onAction={() => navigate(-1)}>
+        Este contenido está marcado como adulto y no se muestra en el perfil infantil.
+      </EmptyState>
+    )
+  }
+
   const fav = favorites.some(f => f.id === meta.id && f.type === meta.type)
   const listed = watchlist.some(w => w.id === meta.id && w.type === meta.type)
 
@@ -1890,7 +1907,7 @@ export default function Details() {
         <ArrowLeft size={24} />
       </button>
 
-      <div className="relative h-[40vh] sm:h-[50vh] overflow-hidden">
+      <div className="relative h-[38vh] min-h-64 sm:h-[52vh] overflow-hidden">
         {meta.backdrop || meta.poster ? (
           <img
             src={meta.backdrop || meta.poster}
@@ -1900,29 +1917,29 @@ export default function Details() {
         ) : (
           <div className="w-full h-full bg-dark-800" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/50 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-950 via-dark-950/35 to-dark-950/10" />
       </div>
 
-      <div className="px-4 lg:px-6 -mt-32 relative z-10">
+      <div className="px-4 lg:px-6 -mt-36 sm:-mt-40 relative z-10">
         {view === 'series' && (
         <div className="flex flex-col sm:flex-row gap-6">
-          <div className="flex-shrink-0 w-32 sm:w-48 mx-auto sm:mx-0">
+          <div className="flex-shrink-0 w-32 sm:w-48 mx-auto sm:mx-0 drop-shadow-2xl">
             {meta.poster && (
               <img
                 src={meta.poster}
                 alt={meta.name}
-                className="w-full rounded-xl shadow-2xl border border-dark-700"
+                className="w-full rounded-2xl shadow-2xl border border-white/10"
               />
             )}
           </div>
 
           <div className="flex-1 space-y-3">
-            <h1 className="text-2xl sm:text-3xl font-bold text-white">{meta.name}</h1>
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white drop-shadow-lg">{meta.name}</h1>
 
             <div className="flex flex-wrap items-center gap-3 text-sm">
-              {meta.year && <span className="text-dark-300">{meta.year}</span>}
+              {meta.year && <span className="rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-dark-100">{meta.year}</span>}
               {meta.rating && (
-                <span className="flex items-center gap-1 text-yellow-400">
+                <span className="flex items-center gap-1 rounded-full bg-yellow-500/10 px-2.5 py-1 text-yellow-300">
                   <Star size={14} className="fill-yellow-400" />
                   {meta.rating.toFixed(1)}
                 </span>
@@ -1991,7 +2008,7 @@ export default function Details() {
                     }
                   }}
                   disabled={resolvingStream}
-                  className="btn-primary px-6 py-3 flex items-center gap-2 font-medium"
+                  className="btn-primary px-6 py-3 flex items-center gap-2 font-semibold shadow-lg shadow-primary-950/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                 >
                   <Play size={22} className="fill-white" />
                   {savedProgress > 0.05 && savedProgress < 0.95 ? 'Continuar' : 'Reproducir'}
@@ -2001,14 +2018,16 @@ export default function Details() {
                 data-tv-card
                 onClick={() => toggleWatchlist(meta)}
                 title={listed ? 'Quitar de Pendientes' : 'Añadir a Pendientes'}
-                className={`btn-secondary p-3 ${listed ? 'text-primary-400' : ''}`}
+                aria-label={listed ? 'Quitar de Pendientes' : 'Añadir a Pendientes'}
+                className={`btn-secondary p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 ${listed ? 'text-primary-400' : ''}`}
               >
                 <Bookmark size={22} className={listed ? 'fill-primary-400' : ''} />
               </button>
               <button
                 data-tv-card
                 onClick={() => toggleFavorite(meta)}
-                className={`btn-secondary p-3 ${fav ? 'text-red-400' : ''}`}
+                aria-label={fav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                className={`btn-secondary p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 ${fav ? 'text-red-400' : ''}`}
               >
                 <Heart size={22} className={fav ? 'fill-red-400' : ''} />
               </button>

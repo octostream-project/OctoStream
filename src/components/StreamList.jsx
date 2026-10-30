@@ -35,6 +35,17 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   }
   const bySeeds = (a, b) => (b.seeds || 0) - (a.seeds || 0)
   const byLangSeeds = (a, b) => langRank(a) - langRank(b) || bySeeds(a, b)
+  const qualityRank = (s) => {
+    const q = parseStreamQuality(s)
+    return ({ '4K': 4, '2160P': 4, '1080P': 3, '720P': 2, '480P': 1 })[q] || 0
+  }
+  const comparators = {
+    language: byLangSeeds,
+    seeds: bySeeds,
+    quality: (a, b) => qualityRank(b) - qualityRank(a) || bySeeds(a, b),
+    cached: (a, b) => Number(b.cached === true) - Number(a.cached === true) || byLangSeeds(a, b),
+  }
+  const sortMode = comparators[filters.sort] ? filters.sort : 'language'
   const toggleFilter = (k) => setFilters(f => {
     const next = { ...f, [k]: !f[k] }
     try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)) } catch { /* sin storage */ }
@@ -56,8 +67,8 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   const canUnlock = isAlldebridEnabled()
   const playable = applyFilters(streams
     .filter(s => !s.processing && (canUnlock || s.streamType !== 'debrid'))
-    .sort(byLangSeeds))
-  const processing = canDebrid ? applyFilters(streams.filter(s => s.processing).sort(byLangSeeds)) : []
+    .sort(comparators[sortMode]))
+  const processing = canDebrid ? applyFilters(streams.filter(s => s.processing).sort(comparators[sortMode])) : []
   const chip = (k, label) => (
     <button
       key={k}
@@ -68,10 +79,29 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
     >{label}</button>
   )
   const filterChips = (
-    <div className="flex items-center gap-2 mb-2 flex-wrap">
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <span className="text-xs text-dark-500">Filtrar:</span>
       {chip('lang', `${langFlag(prefLang)} ${prefLang}`)}
-      {canDebrid && chip('ready', '⚡ Listos')}
-      {chip('seeds', '👥 Seeds')}
+      {canDebrid && chip('ready', '⚡ Cacheados')}
+      {chip('seeds', '👥 Con seeds')}
+      <label className="ml-auto flex items-center gap-2 text-xs text-dark-400">
+        Ordenar
+        <select
+          value={sortMode}
+          onChange={e => setFilters(f => {
+            const next = { ...f, sort: e.target.value }
+            try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
+            return next
+          })}
+          className="rounded-lg border border-dark-700 bg-dark-800 px-2 py-1.5 text-sm text-white focus:border-primary-500 focus:outline-none"
+          aria-label="Ordenar fuentes"
+        >
+          <option value="language">Idioma y seeds</option>
+          <option value="seeds">Más seeds</option>
+          <option value="cached">Cacheados primero</option>
+          <option value="quality">Calidad y seeds</option>
+        </select>
+      </label>
     </div>
   )
   // Progreso real de AllDebrid cuando el magnet está en la cola (subido

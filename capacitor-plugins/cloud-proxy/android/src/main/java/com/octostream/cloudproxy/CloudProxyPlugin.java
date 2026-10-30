@@ -56,6 +56,11 @@ public class CloudProxyPlugin extends Plugin {
     // YouTube y servidores gratuitos salen por WARP local.
     private static final int VPS_SOCKS_PORT = 2819;
     private static final int VPS_HTTP_PORT = 2820;
+    // El doble salto puede gastar hasta 180s en gool + otros 180s en mim;
+    // con edge pegajoso hay además un reintento de gool sin pin. Este límite
+    // debe ser mayor que el handshake completo o getStatus()/connect waiter
+    // lo declaran "stale" y cancelan justamente la conexión que está avanzando.
+    private static final long EXIT_CONNECT_MAX_MS = 600_000L;
 
     private static volatile Process aetherProcess = null;
     private static volatile boolean connected = false;
@@ -449,7 +454,7 @@ public class CloudProxyPlugin extends Plugin {
                 // of a spurious "already in progress" error.
                 new Thread(() -> {
                     int waited = 0;
-                    int maxWait = exitMode() ? 200000 : 70000;
+                    long maxWait = exitMode() ? EXIT_CONNECT_MAX_MS : 70000L;
                     while (connecting && waited < maxWait) {
                         try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
                         waited += 500;
@@ -775,7 +780,7 @@ public class CloudProxyPlugin extends Plugin {
         // modo doble salto gool/mim); un true más viejo que eso es estado
         // corrupto (un connect cancelado o un hilo muerto) — se limpia
         // solo para que los reintentos funcionen.
-        long connectStale = exitMode() ? 200000 : 75000;
+        long connectStale = exitMode() ? EXIT_CONNECT_MAX_MS : 75000;
         if (connecting && System.currentTimeMillis() - connectingSince > connectStale) {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }

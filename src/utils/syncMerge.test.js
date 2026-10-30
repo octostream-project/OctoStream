@@ -50,6 +50,7 @@ import {
 beforeEach(() => {
   localStorage.clear()
   useStore.setState({
+    activeProfileId: 'default',
     favorites: [{ id: 'f1', type: 'movie', name: 'Local' }],
     watchlist: [{ id: 'w1', type: 'series', name: 'Pendiente' }],
     watchHistory: [{ id: 'h1', type: 'movie', name: 'Vista', watchedAt: 10 }],
@@ -165,5 +166,17 @@ describe('mergeRemoteData categories', () => {
     expect(useStore.getState().favorites).toHaveLength(2)
     expect(useStore.getState().watchHistory[0].id).toBe('h2')
     expect(useStore.getState().watchedEpisodes['s1:S1:E2'].progress).toBe(1)
+  })
+
+  it('does not merge library data across different profiles', () => {
+    useStore.setState({ activeProfileId: 'profile-kids' })
+    const counts = mergeRemoteData({
+      profileId: 'default',
+      favorites: [{ id: 'adult-f1', type: 'movie', name: 'Principal' }],
+      watchHistory: [{ id: 'adult-h1', type: 'movie', watchedAt: 20 }],
+    }, ['lists', 'history'])
+    expect(counts.favs).toBe(0)
+    expect(counts.hist).toBe(0)
+    expect(useStore.getState().favorites).toEqual([{ id: 'f1', type: 'movie', name: 'Local' }])
   })
 })

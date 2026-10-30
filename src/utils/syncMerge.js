@@ -23,6 +23,10 @@ const SYNC_EXCLUDED_KEYS = new Set([
   'octostream_pair_tokens',
   'octostream_last_sync',
   'octostream_last_cast_device',
+  // Los perfiles y el perfil activo son locales a cada dispositivo; sus
+  // listas se sincronizan como datos del perfil activo, nunca el registro.
+  'octostream_profiles',
+  'octostream_active_profile',
   SYNC_CATEGORIES_KEY,
 ])
 
@@ -61,8 +65,13 @@ export function mergeRemoteData(remoteData, categories = null) {
   if (!remoteData || typeof remoteData !== 'object') return counts
   const wanted = new Set(normalizeSyncCategories(categories ?? loadSyncCategories()))
   const s = useStore.getState()
+  // No mezclar listas entre perfiles distintos (p. ej. el perfil infantil
+  // del emisor nunca debe acabar dentro de "Principal" del receptor).
+  const localProfileId = s.activeProfileId || 'default'
+  const remoteProfileId = remoteData.profileId || 'default'
+  const matchingProfile = localProfileId === remoteProfileId
 
-  if (wanted.has('lists') && Array.isArray(remoteData.favorites)) {
+  if (matchingProfile && wanted.has('lists') && Array.isArray(remoteData.favorites)) {
     const favMap = new Map()
     for (const f of s.favorites) favMap.set(`${f.id}-${f.type}`, f)
     for (const f of remoteData.favorites) {
@@ -82,7 +91,7 @@ export function mergeRemoteData(remoteData, categories = null) {
     if (counts.watchlist) s.setWatchlist([...listMap.values()].slice(0, 500))
   }
 
-  if (wanted.has('history') && Array.isArray(remoteData.watchHistory)) {
+  if (matchingProfile && wanted.has('history') && Array.isArray(remoteData.watchHistory)) {
     const histMap = new Map()
     for (const h of s.watchHistory) histMap.set(`${h.id}-${h.type}`, h)
     for (const h of remoteData.watchHistory) {
@@ -148,6 +157,7 @@ export async function localSyncPayload(categories = null) {
     kind: 'octostream-sync',
     version: 2,
     sections: cats,
+    profileId: s.activeProfileId || 'default',
   }
   if (cats.includes('lists')) {
     payload.favorites = s.favorites

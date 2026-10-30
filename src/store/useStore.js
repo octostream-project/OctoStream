@@ -5,6 +5,10 @@ import { getSharedCache } from '../plugins/bundled/tdtSpain/cache.js'
 import { normalizeChannel } from '../plugins/bundled/tdtSpain/normalize.js'
 import { getJsonSync, setJsonSync } from '../utils/storage.js'
 import { waitForWarp } from '../utils/warpStatus.js'
+import {
+  getProfiles, getActiveProfileId, profileDataKey, createProfile as createStoredProfile,
+  persistProfiles, setActiveProfileId, canLeaveProfile, deleteProfileData,
+} from '../utils/profiles.js'
 
 // Persisted slices of the store. Each key maps to a localStorage key.
 const PERSISTED_KEYS = {
@@ -17,11 +21,11 @@ const PERSISTED_KEYS = {
 }
 
 function loadPersisted(key, fallback) {
-  return getJsonSync(key, fallback)
+  return getJsonSync(profileDataKey(key), fallback)
 }
 
 function persist(key, value) {
-  setJsonSync(key, value)
+  setJsonSync(profileDataKey(key), value)
 }
 
 // watchedEpisodes crece una key por episodio visto y el objeto entero se
@@ -65,6 +69,43 @@ function searchLocalChannels(query) {
 }
 
 export const useStore = create((set, get) => ({
+  profiles: getProfiles(),
+  activeProfileId: getActiveProfileId(),
+  getActiveProfile: () => get().profiles.find(p => p.id === get().activeProfileId) || get().profiles[0],
+  createProfile: async (name, options) => {
+    const profiles = await createStoredProfile(name, options)
+    set({ profiles })
+    return profiles[profiles.length - 1]
+  },
+  switchProfile: async (id, pin = '') => {
+    const profile = get().profiles.find(p => p.id === id)
+    if (!profile) throw new Error('No se encontró el perfil.')
+    if (id === get().activeProfileId) return true
+    const current = get().profiles.find(p => p.id === get().activeProfileId)
+    if (!(await canLeaveProfile(current, pin))) throw new Error('PIN incorrecto.')
+    setActiveProfileId(id)
+    set({
+      activeProfileId: id,
+      favorites: getJsonSync(profileDataKey(PERSISTED_KEYS.favorites, id), []),
+      watchlist: getJsonSync(profileDataKey(PERSISTED_KEYS.watchlist, id), []),
+      watchHistory: getJsonSync(profileDataKey(PERSISTED_KEYS.watchHistory, id), []),
+      watchedEpisodes: getJsonSync(profileDataKey(PERSISTED_KEYS.watchedEpisodes, id), {}),
+      youtubeSearchHistory: [],
+      youtubeLiveSearchHistory: [],
+      _ytHistoryHydrated: false,
+    })
+    return true
+  },
+  deleteProfile: (id) => {
+    if (!id || id === 'default' || id === get().activeProfileId) {
+      throw new Error('No se puede borrar el perfil principal ni el perfil activo.')
+    }
+    const profiles = get().profiles.filter(p => p.id !== id)
+    deleteProfileData(id)
+    persistProfiles(profiles)
+    set({ profiles })
+  },
+
   plugins: [],
   installedPlugins: [],
   externalPlugins: [],

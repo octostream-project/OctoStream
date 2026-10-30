@@ -3,12 +3,14 @@ import { pluginManager } from '../plugins/manager.js'
 import ContentRow from '../components/ContentRow.jsx'
 import ContentCard from '../components/ContentCard.jsx'
 import ContinueWatching from '../components/ContinueWatching.jsx'
-import { Clapperboard, Film, Tv, PlayCircle, Globe } from 'lucide-react'
+import { Clapperboard, Film, Tv, PlayCircle, Globe, SlidersHorizontal, ChevronUp, ChevronDown, Eye, EyeOff } from 'lucide-react'
 import Chip from '../components/ui/Chip.jsx'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import { SkeletonGrid, SkeletonRow } from '../components/ui/SkeletonCard.jsx'
 import { waitForWarp } from '../utils/warpStatus.js'
+import { useStore } from '../store/useStore.js'
+import { isAllowedInProfile } from '../utils/profiles.js'
 
 // Only TMDB catalogs are shown on the Home page.
 // Plurtasko channels are accessible from the Search and Details pages.
@@ -102,12 +104,26 @@ const TAB_CATS = {
   dorama: DORAMA_CATS,
 }
 
+const HOME_PREFS_KEY = 'octostream_home_layout'
+const readHomePrefs = () => {
+  try { return JSON.parse(localStorage.getItem(HOME_PREFS_KEY) || '{}') || {} } catch { return {} }
+}
+const orderedCategories = (categories, prefs, tab) => {
+  const saved = prefs.order?.[tab] || []
+  const byId = new Map(categories.map(c => [c.id, c]))
+  return [...saved.filter(id => byId.has(id)).map(id => byId.get(id)),
+    ...categories.filter(c => !saved.includes(c.id))]
+}
+
 export default function Home() {
+  const profile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   const [rows, setRows] = useState([])
   const [gridItems, setGridItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('movie') // 'movie' | 'series' | 'anime' | 'dorama'
   const [selectedCat, setSelectedCat] = useState(null) // null = all categories (rows), else grid
+  const [homePrefs, setHomePrefs] = useState(readHomePrefs)
+  const [customizing, setCustomizing] = useState(false)
   const reqIdRef = useRef(0)
 
   useEffect(() => {
@@ -123,7 +139,9 @@ export default function Home() {
       // If WARP is off/disabled, waitForWarp resolves immediately.
       await waitForWarp()
 
-      const cats = TAB_CATS[tab] || MOVIE_CATS
+      const allCats = orderedCategories(TAB_CATS[tab] || MOVIE_CATS, homePrefs, tab)
+      const hidden = new Set(homePrefs.hidden?.[tab] || [])
+      const cats = allCats.filter(c => !hidden.has(c.id))
       const type = TAB_TYPE[tab] || 'movie'
       const pluginId = TAB_PLUGIN[tab] || 'tmdb'
 
@@ -133,7 +151,7 @@ export default function Home() {
           const items = await pluginManager.getCatalogContent(pluginId, selectedCat, type, 0, 60)
           // Ignore if a newer request was started
           if (myReqId !== reqIdRef.current) return
-          setGridItems(items || [])
+          setGridItems((items || []).filter(item => isAllowedInProfile(item, profile)))
         } catch (e) { /* skip */ }
         if (myReqId === reqIdRef.current) setLoading(false)
         return
@@ -148,8 +166,9 @@ export default function Home() {
         try {
           const items = await pluginManager.getCatalogContent(pluginId, cat.id, type, 0, 20)
           if (myReqId !== reqIdRef.current) return
-          if (items && items.length > 0) {
-            setRows(prev => [...prev, { title: cat.name, items, key: cat.id }])
+          const safeItems = (items || []).filter(item => isAllowedInProfile(item, profile))
+          if (safeItems.length > 0) {
+            setRows(prev => [...prev, { title: cat.name, items: safeItems, key: cat.id }])
           }
         } catch (e) { /* skip */ }
       }
@@ -160,15 +179,82 @@ export default function Home() {
 
     }
     loadContent()
-  }, [tab, selectedCat])
+  }, [tab, selectedCat, homePrefs, profile])
 
-  const cats = TAB_CATS[tab] || MOVIE_CATS
+  const allCats = orderedCategories(TAB_CATS[tab] || MOVIE_CATS, homePrefs, tab)
+  const hiddenCats = new Set(homePrefs.hidden?.[tab] || [])
+  const cats = allCats.filter(c => !hiddenCats.has(c.id))
+  const saveHomePrefs = (next) => {
+    setHomePrefs(next)
+    try { localStorage.setItem(HOME_PREFS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
+  }
+  const moveCategory = (index, direction) => {
+    const order = allCats.map(c => c.id)
+    const target = index + direction
+    if (target < 0 || target >= order.length) return
+    ;[order[index], order[target]] = [order[target], order[index]]
+    saveHomePrefs({ ...homePrefs, order: { ...homePrefs.order, [tab]: order } })
+  }
+  const toggleCategory = (id) => {
+    const hidden = new Set(homePrefs.hidden?.[tab] || [])
+    hidden.has(id) ? hidden.delete(id) : hidden.add(id)
+    saveHomePrefs({ ...homePrefs, hidden: { ...homePrefs.hidden, [tab]: [...hidden] } })
+  }
+  const cardSize = homePrefs.cardSize || 'normal'
 
   return (
     <div className="p-4 lg:p-6">
-      <h1 className="text-2xl font-bold text-white mb-4">Inicio</h1>
+      <header className="flex items-end justify-between gap-3 mb-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary-400">Descubre algo nuevo</p>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Inicio</h1>
+        </div>
+        <button
+          type="button"
+          data-tv-card
+          aria-expanded={customizing}
+          onClick={() => setCustomizing(v => !v)}
+          className="inline-flex items-center gap-2 rounded-xl border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-dark-200 hover:border-primary-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+        >
+          <SlidersHorizontal size={16} /> Personalizar
+        </button>
+      </header>
 
       <ContinueWatching />
+
+      {customizing && (
+        <section className="mb-5 rounded-2xl border border-dark-700 bg-dark-800/70 p-4" aria-label="Personalizar portada">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-white">Tu portada</h2>
+              <p className="text-xs text-dark-400">Ordena u oculta filas. Se guarda por sección.</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg bg-dark-900 p-1" aria-label="Tamaño de tarjetas">
+              {['compact', 'normal', 'large'].map((size, i) => (
+                <button
+                  key={size}
+                  type="button"
+                  aria-pressed={cardSize === size}
+                  onClick={() => saveHomePrefs({ ...homePrefs, cardSize: size })}
+                  className={`rounded-md px-2.5 py-1 text-xs ${cardSize === size ? 'bg-primary-600 text-white' : 'text-dark-300 hover:text-white'}`}
+                >{['Compactas', 'Medianas', 'Grandes'][i]}</button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1">
+            {allCats.map((cat, i) => (
+              <div key={cat.id} className="flex items-center gap-2 rounded-lg bg-dark-900/70 px-3 py-2">
+                <span className={`flex-1 truncate text-sm ${hiddenCats.has(cat.id) ? 'text-dark-500 line-through' : 'text-dark-200'}`}>{cat.name}</span>
+                <button type="button" onClick={() => moveCategory(i, -1)} disabled={i === 0} aria-label={`Subir ${cat.name}`} className="rounded p-1 text-dark-400 hover:text-white disabled:opacity-30"><ChevronUp size={16} /></button>
+                <button type="button" onClick={() => moveCategory(i, 1)} disabled={i === allCats.length - 1} aria-label={`Bajar ${cat.name}`} className="rounded p-1 text-dark-400 hover:text-white disabled:opacity-30"><ChevronDown size={16} /></button>
+                <button type="button" onClick={() => toggleCategory(cat.id)} aria-label={`${hiddenCats.has(cat.id) ? 'Mostrar' : 'Ocultar'} ${cat.name}`} className="rounded p-1 text-dark-400 hover:text-primary-300">
+                  {hiddenCats.has(cat.id) ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Tab selector: Películas / Series / Anime / Dorama */}
       <div className="flex gap-2 mb-4 mt-6 flex-wrap" data-tv-row>
@@ -197,7 +283,7 @@ export default function Home() {
         gridItems.length === 0 ? (
           <EmptyState icon={Clapperboard}>No hay contenido disponible</EmptyState>
         ) : (
-          <MediaGrid>
+          <MediaGrid size={cardSize}>
             {gridItems.map(item => (
               <ContentCard key={`${item.type}-${item.id}`} item={item} />
             ))}
@@ -209,7 +295,7 @@ export default function Home() {
           <EmptyState icon={Clapperboard}>No hay contenido disponible</EmptyState>
         ) : (
           rows.map((row) => (
-            <ContentRow key={row.key} title={row.title} items={row.items} />
+            <ContentRow key={row.key} title={row.title} items={row.items} cardSize={cardSize} />
           ))
         )
       )}

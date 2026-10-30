@@ -2,11 +2,15 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import { searchMulti } from '../plugins/builtIn/tmdb.js'
 import ContentCard from '../components/ContentCard.jsx'
-import { Search as SearchIcon, SearchX, X, Film, Tv, Radio, Layers, Clock, Trash2 } from 'lucide-react'
+import { Search as SearchIcon, SearchX, X, Film, Tv, Radio, Layers, Clock, Trash2, HardDrive, Play } from 'lucide-react'
 import { getJsonSync, setJsonSync } from '../utils/storage.js'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import { SkeletonGrid } from '../components/ui/SkeletonCard.jsx'
+import { isAllowedInProfile } from '../utils/profiles.js'
+import { isAndroidNative, isElectron } from '../utils/platform.js'
+import { getTorrentEngine } from '../utils/torrentEngine.js'
+import { playLocalFile } from '../utils/exoPlayer.js'
 
 const FILTERS = [
   { id: 'all', label: 'Todo', icon: Layers },
@@ -49,6 +53,7 @@ async function fetchSuggestions(query, signal) {
       // Miniatura de 32×48: w92 basta (el w342 por defecto es ~4× más pesado)
       poster: (item.poster || '').replace(/\/t\/p\/w\d+\//, '/t/p/w92/'),
       id: item.id,
+      adult: item.adult === true,
     }))
   } catch {
     return []
@@ -57,14 +62,29 @@ async function fetchSuggestions(query, signal) {
 
 export default function SearchPage() {
   const { searchQuery, searchResults, loading, search, clearSearch } = useStore()
+  const favorites = useStore(s => s.favorites)
+  const watchlist = useStore(s => s.watchlist)
+  const watchHistory = useStore(s => s.watchHistory)
+  const profile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   const [input, setInput] = useState(searchQuery)
   const [activeFilter, setActiveFilter] = useState('all')
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [recentSearches, setRecentSearches] = useState(loadRecentSearches())
+  const [downloadFiles, setDownloadFiles] = useState([])
   const [selectedSuggestion, setSelectedSuggestion] = useState(-1)
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
+
+  useEffect(() => {
+    if (!isAndroidNative() && !isElectron()) return undefined
+    let active = true
+    getTorrentEngine()
+      .then(engine => engine?.listDownloads?.())
+      .then(result => { if (active) setDownloadFiles(result?.files || []) })
+      .catch(() => { if (active) setDownloadFiles([]) })
+    return () => { active = false }
+  }, [])
 
   // Búsqueda principal (debounce 400ms)
   useEffect(() => {
@@ -113,31 +133,68 @@ export default function SearchPage() {
     }
   }, [])
 
+  const safeSearchResults = useMemo(
+    () => searchResults.filter(item => isAllowedInProfile(item, profile)),
+    [searchResults, profile],
+  )
+  const visibleSuggestions = useMemo(
+    () => suggestions.filter(item => isAllowedInProfile(item, profile)),
+    [suggestions, profile],
+  )
+
   // Group results by type for categorized display
   const grouped = useMemo(() => {
     const groups = {}
-    for (const item of searchResults) {
+    for (const item of safeSearchResults) {
       const type = item.type || 'other'
       if (!groups[type]) groups[type] = []
       groups[type].push(item)
     }
     return groups
-  }, [searchResults])
+  }, [safeSearchResults])
+
+  // Búsqueda global local: aparece mientras TMDB busca, e incluye Favoritos,
+  // Pendientes e Historial sin pedir datos a la red.
+  const libraryResults = useMemo(() => {
+    const q = input.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    if (q.length < 2) return []
+    const unique = new Map()
+    for (const item of [...favorites, ...watchlist, ...watchHistory]) {
+      const searchable = [item.name, item.title, item.originalName].join(' ')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      if (!searchable.includes(q) || !isAllowedInProfile(item, profile)) continue
+      const key = `${item.type}:${item.id}`
+      if (!unique.has(key)) unique.set(key, item)
+    }
+    return [...unique.values()].slice(0, 60)
+  }, [input, favorites, watchlist, watchHistory, profile])
+  const matchingDownloads = useMemo(() => {
+    const q = input.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    if (q.length < 2) return []
+    return downloadFiles.filter(file => String(file.name || '').normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(q))
+  }, [input, downloadFiles])
+  const playDownload = (file) => {
+    const uri = String(file.path || '').startsWith('content://')
+      ? file.path
+      : isAndroidNative() ? `file://${file.path}` : file.path
+    if (uri) playLocalFile({ uri, title: file.name }).catch(() => {})
+  }
 
   const filteredResults = useMemo(() => {
-    if (activeFilter === 'all') return searchResults
-    return searchResults.filter(item => item.type === activeFilter)
-  }, [searchResults, activeFilter])
+    if (activeFilter === 'all') return safeSearchResults
+    return safeSearchResults.filter(item => item.type === activeFilter)
+  }, [safeSearchResults, activeFilter])
 
   // Count per filter
   const filterCounts = useMemo(() => {
-    const counts = { all: searchResults.length }
-    for (const item of searchResults) {
+    const counts = { all: safeSearchResults.length }
+    for (const item of safeSearchResults) {
       const type = item.type || 'other'
       counts[type] = (counts[type] || 0) + 1
     }
     return counts
-  }, [searchResults])
+  }, [safeSearchResults])
 
   const availableFilters = FILTERS.filter(f => f.id === 'all' || (filterCounts[f.id] || 0) > 0)
 
@@ -214,7 +271,7 @@ export default function SearchPage() {
     }
   }
 
-  const showSuggestList = showSuggestions && suggestions.length > 0 && input.trim().length >= 3 && !loading && searchResults.length === 0
+  const showSuggestList = showSuggestions && visibleSuggestions.length > 0 && input.trim().length >= 3 && !loading && safeSearchResults.length === 0
 
   return (
     <div className="p-4 lg:p-6">
@@ -249,7 +306,7 @@ export default function SearchPage() {
         {/* Dropdown de autocompletado */}
         {showSuggestList && (
           <div className="absolute z-50 left-0 right-0 mt-1 bg-dark-800 border border-dark-700 rounded-lg shadow-xl overflow-hidden max-h-80 overflow-y-auto">
-            {suggestions.map((s, i) => (
+            {visibleSuggestions.map((s, i) => (
               <button
                 key={`${s.type}-${s.id}`}
                 data-focusable
@@ -307,8 +364,42 @@ export default function SearchPage() {
         </div>
       )}
 
+      {input.trim().length >= 2 && libraryResults.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-center gap-2">
+            <Clock className="text-primary-400" size={18} />
+            <h2 className="text-lg font-bold text-white">En tu biblioteca</h2>
+            <span className="rounded-full bg-dark-800 px-2 py-0.5 text-xs text-dark-400">{libraryResults.length}</span>
+          </div>
+          <MediaGrid>
+            {libraryResults.map(item => (
+              <ContentCard key={`local-${item.type}-${item.id}`} item={item} />
+            ))}
+          </MediaGrid>
+        </section>
+      )}
+
+      {input.trim().length >= 2 && matchingDownloads.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-center gap-2">
+            <HardDrive className="text-sky-300" size={18} />
+            <h2 className="text-lg font-bold text-white">Descargas</h2>
+            <span className="rounded-full bg-dark-800 px-2 py-0.5 text-xs text-dark-400">{matchingDownloads.length}</span>
+          </div>
+          <div className="space-y-2">
+            {matchingDownloads.map((file, i) => (
+              <button key={file.path || `${file.name}-${i}`} type="button" data-tv-item onClick={() => playDownload(file)} className="flex w-full items-center gap-3 rounded-xl border border-dark-800 bg-dark-900/70 p-3 text-left hover:border-primary-500/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400">
+                <Play size={17} className="flex-shrink-0 text-primary-300" />
+                <span className="min-w-0 flex-1 truncate text-sm text-white">{file.name}</span>
+                <span className="text-xs text-dark-500">En este dispositivo</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Filter tabs */}
-      {searchResults.length > 0 && (
+      {safeSearchResults.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
           {availableFilters.map(f => {
             const Icon = f.icon
@@ -335,15 +426,15 @@ export default function SearchPage() {
         </div>
       )}
 
-      {loading && searchResults.length === 0 && (
+      {loading && safeSearchResults.length === 0 && (
         <SkeletonGrid />
       )}
 
-      {!loading && input && searchResults.length === 0 && (
+      {!loading && input && safeSearchResults.length === 0 && (
         <EmptyState icon={SearchX}>No se encontraron resultados para "{input}"</EmptyState>
       )}
 
-      {searchResults.length > 0 && activeFilter === 'all' && (
+      {safeSearchResults.length > 0 && activeFilter === 'all' && (
         <div className="space-y-8">
           {typeOrder.map(type => {
             const items = grouped[type]
@@ -367,7 +458,7 @@ export default function SearchPage() {
         </div>
       )}
 
-      {searchResults.length > 0 && activeFilter !== 'all' && (
+      {safeSearchResults.length > 0 && activeFilter !== 'all' && (
         <>
           <p className="text-dark-400 text-sm mb-4">
             {filteredResults.length} resultado{filteredResults.length !== 1 ? 's' : ''}

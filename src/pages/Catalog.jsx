@@ -5,8 +5,11 @@ import ContentCard from '../components/ContentCard.jsx'
 import OctoLoader from '../components/OctoLoader.jsx'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
 import { SkeletonGrid } from '../components/ui/SkeletonCard.jsx'
+import { useStore } from '../store/useStore.js'
+import { isAllowedInProfile } from '../utils/profiles.js'
 
 export default function Catalog() {
+  const profile = useStore(s => s.profiles.find(p => p.id === s.activeProfileId))
   const { pluginId, catalogId, type } = useParams()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,16 +28,17 @@ export default function Catalog() {
       const cat = cats.find(c => c.pluginId === pluginId && c.id === catalogId)
       if (cat) setCatalogName(cat.name || cat.pluginName || '')
     }).catch(() => {})
-  }, [pluginId, catalogId, type])
+  }, [pluginId, catalogId, type, profile])
 
   const loadContent = async (offset, reset = false) => {
     setLoading(true)
     try {
       const newItems = await pluginManager.getCatalogContent(pluginId, catalogId, type, offset, 50)
+      const safeItems = (newItems || []).filter(item => isAllowedInProfile(item, profile))
       if (reset) {
-        setItems(newItems)
+        setItems(safeItems)
       } else {
-        setItems(prev => [...prev, ...newItems])
+        setItems(prev => [...prev, ...safeItems])
       }
       setHasMore(newItems.length === 50)
     } catch (e) {

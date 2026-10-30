@@ -1,18 +1,18 @@
 {
-  "versionCode": 20919,
-  "versionName": "2.09.19",
+  "versionCode": 20920,
+  "versionName": "2.09.20",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.19/octostream-2.09.19-arm64-v8a.apk",
-  "sha256": "95d6558c17492fce00475d13219e33e766cbd556b2165e5fb585bf01243302c3",
-  "notes": "",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-arm64-v8a.apk",
+  "sha256": "80d2e614e9cd7ec2cc6a4598ad00a3b13e2655e8f4c1593c1eda2503ba61e296",
+  "notes": "Home configurable, busqueda global, perfiles, sort de fuentes, plugin perf, fix handshake WARP y timeout de doble salto",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.19/octostream-2.09.19-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.19/octostream-2.09.19-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.19/octostream-2.09.19-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "95d6558c17492fce00475d13219e33e766cbd556b2165e5fb585bf01243302c3",
-    "armeabi-v7a": "76b702b21d376bece0b15da8460e957ce7cfd8a6947e652a0bae98b70be5ea2f",
-    "x86_64": "6b0b36ce4cd5bfa81ed9f1726696c751b02e73dab4c03a5bd776eae843cfc647"
+    "arm64-v8a": "80d2e614e9cd7ec2cc6a4598ad00a3b13e2655e8f4c1593c1eda2503ba61e296",
+    "armeabi-v7a": "5dde8a4806c9e369f1495bb71a2efb3d31361fb0815b225c9510538ee7b157bc",
+    "x86_64": "e8ae32495ae14d83ff9f4d990ea8e3132e8bbec083516faff8a7154d9d5f5c8c"
   }
 }

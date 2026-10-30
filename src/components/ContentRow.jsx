@@ -1,8 +1,13 @@
 import { memo } from 'react'
 import ContentCard from './ContentCard.jsx'
 
-function ContentRow({ title, items }) {
+function ContentRow({ title, items, cardSize = 'normal' }) {
   if (!items || items.length === 0) return null
+  const width = cardSize === 'compact'
+    ? '7rem'
+    : cardSize === 'large'
+      ? '12rem'
+      : '9rem'
 
   return (
     <div className="mb-8">
@@ -12,10 +17,10 @@ function ContentRow({ title, items }) {
       <div
         data-tv-row
         className="flex gap-4 overflow-x-auto scrollbar-hide pb-2"
-        style={{ scrollbarWidth: 'none' }}
+        style={{ scrollbarWidth: 'none', '--content-card-width': width }}
       >
         {items.map(item => (
-          <div key={`${item.type}-${item.id}`} className="content-card-slot flex-shrink-0 w-36 sm:w-40 md:w-44">
+          <div key={`${item.type}-${item.id}`} className="content-card-slot flex-shrink-0" style={{ width }}>
             <ContentCard item={item} />
           </div>
         ))}

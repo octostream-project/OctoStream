@@ -1,11 +1,12 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore.js'
 import {
   Puzzle, Check, Download, Trash2, Film, Tv, Radio, Play,
   Globe, Plus, Link, FileJson, AlertCircle, Upload, Cloud,
-  Trophy,
+  Trophy, Search,
 } from 'lucide-react'
 import OctoLoader from '../components/OctoLoader.jsx'
+import { getJsonSync } from '../utils/storage.js'
 
 const iconMap = {
   film: Film,
@@ -29,11 +30,17 @@ export default function Plugins() {
   } = useStore()
 
   const [activeTab, setActiveTab] = useState('repository')
+  const [pluginQuery, setPluginQuery] = useState('')
+  const [pluginScope, setPluginScope] = useState('all')
   const [manifestUrl, setManifestUrl] = useState('')
   const [jsonInput, setJsonInput] = useState('')
   const [formError, setFormError] = useState(null)
   const [formSuccess, setFormSuccess] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [recentPerf, setRecentPerf] = useState(() => {
+    const saved = getJsonSync('octostream_plugin_perf_metrics', [])
+    return Array.isArray(saved) ? saved : []
+  })
 
   // Remote repository state
   const [repoUrl, setRepoUrl] = useState('')
@@ -42,7 +49,23 @@ export default function Plugins() {
   const [repoError, setRepoError] = useState(null)
   const fileInputRef = useRef(null)
 
+  useEffect(() => {
+    const onPerf = (event) => {
+      const metric = event.detail
+      if (metric) setRecentPerf(prev => [metric, ...prev].slice(0, 40))
+    }
+    window.addEventListener('octostream:plugin-perf', onPerf)
+    return () => window.removeEventListener('octostream:plugin-perf', onPerf)
+  }, [])
+
   const isInstalled = (pluginId) => installedPlugins.some(p => p.id === pluginId)
+  const matchesPlugin = (plugin) => {
+    const q = pluginQuery.trim().toLowerCase()
+    const text = `${plugin.manifest?.name || ''} ${plugin.manifest?.description || ''} ${plugin.id || ''}`.toLowerCase()
+    return (!q || text.includes(q)) && (pluginScope !== 'installed' || isInstalled(plugin.id))
+  }
+  const repositoryPlugins = plugins.filter(p => (!p.isExternal || p.isBundled) && matchesPlugin(p))
+  const filteredExternalPlugins = externalPlugins.filter(matchesPlugin)
 
   const handleInstallExternalByUrl = async (e) => {
     e.preventDefault()
@@ -225,6 +248,23 @@ export default function Plugins() {
         Los plugins extienden la funcionalidad de OctoStream. Activa los incluidos o añade más abajo.
       </p>
 
+      {recentPerf.length > 0 && (
+        <details className="mb-5 rounded-xl border border-dark-700 bg-dark-800/50">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-dark-200">
+            Rendimiento reciente · últimos {Math.min(recentPerf.length, 8)} eventos
+          </summary>
+          <div className="space-y-1 px-4 pb-4">
+            {recentPerf.slice(0, 8).map((m, i) => (
+              <div key={`${m.ts}-${m.pluginId}-${i}`} className="flex items-center gap-3 rounded-lg bg-dark-900/70 px-3 py-2 text-xs">
+                <span className={`h-2 w-2 flex-shrink-0 rounded-full ${m.error ? 'bg-red-400' : m.durationMs > 5000 ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                <span className="min-w-0 flex-1 truncate text-white">{m.pluginId} · {m.operation}</span>
+                <span className={m.error ? 'text-red-300' : 'text-dark-300'}>{m.durationMs} ms · {m.count} resultados</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
       <div className="flex gap-2 mb-6 border-b border-dark-800">
         <button
           onClick={() => setActiveTab('repository')}
@@ -248,9 +288,34 @@ export default function Plugins() {
         </button>
       </div>
 
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label className="relative flex-1">
+          <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dark-500" />
+          <input
+            type="search"
+            value={pluginQuery}
+            onChange={e => setPluginQuery(e.target.value)}
+            placeholder="Buscar proveedor o catálogo…"
+            className="w-full rounded-xl border border-dark-700 bg-dark-800 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-dark-500 focus:border-primary-500 focus:outline-none"
+          />
+        </label>
+        <div className="flex rounded-xl bg-dark-800 p-1" aria-label="Filtrar plugins">
+          {['all', 'installed'].map(scope => (
+            <button
+              key={scope}
+              type="button"
+              aria-pressed={pluginScope === scope}
+              onClick={() => setPluginScope(scope)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${pluginScope === scope ? 'bg-primary-600 text-white' : 'text-dark-300 hover:text-white'}`}
+            >{scope === 'all' ? 'Todos' : `Instalados (${installedPlugins.length})`}</button>
+          ))}
+        </div>
+      </div>
+
       {activeTab === 'repository' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {plugins.filter(p => !p.isExternal || p.isBundled).map(plugin => pluginCard(plugin, false))}
+          {repositoryPlugins.map(plugin => pluginCard(plugin, false))}
+          {repositoryPlugins.length === 0 && <p className="text-sm text-dark-400">No hay proveedores que coincidan.</p>}
         </div>
       )}
 
@@ -404,7 +469,7 @@ export default function Plugins() {
 
           {externalPlugins.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {externalPlugins.map(plugin => pluginCard(plugin, true))}
+              {filteredExternalPlugins.map(plugin => pluginCard(plugin, true))}
             </div>
           ) : (
             <p className="text-dark-500 text-sm">No tienes plugins externos instalados.</p>

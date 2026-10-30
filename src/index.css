@@ -220,7 +220,7 @@ body {
 }
 
 .tv-mode .content-card-slot {
-  width: 6rem !important;
+  width: var(--content-card-width, 9rem) !important;
 }
 
 .tv-mode .content-card-slot .card > div:last-child {
@@ -228,7 +228,7 @@ body {
 }
 
 .tv-mode .media-card-grid {
-  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)) !important;
+  grid-template-columns: repeat(auto-fill, minmax(var(--media-card-min, 9rem), 1fr)) !important;
   gap: 0.5rem !important;
   padding: 4px !important;
 }

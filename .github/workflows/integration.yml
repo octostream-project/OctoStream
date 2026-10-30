@@ -1,0 +1,22 @@
+name: integration
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # diario — detecta cambios de la API AllDebrid
+  workflow_dispatch:      # manual desde Actions
+
+permissions:
+  contents: read
+
+jobs:
+  alldebrid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: AllDebrid API smoke test
+        env:
+          ALLDEBRID_KEY: ${{ secrets.ALLDEBRID_KEY }}
+        run: node scripts/ad-integration-test.mjs
