@@ -10,7 +10,8 @@ import { getJsonSync, setJsonSync, removeItemSync, getItemSync } from '../utils/
 
 const META_TIMEOUT_MS = 8000
 const SEARCH_TIMEOUT_MS = 15000
-const STREAMS_TIMEOUT_MS = 25000 // resolvers pueden encadenar varios scrapes
+const STREAMS_TIMEOUT_MS = 15000 // resolvers pueden encadenar varios scrapes,
+// pero un plugin que no responde en 15s está muerto — no retener el batch.
 
 // Fuentes 4K/2160p/UHD descartadas: casi ningún dispositivo decodifica HEVC
 // a esa resolución en tiempo real y los archivos debrid llegan a 80 GB —
@@ -199,16 +200,18 @@ export class PluginManager {
   async loadExternalPlugins() {
     this.externalPlugins = []
     console.log('[PluginManager] Loading external plugins, configs:', this.externalPluginConfigs.map(c => c?.manifest?.id || c?.id))
-    for (const config of this.externalPluginConfigs) {
-      try {
-        const plugin = await createPluginFromConfig(config)
-        if (plugin) {
-          this.externalPlugins.push(plugin)
-          console.log('[PluginManager] Loaded plugin:', plugin.id)
-        }
-      } catch (e) {
-        logError('Failed to load external plugin', String(e?.message || e))
-        console.error('[PluginManager] Failed to load plugin:', config?.manifest?.id || config?.id, e?.message)
+    // En paralelo: N plugins externos no se encadenan en el arranque.
+    const loaded = await Promise.allSettled(
+      this.externalPluginConfigs.map(config => createPluginFromConfig(config))
+    )
+    for (let i = 0; i < loaded.length; i++) {
+      const r = loaded[i]
+      const cfg = this.externalPluginConfigs[i]
+      if (r.status === 'fulfilled' && r.value) {
+        this.externalPlugins.push(r.value)
+        console.log('[PluginManager] Loaded plugin:', r.value.id)
+      } else if (r.status === 'rejected') {
+        console.error('[PluginManager] Failed to load plugin:', cfg?.manifest?.id || cfg?.id, r.reason?.message)
       }
     }
     console.log('[PluginManager] All external plugins loaded:', this.externalPlugins.map(p => p.id))
@@ -400,16 +403,19 @@ export class PluginManager {
     )
     // Streams en paralelo en todos los plugins a la vez (multihilo).
     const promises = candidates.map(async plugin => {
+      const t0 = Date.now()
       try {
         const streams = await withCancelTimeout(
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
+        console.log(`[PM perf] getStreams ${plugin.id}: ${Date.now() - t0}ms (${streams?.length || 0})`)
         if (streams && streams.length > 0) {
           return streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' }))
         }
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
+        console.warn(`[PM perf] getStreams ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
         logError(`getStreams failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }
@@ -464,6 +470,7 @@ export class PluginManager {
     const keep = (s) => noTorrent(s) && !is4kStream(s)
 
     const promises = candidates.map(async plugin => {
+      const t0 = Date.now()
       try {
         const pluginOnBatch = onBatch ? (batch) => {
           const tagged = batch.map(s => ({
@@ -480,6 +487,7 @@ export class PluginManager {
         const streams = await withCancelTimeout(
           sig => plugin.getStreams({ type, id, name, signal: sig, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch: pluginOnBatch }),
           STREAMS_TIMEOUT_MS, signal, `getStreams timeout in ${plugin.id}`)
+        console.log(`[PM perf] getStreams* ${plugin.id}: ${Date.now() - t0}ms (${streams?.length || 0})`)
         if (streams && streams.length > 0) {
           const tagged = streams.map(s => ({ ...s, pluginId: plugin.id, pluginName: plugin.name, direct: s.direct === true || plugin.id === 'tdtspain', bypassVpn: s.bypassVpn === true || plugin.id === 'tdtspain' })).filter(keep)
           allStreams = allStreams.filter(s => s.pluginId !== plugin.id)
@@ -490,6 +498,7 @@ export class PluginManager {
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
+        console.warn(`[PM perf] getStreams* ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
         logError(`getStreams failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }
@@ -529,6 +538,7 @@ export class PluginManager {
     const results = []
     let anyPluginOk = false
     const promises = this.plugins.map(async plugin => {
+      const t0 = Date.now()
       try {
         const items = await withCancelTimeout(
           sig => plugin.search({ query, signal: sig }),
@@ -536,6 +546,7 @@ export class PluginManager {
           `search timeout in ${plugin.id}`
         )
         anyPluginOk = true
+        console.log(`[PM perf] search ${plugin.id}: ${Date.now() - t0}ms (${items?.length || 0})`)
         if (items && items.length > 0) {
           const tagged = items.map(item => ({ ...item, pluginId: plugin.id, pluginName: plugin.name }))
           results.push(...tagged)
@@ -545,6 +556,7 @@ export class PluginManager {
         return []
       } catch (e) {
         if (e?.name === 'AbortError') throw e
+        console.warn(`[PM perf] search ${plugin.id}: falló tras ${Date.now() - t0}ms — ${e?.message || e}`)
         logError(`search failed in plugin ${plugin.id}`, String(e?.message || e))
         return []
       }
