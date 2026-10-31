@@ -17,6 +17,23 @@ beforeEach(() => {
 })
 
 describe('streaming catalogs', () => {
+  it('filters catalog items by normalized Spanish or English genres', async () => {
+    const { filterStreamingCatalogByGenre } = await import('./streamingCatalogs.js')
+    const items = [
+      { id: 'comedy', genres: ['Comedy'] },
+      { id: 'horror', genres: ['Horror'] },
+      { id: 'spanish-drama', genres: ['Comedia'] },
+      { id: 'action-adventure', genres: ['Action & Adventure'] },
+    ]
+
+    expect(filterStreamingCatalogByGenre(items, 'comedy').map(item => item.id))
+      .toEqual(['comedy', 'spanish-drama'])
+    expect(filterStreamingCatalogByGenre(items, 'horror').map(item => item.id))
+      .toEqual(['horror'])
+    expect(filterStreamingCatalogByGenre(items, 'adventure').map(item => item.id))
+      .toEqual(['action-adventure'])
+  })
+
   it('loads catalog-only platforms and excludes remote stream resources', async () => {
     httpGetJson.mockResolvedValueOnce(manifest)
     const { getStreamingPlatformCatalogs } = await import('./streamingCatalogs.js')

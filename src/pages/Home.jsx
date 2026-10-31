@@ -11,7 +11,12 @@ import { SkeletonGrid, SkeletonRow } from '../components/ui/SkeletonCard.jsx'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { useStore } from '../store/useStore.js'
 import { isAllowedInProfile } from '../utils/profiles.js'
-import { getStreamingPlatformCatalogs, getStreamingPlatformCatalogContent } from '../plugins/bundled/streamingCatalogs.js'
+import {
+  filterStreamingCatalogByGenre,
+  getStreamingPlatformCatalogs,
+  getStreamingPlatformCatalogContent,
+  STREAMING_GENRES,
+} from '../plugins/bundled/streamingCatalogs.js'
 
 // Only TMDB catalogs are shown on the Home page.
 // Plurtasko channels are accessible from the Search and Details pages.
@@ -206,17 +211,33 @@ export default function Home() {
       // Streaming-service catalogs are opt-in and loaded separately so they
       // don't delay the standard Home rows or query unselected platforms.
       const selectedPlatforms = new Set(homePrefs.platforms?.[tab] || [])
+      const selectedGenres = new Set(homePrefs.platformGenres?.[tab] || [])
       const enabledCatalogs = platformCatalogs.filter(c =>
         c.type === type && selectedPlatforms.has(c.key))
       Promise.allSettled(enabledCatalogs.map(async catalog => {
-        const items = await getStreamingPlatformCatalogContent(catalog, { limit: 20 })
+        const items = await getStreamingPlatformCatalogContent(catalog, {
+          limit: selectedGenres.size ? 96 : 20,
+        })
         if (myReqId !== reqIdRef.current) return
         const safeItems = items.filter(item => isAllowedInProfile(item, profile))
-        if (!safeItems.length) return
-        const key = `streaming-${catalog.key}`
+        const prefix = `streaming-${catalog.key}`
+        const catalogRows = safeItems.length
+          ? [{ title: catalog.name, items: safeItems.slice(0, 20), key: prefix }]
+          : []
+        for (const genre of STREAMING_GENRES) {
+          if (!selectedGenres.has(genre.id)) continue
+          const matches = filterStreamingCatalogByGenre(safeItems, genre.id)
+          if (matches.length) {
+            catalogRows.push({
+              title: `${catalog.name} · ${genre.name}`,
+              items: matches.slice(0, 20),
+              key: `${prefix}:genre:${genre.id}`,
+            })
+          }
+        }
         setRows(prev => [
-          ...prev.filter(row => row.key !== key),
-          { title: catalog.name, items: safeItems, key },
+          ...prev.filter(row => row.key !== prefix && !row.key.startsWith(`${prefix}:genre:`)),
+          ...catalogRows,
         ])
       }))
     }
@@ -247,8 +268,14 @@ export default function Home() {
     selected.has(key) ? selected.delete(key) : selected.add(key)
     saveHomePrefs({ ...homePrefs, platforms: { ...homePrefs.platforms, [tab]: [...selected] } })
   }
+  const toggleStreamingGenre = (genreId) => {
+    const selected = new Set(homePrefs.platformGenres?.[tab] || [])
+    selected.has(genreId) ? selected.delete(genreId) : selected.add(genreId)
+    saveHomePrefs({ ...homePrefs, platformGenres: { ...homePrefs.platformGenres, [tab]: [...selected] } })
+  }
   const visiblePlatformCatalogs = platformCatalogs.filter(c => c.type === TAB_TYPE[tab])
   const enabledPlatformCatalogs = new Set(homePrefs.platforms?.[tab] || [])
+  const enabledPlatformGenres = new Set(homePrefs.platformGenres?.[tab] || [])
   const cardSize = homePrefs.cardSize || 'normal'
 
   return (
@@ -338,6 +365,29 @@ export default function Home() {
               </div>
             ) : (
               <p className="text-xs text-dark-500">No hay catálogos de plataformas disponibles.</p>
+            )}
+            {!platformCatalogsLoading && !platformCatalogError && visiblePlatformCatalogs.length > 0 && (
+              <div className="mt-4 border-t border-dark-700/70 pt-4">
+                <h4 className="mb-1 text-sm font-semibold text-white">Géneros de plataformas</h4>
+                <p className="mb-3 text-xs text-dark-400">
+                  Activa géneros para crear filas como «Netflix · Comedia» o «HBO Max · Terror» en las plataformas seleccionadas.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {STREAMING_GENRES.map(genre => {
+                    const active = enabledPlatformGenres.has(genre.id)
+                    return (
+                      <button
+                        key={genre.id}
+                        type="button"
+                        data-tv-card
+                        aria-pressed={active}
+                        onClick={() => toggleStreamingGenre(genre.id)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${active ? 'border-emerald-500 bg-emerald-600/20 text-white' : 'border-dark-700 bg-dark-900 text-dark-300 hover:border-dark-500 hover:text-white'}`}
+                      >{active ? '✓ ' : '+ '}{genre.name}</button>
+                    )
+                  })}
+                </div>
+              </div>
             )}
           </div>
         </section>

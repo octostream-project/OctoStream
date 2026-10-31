@@ -1,18 +1,18 @@
 {
-  "versionCode": 20923,
-  "versionName": "2.09.23",
+  "versionCode": 20924,
+  "versionName": "2.09.24",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-arm64-v8a.apk",
-  "sha256": "effe69c277beb88b5da2f68109a57ff3384e6ea5a28e66b72dc4091c78784c2f",
-  "notes": "AllDebrid solo anade magnets tras confirmacion; controles del ExoPlayer en horizontal y vuelta a la orientacion anterior",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-arm64-v8a.apk",
+  "sha256": "89a269f240f4cef92bae8851fe5a700bc187929d84bd5559695d8039a4d21480",
+  "notes": "Categorias de plataformas Netflix, HBO Max y mas por comedia, terror y generos; reproduccion con resolutores OctoStream",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "effe69c277beb88b5da2f68109a57ff3384e6ea5a28e66b72dc4091c78784c2f",
-    "armeabi-v7a": "02291f1d0f9b3ac87e76b475e32c72929d2f3c1a918e00e2bc3083818eacb783",
-    "x86_64": "4f8d5606cc47624b3dc959edb1300938b9546da9982b7eb140ed2318d72eef50"
+    "arm64-v8a": "89a269f240f4cef92bae8851fe5a700bc187929d84bd5559695d8039a4d21480",
+    "armeabi-v7a": "7480f1d2e745cae9da3c09730f6f2420d091e5c8dd1f39d16d192f5ca100771d",
+    "x86_64": "50f9031471f657eb7a977ea40607908c1d88683af8ac65eca9ee967b776c66d4"
   }
 }

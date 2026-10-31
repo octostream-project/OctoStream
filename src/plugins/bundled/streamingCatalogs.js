@@ -9,6 +9,46 @@ const CACHE_TTL_MS = 10 * 60 * 1000
 const manifestCatalogsCache = new Map()
 let catalogCache = new Map()
 
+export const STREAMING_GENRES = [
+  { id: 'action', name: 'Acción', terms: ['action', 'acción'] },
+  { id: 'adventure', name: 'Aventura', terms: ['adventure', 'aventura'] },
+  { id: 'animation', name: 'Animación', terms: ['animation', 'animated', 'animación', 'anime'] },
+  { id: 'comedy', name: 'Comedia', terms: ['comedy', 'comedies', 'comedia'] },
+  { id: 'crime', name: 'Crimen', terms: ['crime', 'crimen'] },
+  { id: 'documentary', name: 'Documental', terms: ['documentary', 'documental'] },
+  { id: 'drama', name: 'Drama', terms: ['drama'] },
+  { id: 'family', name: 'Familiar', terms: ['family', 'familia'] },
+  { id: 'fantasy', name: 'Fantasía', terms: ['fantasy', 'fantasía'] },
+  { id: 'history', name: 'Historia', terms: ['history', 'historia'] },
+  { id: 'horror', name: 'Terror', terms: ['horror', 'terror'] },
+  { id: 'music', name: 'Música', terms: ['music', 'música'] },
+  { id: 'mystery', name: 'Misterio', terms: ['mystery', 'misterio'] },
+  { id: 'romance', name: 'Romance', terms: ['romance'] },
+  { id: 'scifi', name: 'Ciencia ficción', terms: ['science fiction', 'sci fi', 'sci-fi', 'ciencia ficción'] },
+  { id: 'sport', name: 'Deporte', terms: ['sport', 'sports', 'deporte'] },
+  { id: 'thriller', name: 'Suspense', terms: ['thriller', 'suspense'] },
+  { id: 'war', name: 'Bélica', terms: ['war', 'bélica'] },
+  { id: 'western', name: 'Western', terms: ['western'] },
+  { id: 'kids', name: 'Infantil', terms: ['kids', 'children', 'childrens', 'infantil'] },
+]
+
+const normalizeGenre = value => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim()
+
+export function filterStreamingCatalogByGenre(items, genreId) {
+  const genre = STREAMING_GENRES.find(entry => entry.id === genreId)
+  if (!genre || !Array.isArray(items)) return []
+  const terms = genre.terms.map(normalizeGenre)
+  return items.filter(item => (item.genres || []).some(rawGenre => {
+    const candidate = normalizeGenre(rawGenre)
+    return terms.some(term => candidate === term || candidate.includes(term))
+  }))
+}
+
 function safeManifestUrl(url) {
   let parsed
   try { parsed = new URL(String(url || '')) } catch { throw new Error('URL de manifest no válida') }
