@@ -4,6 +4,7 @@
 
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpPostJson } from './httpClient.js'
+import { isValidWatchPartyState } from './watchParty.js'
 // Import ESTÁTICO del plugin — registra 'SyncServer' al cargar la app. El
 // import dinámico en frío (chunk + __vite__mapDeps) es frágil en WebViews
 // de TV antiguos: si fallaba, getSyncServer() devolvía null → el panel de
@@ -229,8 +230,8 @@ export async function pingDevice(deviceUrl) {
 // | 'denied' (rechazado) | false.
 // Con token de emparejamiento va autenticado; sin él intenta /pair primero
 // (diálogo con alias+fingerprint en el receptor) y reintenta solo.
-export async function sendPlay(deviceUrl, { url, title, type = 'hls', mode = 'live', imdbId, season, episode }, device = null, signal = null) {
-  const body = JSON.stringify({ url, title, type, mode, imdbId, season, episode })
+export async function sendPlay(deviceUrl, { url, title, type = 'hls', mode = 'live', imdbId, season, episode, partyId }, device = null, signal = null) {
+  const body = JSON.stringify({ url, title, type, mode, imdbId, season, episode, partyId })
   const devId = device?.deviceId || null
   const headers = { 'Content-Type': 'application/json' }
   try {
@@ -298,3 +299,24 @@ async function syncRequest(deviceUrl, device, method, data, signal) {
 
 export const pullSync = (deviceUrl, device, signal) => syncRequest(deviceUrl, device, 'GET', undefined, signal)
 export const pushSync = (deviceUrl, device, data, signal) => syncRequest(deviceUrl, device, 'POST', data, signal)
+
+// Reuses authenticated /sync for tiny watch-party clock updates. This sends
+// playback metadata only (no stream URL) and therefore preserves the same
+// pairing/token/Origin protections as ordinary LAN sync.
+export function sendWatchPartyState(device, state, signal) {
+  const url = device?.url || (device?.ip ? `http://${device.ip}:8765` : '')
+  if (!url) return Promise.resolve(false)
+  const payload = {
+    kind: 'octostream-watch-party',
+    version: 1,
+    partyId: state?.partyId,
+    command: 'state',
+    mediaKey: String(state?.mediaKey || ''),
+    title: String(state?.title || ''),
+    position: Number(state?.position),
+    playing: state?.playing,
+    sentAt: Number(state?.sentAt),
+  }
+  if (!isValidWatchPartyState(payload)) return Promise.resolve(false)
+  return pushSync(url, device, payload, signal).then(result => result === true).catch(() => false)
+}

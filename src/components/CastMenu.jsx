@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Tv, Wifi, Copy, Check, X, MonitorSmartphone, ScanSearch, ChevronDown, ChevronUp, ScreenShare } from 'lucide-react'
+import { Tv, Wifi, Copy, Check, X, MonitorSmartphone, ScanSearch, ChevronDown, ChevronUp, ScreenShare, Users } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
 import { scanDevices, sendPlay, pingDevice, getLastDevice, getDiscovered } from '../utils/remotePlay.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
@@ -17,6 +17,7 @@ export default function CastMenu({
   copiedUrl, onCopyUrl, onOpenTvBrowser,
 }) {
   const [octoOpen, setOctoOpen] = useState(false)
+  const [partySync, setPartySync] = useState(false)
   const [devices, setDevices] = useState(null) // null = sin escanear
   const [scanning, setScanning] = useState(false)
   const [scanPct, setScanPct] = useState(0)
@@ -28,6 +29,7 @@ export default function CastMenu({
   const [lastDevice, setLastDevice] = useState(() => getLastDevice())
   const scanAbort = useRef(false)
   const sendAbort = useRef(null)
+  const partyIdRef = useRef('')
 
   useEffect(() => () => {
     scanAbort.current = true
@@ -42,7 +44,18 @@ export default function CastMenu({
     imdbId: meta?.imdbId || undefined,
     season: meta?.season || undefined,
     episode: meta?.episode || undefined,
+    partyId: partySync ? partyIdRef.current : undefined,
   })
+
+  const togglePartySync = () => {
+    setPartySync(enabled => {
+      const next = !enabled
+      partyIdRef.current = next
+        ? (globalThis.crypto?.randomUUID?.()?.replace(/-/g, '') || `${Date.now()}${Math.random().toString(36).slice(2, 10)}`)
+        : ''
+      return next
+    })
+  }
 
   const handleScan = async () => {
     setScanning(true)
@@ -78,7 +91,7 @@ export default function CastMenu({
       if (!ok) throw new Error('respuesta inválida')
       setSendState('sent')
       setLastDevice(device)
-      onRemoteSent?.(device)
+      onRemoteSent?.(device, partySync ? partyIdRef.current : '')
     } catch (e) {
       console.warn('[Cast] envío a OctoStream falló:', e?.message)
       setSendState('error')
@@ -188,6 +201,19 @@ export default function CastMenu({
 
         {octoOpen && (
           <div className="ml-2 pl-3 border-l-2 border-dark-600 space-y-1">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={partySync}
+              onClick={togglePartySync}
+              className={`${itemCls} ${partySync ? 'bg-primary-900/30' : ''}`}
+            >
+              <Users size={18} className={`shrink-0 ${partySync ? 'text-emerald-300' : 'text-dark-400'}`} />
+              <div>
+                <p className="text-white text-sm font-medium">{partySync ? 'Ver juntos activado' : 'Ver juntos'}</p>
+                <p className="text-xs text-dark-400">Sincroniza pausa y posición tras enviar este stream</p>
+              </div>
+            </button>
             {sendState === 'sent' && sendTarget && (
               <p className="text-xs text-green-400 px-3 py-1 flex items-center gap-1">
                 <Check size={12} /> Enviado a {sendTarget.name || sendTarget.ip}

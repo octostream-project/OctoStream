@@ -13,6 +13,8 @@ import {
   isPlayerActive,
 } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
+import { reserveDownloadsForPlayback } from '../utils/downloadQueue.js'
+import { recordStreamOutcome } from '../utils/streamReliability.js'
 import { resolveEmbed as resolveEmbedJs } from '../plugins/bundled/plurtasko/resolver.js'
 import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { pluginManager } from '../plugins/manager.js'
@@ -21,7 +23,7 @@ import { useStore } from '../store/useStore.js'
 import { X, ExternalLink, Captions } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
 import CastMenu from './CastMenu.jsx'
-import { sendStop } from '../utils/remotePlay.js'
+import { sendStop, sendWatchPartyState } from '../utils/remotePlay.js'
 import { isWarpConnected, waitForWarp } from '../utils/warpStatus.js'
 import LogoLoader from './LogoLoader.jsx'
 
@@ -47,7 +49,7 @@ function torrentStatusText(ev) {
   return `Descargando torrent… ${pct}%\n${parts.join(' · ')}`
 }
 
-function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null, onLoadSeason = null }) {
+function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null, onLoadSeason = null, partyId = '' }) {
   const updateProgress = useStore(s => s.updateProgress)
   const [loading, setLoading] = useState(true)
   const [resolvingEmbed, setResolvingEmbed] = useState(false)
@@ -64,6 +66,8 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   const [cursorHidden, setCursorHidden] = useState(false)
   const cursorTimerRef = useRef(null)
   const [playing, setPlaying] = useState(false)
+  const playingRef = useRef(playing)
+  useEffect(() => { playingRef.current = playing }, [playing])
   // Embeds en web (sin app): el iframe del proveedor es la única vía.
   const [webEmbed, setWebEmbed] = useState(false)
   const lastStreamRef = useRef(null)
@@ -92,6 +96,56 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   const [casting, setCasting] = useState(false)
   const [castDevice, setCastDevice] = useState(null)
   const [remoteDevice, setRemoteDevice] = useState(null) // OctoStream LAN
+  const [partyPeers, setPartyPeers] = useState([])
+  const partyPeersRef = useRef([])
+  const partyLastSentRef = useRef(0)
+  const partyRemoteActionUntilRef = useRef(0)
+  const downloadReservationRef = useRef(null)
+  useEffect(() => { partyPeersRef.current = partyPeers }, [partyPeers])
+
+  useEffect(() => () => {
+    for (const peer of partyPeersRef.current) {
+      const device = peer.device
+      const url = device?.url || (device?.ip ? `http://${device.ip}:8765` : '')
+      if (url) sendStop(url, device).catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!partyId || typeof window === 'undefined') return undefined
+    const onPartyState = (event) => {
+      const update = event.detail
+      if (update?.partyId !== partyId || update.command !== 'state') return
+      const normalize = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+      const matchingIds = [meta?.imdbId, meta?.id].filter(Boolean).map(String)
+      const idMatches = matchingIds.includes(String(update.mediaKey || ''))
+      const titleMatches = normalize(update.title) === normalize(title || meta?.name)
+      if (update.mediaKey && !idMatches && !titleMatches) return
+
+      const sentAt = Number(update.sentAt) || Date.now()
+      const elapsed = update.playing ? Math.max(0, (Date.now() - sentAt) / 1000) : 0
+      const target = Math.max(0, (Number(update.position) || 0) + elapsed)
+      partyRemoteActionUntilRef.current = Date.now() + 3000
+      if (mode !== 'live' && Number.isFinite(target)
+          && Math.abs(currentTimeRef.current - target) > 4) {
+        const bounded = durationRef.current > 0 ? Math.min(target, durationRef.current - 1) : target
+        seekTo(bounded).catch(() => {})
+      }
+      if (update.playing && !playing) resumePlayback().catch(() => {})
+      else if (!update.playing && playing) pausePlayback().catch(() => {})
+    }
+    window.addEventListener('octostream:watch-party', onPartyState)
+    return () => window.removeEventListener('octostream:watch-party', onPartyState)
+  }, [partyId, meta?.imdbId, meta?.id, meta?.name, title, mode, playing])
+
+  useEffect(() => {
+    const reservation = reserveDownloadsForPlayback()
+    downloadReservationRef.current = reservation
+    return () => {
+      reservation.release()
+      if (downloadReservationRef.current === reservation) downloadReservationRef.current = null
+    }
+  }, [])
   const [copiedUrl, setCopiedUrl] = useState(false)
   const castSessionRef = useRef(null)
   // Overrides del botón Cast nativo (URL/título que envía el nativo) — en
@@ -288,6 +342,13 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   useEffect(() => {
     if (!stream) return
     console.log('[Player] main effect running, stream=', urlHost(stream?.url || ''), 'streamChanged=', lastStreamRef.current !== stream, 'closedRef=', closedRef.current)
+    let outcomeRecorded = false
+    let attemptStartedAt = Date.now()
+    const recordOutcomeOnce = (success) => {
+      if (outcomeRecorded) return
+      outcomeRecorded = true
+      recordStreamOutcome(stream, success, Date.now() - attemptStartedAt)
+    }
 
     // Cancel any pending setPlayerOpen(false) from a previous cleanup so it
     // can't fire after this run marks the player as open again.
@@ -549,6 +610,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     let cancelled = false
 
     const init = async () => {
+    await downloadReservationRef.current?.ready
+    if (cancelled) return
+    attemptStartedAt = Date.now()
 
     // Re-resolver una URL fresca cuando el token firmado caduca:
     // embed → resolver JS sobre originalUrl; deportes → getStreams del item
@@ -715,6 +779,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           streamUrl = res.url
         } catch (e) {
           if (cancelled) return
+          recordOutcomeOnce(false)
           console.warn('[Player] torrent engine failed:', e?.message)
           setTorrentProgress(null)
           restoreAppDom()
@@ -875,6 +940,31 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       // direct/bypassVpn nunca van por WARP aunque esté activo.
       warpBoundRef.current = isWarpConnected()
         && playArgs.direct !== true && playArgs.bypassVpn !== true
+      const syncPartyState = (state) => {
+        const peers = partyPeersRef.current
+        if (!peers.length || Date.now() < partyRemoteActionUntilRef.current) return
+        if (!['ready', 'playing', 'paused', 'position'].includes(state.state)) return
+        const now = Date.now()
+        if (state.state === 'position' && now - partyLastSentRef.current < 12000) return
+        partyLastSentRef.current = now
+        const position = Number.isFinite(state.position)
+          ? state.position / 1000
+          : currentTimeRef.current
+        const isNowPlaying = state.state === 'playing' ? true
+          : state.state === 'paused' ? false
+            : playingRef.current
+        const payload = {
+          command: 'state',
+          mediaKey: meta?.imdbId || meta?.id || title || '',
+          title: title || meta?.name || '',
+          position,
+          playing: isNowPlaying,
+          sentAt: now,
+        }
+        for (const peer of peers) {
+          sendWatchPartyState(peer.device, { ...payload, partyId: peer.partyId }).catch(() => {})
+        }
+      }
       const onPlaybackState = (state) => {
         // El watchdog de 0-peers solo actúa cuando el player espera datos.
         // 'position' llega cada 5s incluso durante un stall — no tocarlo.
@@ -882,6 +972,8 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         else if (state.state === 'ready' || state.state === 'ended' || state.state === 'error') playerStalledRef.current = false
         if (state.state === 'playing') setPlaying(true)
         else if (state.state === 'paused' || state.state === 'ended') setPlaying(false)
+        if (state.state === 'ready') recordOutcomeOnce(true)
+        syncPartyState(state)
         if (state.state === 'qualityCapped') {
           // Decoder saturado o rebuffer crónico: en HLS el player ya bajó a
           // 720p; en progresivo (mp4/mkv debrid) no hay variantes y la
@@ -958,6 +1050,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                 launchPlayback().catch(e => {
                   console.warn('[Player] retry after re-resolve failed:', e?.message)
                   if (!cancelled && !closedRef.current) {
+                    recordOutcomeOnce(false)
                     restoreAppDom()
                     setPlayerOpen(false)
                     setError(`No se pudo reproducir el stream: ${e?.message || 'error desconocido'}`)
@@ -966,6 +1059,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                 })
               } else {
                 console.log('[Player] Re-resolve gave no new URL')
+                recordOutcomeOnce(false)
                 restoreAppDom()
                 setPlayerOpen(false)
                 setError('No se pudo renovar el enlace — prueba con otro')
@@ -974,6 +1068,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             }).catch(e => {
               console.warn('[Player] Re-resolve failed:', e?.message)
               if (cancelled || closedRef.current) return
+              recordOutcomeOnce(false)
               setResolvingEmbed(false)
               restoreAppDom()
               setPlayerOpen(false)
@@ -982,6 +1077,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             })
             return
           }
+          recordOutcomeOnce(false)
           console.log('[Player] native player error:', msg, 'code:', state.errorCode)
           // El diálogo nativo puede seguir abierto con el player muerto
           // encima del error — cerrar para que se vea.
@@ -1074,6 +1170,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         }
       }
       const startNative = () => playStream(playArgs, onPlaybackState).catch(e => {
+        recordOutcomeOnce(false)
         console.error('[Player] native player error:', e?.message)
         restoreAppDom()
         setPlayerOpen(false)
@@ -1138,6 +1235,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     init().catch(e => {
       console.error('[Player] init error:', e?.message || e)
       if (!cancelled) {
+        recordOutcomeOnce(false)
         setError(`Error al iniciar reproducción: ${e?.message || 'unknown'}`)
         setLoading(false)
       }
@@ -1607,7 +1705,17 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
               meta={meta}
               className="absolute top-14 right-20"
               onRequestCast={() => { setShowCastMenu(false); requestCastSession() }}
-              onRemoteSent={(device) => { setRemoteDevice(device); setShowCastMenu(false) }}
+              onRemoteSent={(device, partySessionId) => {
+                setRemoteDevice(device)
+                if (partySessionId) {
+                  setPartyPeers(prev => [
+                    ...prev.filter(peer => peer.device?.deviceId !== device?.deviceId),
+                    { device, partyId: partySessionId },
+                  ])
+                } else {
+                  setShowCastMenu(false)
+                }
+              }}
               onClose={() => setShowCastMenu(false)}
               copiedUrl={copiedUrl}
               onCopyUrl={copyStreamUrl}

@@ -4,14 +4,28 @@ import { getSyncServer } from '../utils/remotePlay.js'
 import Modal from './ui/Modal.jsx'
 import { sanitizeRemoteUrl } from '../utils/sanitizeUrl.js'
 import { mergeRemoteData, localSyncPayload } from '../utils/syncMerge.js'
+import { isValidPartyId, isValidWatchPartyState } from '../utils/watchParty.js'
 
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
+const lastPartyEventAt = new Map()
 
 // Push entrante → unión con lo local y re-publicar: el siguiente que nos
 // descargue recibe ya los datos fusionados (y así se propaga la unión).
 const applySync = (dataStr) => {
   try {
-    const counts = mergeRemoteData(JSON.parse(dataStr))
+    const data = JSON.parse(dataStr)
+    if (isValidWatchPartyState(data)) {
+      const previousAt = lastPartyEventAt.get(data.partyId) || 0
+      if (data.sentAt <= previousAt) return
+      lastPartyEventAt.set(data.partyId, data.sentAt)
+      if (lastPartyEventAt.size > 64) {
+        const oldest = lastPartyEventAt.keys().next().value
+        lastPartyEventAt.delete(oldest)
+      }
+      window.dispatchEvent(new CustomEvent('octostream:watch-party', { detail: data }))
+      return
+    }
+    const counts = mergeRemoteData(data)
     if (!counts.favs && !counts.hist && !counts.eps && !counts.watchlist && !counts.settings) return
     console.log(`[Sync] merge recibido: +${counts.favs} favoritos, ${counts.watchlist} mi lista, ${counts.hist} historial, ${counts.eps} episodios, ${counts.settings} ajustes`)
     getSyncServer().then(async S => {
@@ -73,6 +87,7 @@ export default function RemotePlayReceiver() {
           imdbId: ev.imdbId || '',
           season: ev.season > 0 ? ev.season : undefined,
           episode: ev.episode > 0 ? ev.episode : undefined,
+          partyId: isValidPartyId(ev.partyId) ? ev.partyId : '',
         })
       })
       stopHandle = await SyncServer.addListener('stopReceived', () => {
@@ -128,6 +143,7 @@ export default function RemotePlayReceiver() {
             imdbId: ev.imdbId || '',
             season: ev.season > 0 ? ev.season : undefined,
             episode: ev.episode > 0 ? ev.episode : undefined,
+            partyId: isValidPartyId(ev.partyId) ? ev.partyId : '',
           })
         }
       } catch { /* tolerado */ }
@@ -193,6 +209,7 @@ export default function RemotePlayReceiver() {
             mode={request.mode === 'vod' ? 'vod' : 'live'}
             stream={{ url: request.url, streamType: request.type, quality: '' }}
             title={request.title}
+            partyId={request.partyId}
             meta={{
               id: `remote-${request.url}`, type: 'live', name: request.title,
               imdbId: request.imdbId, season: request.season, episode: request.episode,

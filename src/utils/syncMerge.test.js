@@ -169,14 +169,55 @@ describe('mergeRemoteData categories', () => {
   })
 
   it('does not merge library data across different profiles', () => {
-    useStore.setState({ activeProfileId: 'profile-kids' })
+    useStore.setState({
+      activeProfileId: 'profile-kids',
+      profiles: [{ id: 'profile-kids', name: 'Peques', kids: true }],
+    })
     const counts = mergeRemoteData({
       profileId: 'default',
+      profileName: 'Principal',
+      profileKids: false,
       favorites: [{ id: 'adult-f1', type: 'movie', name: 'Principal' }],
+      watchlist: [{ id: 'adult-w1', type: 'movie', name: 'Principal' }],
       watchHistory: [{ id: 'adult-h1', type: 'movie', watchedAt: 20 }],
+      watchedEpisodes: { 's1:S1:E2': { watchedAt: 20, progress: 1 } },
     }, ['lists', 'history'])
     expect(counts.favs).toBe(0)
+    expect(counts.watchlist).toBe(0)
     expect(counts.hist).toBe(0)
+    expect(counts.eps).toBe(0)
     expect(useStore.getState().favorites).toEqual([{ id: 'f1', type: 'movie', name: 'Local' }])
+  })
+
+  it('syncs between same-name profiles with different local IDs', () => {
+    useStore.setState({
+      activeProfileId: 'local-ana',
+      profiles: [{ id: 'local-ana', name: 'Ana', kids: false }],
+    })
+    const counts = mergeRemoteData({
+      profileId: 'remote-ana',
+      profileName: ' ana ',
+      profileKids: false,
+      favorites: [{ id: 'f2', type: 'movie' }],
+    }, ['lists'])
+    expect(counts.favs).toBe(1)
+    expect(useStore.getState().favorites.map(item => item.id)).toEqual(['f1', 'f2'])
+  })
+
+  it('does not treat adult and child profiles with the same name as identical', () => {
+    useStore.setState({
+      activeProfileId: 'local-profile',
+      profiles: [{ id: 'local-profile', name: 'Alex', kids: true }],
+    })
+    const counts = mergeRemoteData({
+      profileId: 'remote-profile',
+      profileName: 'Alex',
+      profileKids: false,
+      watchlist: [{ id: 'adult-w1', type: 'movie' }],
+      watchedEpisodes: { 's1:S1:E2': { watchedAt: 20, progress: 1 } },
+    }, ['lists', 'history'])
+    expect(counts.watchlist).toBe(0)
+    expect(counts.eps).toBe(0)
+    expect(useStore.getState().watchlist).toEqual([{ id: 'w1', type: 'series', name: 'Pendiente' }])
   })
 })

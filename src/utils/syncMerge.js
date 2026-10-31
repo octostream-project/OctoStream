@@ -67,9 +67,17 @@ export function mergeRemoteData(remoteData, categories = null) {
   const s = useStore.getState()
   // No mezclar listas entre perfiles distintos (p. ej. el perfil infantil
   // del emisor nunca debe acabar dentro de "Principal" del receptor).
+  // Los IDs se generan localmente; entre dispositivos emparejados se
+  // considera el mismo perfil solo con nombre normalizado + tipo infantil.
   const localProfileId = s.activeProfileId || 'default'
   const remoteProfileId = remoteData.profileId || 'default'
+  const localProfile = s.profiles?.find(p => p.id === localProfileId)
+  const normalizeProfileName = value => String(value || '').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
   const matchingProfile = localProfileId === remoteProfileId
+    || (!!localProfile && !!remoteData.profileName
+      && normalizeProfileName(localProfile.name) === normalizeProfileName(remoteData.profileName)
+      && !!localProfile.kids === !!remoteData.profileKids)
 
   if (matchingProfile && wanted.has('lists') && Array.isArray(remoteData.favorites)) {
     const favMap = new Map()
@@ -81,7 +89,7 @@ export function mergeRemoteData(remoteData, categories = null) {
     if (counts.favs) s.setFavorites([...favMap.values()].slice(0, 500))
   }
 
-  if (wanted.has('lists') && Array.isArray(remoteData.watchlist)) {
+  if (matchingProfile && wanted.has('lists') && Array.isArray(remoteData.watchlist)) {
     const listMap = new Map()
     for (const w of s.watchlist) listMap.set(`${w.id}-${w.type}`, w)
     for (const w of remoteData.watchlist) {
@@ -109,7 +117,7 @@ export function mergeRemoteData(remoteData, categories = null) {
   }
 
   // Sin keys de prototipo — un peer malicioso podría inyectar __proto__.
-  if (wanted.has('history') && remoteData.watchedEpisodes && typeof remoteData.watchedEpisodes === 'object') {
+  if (matchingProfile && wanted.has('history') && remoteData.watchedEpisodes && typeof remoteData.watchedEpisodes === 'object') {
     const merged = { ...s.watchedEpisodes }
     let count = Object.keys(merged).length
     let changed = false
@@ -158,6 +166,8 @@ export async function localSyncPayload(categories = null) {
     version: 2,
     sections: cats,
     profileId: s.activeProfileId || 'default',
+    profileName: s.profiles?.find(p => p.id === s.activeProfileId)?.name || 'Principal',
+    profileKids: !!s.profiles?.find(p => p.id === s.activeProfileId)?.kids,
   }
   if (cats.includes('lists')) {
     payload.favorites = s.favorites

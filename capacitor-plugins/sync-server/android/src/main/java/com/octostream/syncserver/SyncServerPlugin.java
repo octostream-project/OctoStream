@@ -422,6 +422,8 @@ public class SyncServerPlugin extends Plugin {
                         ev.put("imdbId", json.optString("imdbId"));
                         ev.put("season", json.optInt("season", 0));
                         ev.put("episode", json.optInt("episode", 0));
+                        String partyId = json.optString("partyId", "");
+                        if (partyId.matches("[a-zA-Z0-9_-]{8,80}")) ev.put("partyId", partyId);
                         notifyListeners("playReceived", ev);
                         res = newFixedLengthResponse(Response.Status.OK, "application/json", "{\"ok\":true}");
                     }

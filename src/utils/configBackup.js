@@ -8,9 +8,23 @@
 import { isAndroidNative } from './platform.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
+import { setItemSync } from './storage.js'
 
 const PREFIX = 'octostream_'
 const BACKUP_NAME = 'octostream-backup.json'
+const PROFILE_REGISTRY_KEY = 'octostream_profiles'
+const PROFILE_DATA_SUFFIXES = [
+  'favorites', 'watchlist', 'history', 'watched_episodes',
+  'youtube_search_history', 'youtube_live_search_history',
+]
+
+function backupCategoryKey(key) {
+  if (key.startsWith('octostream_profile_')) {
+    const suffix = PROFILE_DATA_SUFFIXES.find(name => key.endsWith(`_${name}`))
+    return suffix ? `octostream_${suffix}` : key
+  }
+  return key
+}
 
 // Secciones seleccionables del backup. `keys` casa exacto; `prefixes` casa
 // por prefijo (posiciones localpos_<ruta>, credenciales aiostreams_*/trakt_*).
@@ -66,10 +80,11 @@ export const BACKUP_CATEGORIES = [
 export const ALL_CATEGORIES = BACKUP_CATEGORIES.map(c => c.id)
 
 export function categoryOf(key) {
+  const normalizedKey = backupCategoryKey(key)
   for (const cat of BACKUP_CATEGORIES) {
     if (cat.id === 'settings') continue
-    if (cat.keys.includes(key)) return cat.id
-    if (cat.prefixes.some(p => key.startsWith(p))) return cat.id
+    if (cat.keys.includes(normalizedKey)) return cat.id
+    if (cat.prefixes.some(p => normalizedKey.startsWith(p))) return cat.id
   }
   return 'settings'
 }
@@ -85,13 +100,17 @@ function storageKeys() {
   return keys
 }
 
-export function collectSettings(categories, excludedKeys = null) {
+export function collectSettings(categories, excludedKeys = null, includeProfiles = false) {
   const wanted = categories ? new Set(categories) : null
   const settings = {}
   for (const k of storageKeys()) {
     if (!k?.startsWith(PREFIX) || excludedKeys?.has(k)) continue
-    if (k === 'octostream_profiles' || k === 'octostream_active_profile' || k.startsWith('octostream_profile_')) continue
-    if (wanted && !wanted.has(categoryOf(k))) continue
+    if (k === 'octostream_active_profile') continue
+    const profileData = k.startsWith('octostream_profile_')
+    if ((profileData || k === PROFILE_REGISTRY_KEY) && !includeProfiles) continue
+    const profileRegistryNeeded = k === PROFILE_REGISTRY_KEY
+      && (!wanted || wanted.has('lists') || wanted.has('history') || wanted.has('settings'))
+    if (wanted && !wanted.has(categoryOf(k)) && !profileRegistryNeeded) continue
     settings[k] = localStorage.getItem(k)
   }
   return settings
@@ -104,7 +123,7 @@ function buildBackup(categories, extraSettings = null) {
     version: 1,
     sections: categories || ALL_CATEGORIES,
     exportedAt: new Date().toISOString(),
-    settings: { ...collectSettings(categories), ...(extraSettings || {}) },
+    settings: { ...collectSettings(categories, null, true), ...(extraSettings || {}) },
   }, null, 2)
 }
 
@@ -181,8 +200,10 @@ export async function importSettings(categories = null) {
   let count = 0
   for (const [k, v] of Object.entries(data.settings)) {
     if (!k.startsWith(PREFIX) || typeof v !== 'string') continue
-    if (wanted && !wanted.has(categoryOf(k))) continue
-    localStorage.setItem(k, v)
+    const profileRegistryNeeded = k === PROFILE_REGISTRY_KEY
+      && (!wanted || wanted.has('lists') || wanted.has('history') || wanted.has('settings'))
+    if (wanted && !wanted.has(categoryOf(k)) && !profileRegistryNeeded) continue
+    setItemSync(k, v)
     count++
   }
   // En Android la clave SSH recién restaurada sube al Keystore del plugin.

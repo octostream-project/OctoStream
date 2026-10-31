@@ -21,6 +21,7 @@ import { httpGetText } from '../utils/httpClient.js'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { switchChannel, stopPlayback } from '../utils/exoPlayer.js'
 import { getTorrentEngine } from '../utils/torrentEngine.js'
+import { enqueueDownload, subscribeDownloadQueue } from '../utils/downloadQueue.js'
 import { formatDuration } from '../utils/format.js'
 import { useWindowedList } from '../hooks/useWindowedList.js'
 import { Play, Heart, Star, ArrowLeft, Clock, Users, Film as FilmIcon, RotateCcw, AlertCircle, Check, Download, Bookmark, X } from 'lucide-react'
@@ -137,23 +138,24 @@ export default function Details() {
   const [debridConfirm, setDebridConfirm] = useState(null)
   // Chip de progreso de descarga offline (torrent → carpeta Descargas).
   const [dlStatus, setDlStatus] = useState(null)
-  const dlListenerRef = useRef(null)
+  const dlJobIdRef = useRef('')
 
-  // Descarga offline de un torrent (o un archivo concreto del pack).
-  // Progreso por eventos 'torrentProgress'; el motor tiene slot único —
-  // iniciar otra descarga o reproducción sustituye a la anterior.
-  const ensureDlListener = async (engine) => {
-    if (!dlListenerRef.current) {
-      dlListenerRef.current = await engine.addListener('torrentProgress', ev => {
-        setDlStatus(prev => {
-          if (!prev || prev.done) return prev
-          const progress = ev?.progress || 0
-          const done = progress >= 1 || ev?.state === 'finished'
-          return { ...prev, name: ev?.fileName || prev.name, progress, done }
-        })
-      })
+  useEffect(() => subscribeDownloadQueue(jobs => {
+    const job = jobs.find(entry => entry.id === dlJobIdRef.current)
+    if (!job) return
+    if (job.status === 'cancelled') {
+      dlJobIdRef.current = ''
+      setDlStatus(null)
+      return
     }
-  }
+    setDlStatus({
+      name: job.name,
+      progress: job.progress,
+      done: job.status === 'completed',
+      status: job.status,
+      error: job.error,
+    })
+  }), [])
 
   const downloadTorrent = async (stream, fileIndex = null) => {
     try {
@@ -162,18 +164,20 @@ export default function Details() {
         toast.error('Descargas no disponibles en esta plataforma')
         return
       }
-      setDlStatus({ name: stream.name || stream.server || 'torrent', progress: 0, done: false })
-      await ensureDlListener(engine)
-      const res = await engine.download({
-        url: stream.url,
-        season: meta?.season ?? undefined,
-        episode: meta?.episode ?? undefined,
-        fileIndex: fileIndex ?? undefined,
+      const name = stream.name || stream.server || 'torrent'
+      const id = enqueueDownload({
+        name,
+        kind: 'torrent',
+        start: downloadEngine => downloadEngine.download({
+          url: stream.url,
+          season: meta?.season ?? undefined,
+          episode: meta?.episode ?? undefined,
+          fileIndex: fileIndex ?? undefined,
+        }),
       })
-      if (res?.complete) {
-        setDlStatus({ name: res.name, progress: 1, done: true })
-        toast.success(`Descarga completada: ${res.name}`)
-      }
+      dlJobIdRef.current = id
+      setDlStatus({ name, progress: 0, done: false, status: 'queued' })
+      toast.success('Añadida a la cola de descargas')
     } catch (e) {
       console.warn('[Details] download failed:', e?.message)
       setDlStatus(null)
@@ -190,30 +194,28 @@ export default function Details() {
         toast.error('Descargas no disponibles en esta plataforma')
         return
       }
-      let url = stream.url
-      if (stream.streamType === 'debrid') {
-        if (!isAlldebridEnabled()) {
-          toast.error('Requiere AllDebrid (Ajustes → Debrid)')
-          return
-        }
-        setDlStatus({ name: 'Desbloqueando enlace debrid…', progress: 0, done: false })
-        const r = await unlockDebrid(stream.url)
-        if (!r?.link) {
-          setDlStatus(null)
-          toast.error(debridErrorMessage(r?.error))
-          return
-        }
-        url = r.link
+      if (stream.streamType === 'debrid' && !isAlldebridEnabled()) {
+        toast.error('Requiere AllDebrid (Ajustes → Debrid)')
+        return
       }
       const displayName = [meta?.name, parseStreamQuality(stream)].filter(Boolean).join(' ')
         || stream.name || stream.server || 'video'
-      setDlStatus({ name: displayName, progress: 0, done: false })
-      await ensureDlListener(engine)
-      const res = await engine.downloadHttp({ url, name: displayName, headers: stream.headers })
-      if (res?.complete) {
-        setDlStatus({ name: res.name, progress: 1, done: true })
-        toast.success(`Descarga completada: ${res.name}`)
-      }
+      const id = enqueueDownload({
+        name: displayName,
+        kind: 'http',
+        start: async downloadEngine => {
+          let url = stream.url
+          if (stream.streamType === 'debrid') {
+            const result = await unlockDebrid(stream.url)
+            if (!result?.link) throw new Error(debridErrorMessage(result?.error))
+            url = result.link
+          }
+          return downloadEngine.downloadHttp({ url, name: displayName, headers: stream.headers })
+        },
+      })
+      dlJobIdRef.current = id
+      setDlStatus({ name: displayName, progress: 0, done: false, status: 'queued' })
+      toast.success('Añadida a la cola de descargas')
     } catch (e) {
       console.warn('[Details] downloadHttp failed:', e?.message)
       setDlStatus(null)
@@ -247,7 +249,10 @@ export default function Details() {
   // El chip de "Descargado" se autocierra a los pocos segundos.
   useEffect(() => {
     if (!dlStatus?.done) return
-    const t = setTimeout(() => setDlStatus(null), 5000)
+    const t = setTimeout(() => {
+      dlJobIdRef.current = ''
+      setDlStatus(null)
+    }, 5000)
     return () => clearTimeout(t)
   }, [dlStatus?.done])
   // Loading state for episode stream search — separate from page-level loading
@@ -595,14 +600,6 @@ export default function Details() {
       zapAbortRef.current?.abort()
     }
   }, [type, id, location.state?.autoplay])
-
-  // El listener de 'torrentProgress' vive en el plugin nativo/IPC: sin
-  // remove() al desmontar se acumulan listeners que retienen setState de un
-  // componente ya muerto.
-  useEffect(() => () => {
-    try { dlListenerRef.current?.remove?.() } catch { /* noop */ }
-    dlListenerRef.current = null
-  }, [])
 
   const [resolvingStream, setResolvingStream] = useState(false)
   const [resolvingText, setResolvingText] = useState('')
@@ -1878,12 +1875,16 @@ export default function Details() {
         <div className="fixed bottom-20 right-4 z-50 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 max-w-sm">
           {dlStatus.done
             ? <Check size={18} className="text-emerald-400 flex-shrink-0" />
+            : dlStatus.status === 'failed'
+              ? <AlertCircle size={18} className="text-red-400 flex-shrink-0" />
             : <Download size={18} className="text-primary-400 flex-shrink-0 animate-pulse" />}
           <div className="min-w-0">
             <p className="text-white text-sm truncate">
-              {dlStatus.done ? 'Descargado' : 'Descargando'} · {dlStatus.name}
+              {dlStatus.done ? 'Descargado' : dlStatus.status === 'queued' ? 'En cola' : dlStatus.status === 'failed' ? 'Error' : 'Descargando'} · {dlStatus.name}
             </p>
-            {!dlStatus.done && (
+            {dlStatus.status === 'failed' ? (
+              <p className="text-red-300 text-xs mt-1">{dlStatus.error || 'No se pudo completar'}</p>
+            ) : !dlStatus.done && dlStatus.status !== 'queued' && (
               <div className="w-48 h-1.5 bg-dark-600 rounded-full mt-1.5 overflow-hidden">
                 <div
                   className="h-full bg-primary-500 rounded-full transition-all"
@@ -1891,7 +1892,7 @@ export default function Details() {
                 />
               </div>
             )}
-            {!dlStatus.done && (
+            {!dlStatus.done && dlStatus.status !== 'queued' && dlStatus.status !== 'failed' && (
               <p className="text-dark-400 text-xs mt-1">{Math.round((dlStatus.progress || 0) * 100)}%</p>
             )}
           </div>

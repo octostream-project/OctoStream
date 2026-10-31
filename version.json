@@ -1,18 +1,18 @@
 {
-  "versionCode": 20920,
-  "versionName": "2.09.20",
+  "versionCode": 20921,
+  "versionName": "2.09.21",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-arm64-v8a.apk",
-  "sha256": "80d2e614e9cd7ec2cc6a4598ad00a3b13e2655e8f4c1593c1eda2503ba61e296",
-  "notes": "Home configurable, busqueda global, perfiles, sort de fuentes, plugin perf, fix handshake WARP y timeout de doble salto",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.21/octostream-2.09.21-arm64-v8a.apk",
+  "sha256": "b7f8bda0ec5b9524e220832c2e12206cd42ef7dd30042b126fcbf9b1ace9a3cc",
+  "notes": "Catalogos de plataformas, perfiles sincronizables, ver juntos LAN, cola de descargas con prioridad y fiabilidad local de fuentes",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.20/octostream-2.09.20-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.21/octostream-2.09.21-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.21/octostream-2.09.21-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.21/octostream-2.09.21-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "80d2e614e9cd7ec2cc6a4598ad00a3b13e2655e8f4c1593c1eda2503ba61e296",
-    "armeabi-v7a": "5dde8a4806c9e369f1495bb71a2efb3d31361fb0815b225c9510538ee7b157bc",
-    "x86_64": "e8ae32495ae14d83ff9f4d990ea8e3132e8bbec083516faff8a7154d9d5f5c8c"
+    "arm64-v8a": "b7f8bda0ec5b9524e220832c2e12206cd42ef7dd30042b126fcbf9b1ace9a3cc",
+    "armeabi-v7a": "11380420dc3eb49e0a0ede327727e80235530168c0a596f79e3a9670e176a5ba",
+    "x86_64": "c6a2adbb9becabcc0ee16ec84e76b61d0c60ee6e08a9750e4e37f46ee66e982a"
   }
 }

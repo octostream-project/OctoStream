@@ -75,7 +75,7 @@ export default function ProfileSettings() {
           </div>
         </div>
         <p className="mb-3 rounded-lg bg-dark-900/70 px-3 py-2 text-xs text-dark-400">
-          Los perfiles se guardan en este dispositivo. Para evitar mezclar bibliotecas, sincronización LAN solo combina datos cuando coincide el perfil; el registro de perfiles no se exporta en copias de configuración.
+          La sincronización LAN empareja perfiles por nombre y tipo (general/infantil); crea el mismo perfil en ambos dispositivos. El PIN no viaja por LAN. Las copias de seguridad pueden incluir perfiles y sus datos seleccionados.
         </p>
         <div className="space-y-2">
           {profiles.map(profile => (

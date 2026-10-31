@@ -11,6 +11,7 @@ import { SkeletonGrid, SkeletonRow } from '../components/ui/SkeletonCard.jsx'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { useStore } from '../store/useStore.js'
 import { isAllowedInProfile } from '../utils/profiles.js'
+import { getStreamingPlatformCatalogs, getStreamingPlatformCatalogContent } from '../plugins/bundled/streamingCatalogs.js'
 
 // Only TMDB catalogs are shown on the Home page.
 // Plurtasko channels are accessible from the Search and Details pages.
@@ -124,7 +125,32 @@ export default function Home() {
   const [selectedCat, setSelectedCat] = useState(null) // null = all categories (rows), else grid
   const [homePrefs, setHomePrefs] = useState(readHomePrefs)
   const [customizing, setCustomizing] = useState(false)
+  const [platformCatalogs, setPlatformCatalogs] = useState([])
+  const [platformCatalogsLoading, setPlatformCatalogsLoading] = useState(true)
+  const [platformCatalogError, setPlatformCatalogError] = useState('')
+  const [platformCatalogReload, setPlatformCatalogReload] = useState(0)
   const reqIdRef = useRef(0)
+
+  useEffect(() => {
+    let active = true
+    const loadPlatformCatalogs = async () => {
+      try {
+        await waitForWarp()
+        const catalogs = await getStreamingPlatformCatalogs()
+        if (active) {
+          setPlatformCatalogs(catalogs)
+          setPlatformCatalogError('')
+        }
+      } catch (err) {
+        if (active) setPlatformCatalogError('No se pudieron cargar los catálogos de plataformas.')
+        console.warn('[Home] Streaming catalogs unavailable:', err?.message || err)
+      } finally {
+        if (active) setPlatformCatalogsLoading(false)
+      }
+    }
+    loadPlatformCatalogs()
+    return () => { active = false }
+  }, [platformCatalogReload])
 
   useEffect(() => {
     const myReqId = ++reqIdRef.current
@@ -177,9 +203,25 @@ export default function Home() {
       await Promise.allSettled(initial.map(loadOne))
       if (myReqId === reqIdRef.current) setLoading(false)
 
+      // Streaming-service catalogs are opt-in and loaded separately so they
+      // don't delay the standard Home rows or query unselected platforms.
+      const selectedPlatforms = new Set(homePrefs.platforms?.[tab] || [])
+      const enabledCatalogs = platformCatalogs.filter(c =>
+        c.type === type && selectedPlatforms.has(c.key))
+      Promise.allSettled(enabledCatalogs.map(async catalog => {
+        const items = await getStreamingPlatformCatalogContent(catalog, { limit: 20 })
+        if (myReqId !== reqIdRef.current) return
+        const safeItems = items.filter(item => isAllowedInProfile(item, profile))
+        if (!safeItems.length) return
+        const key = `streaming-${catalog.key}`
+        setRows(prev => [
+          ...prev.filter(row => row.key !== key),
+          { title: catalog.name, items: safeItems, key },
+        ])
+      }))
     }
     loadContent()
-  }, [tab, selectedCat, homePrefs, profile])
+  }, [tab, selectedCat, homePrefs, profile, platformCatalogs])
 
   const allCats = orderedCategories(TAB_CATS[tab] || MOVIE_CATS, homePrefs, tab)
   const hiddenCats = new Set(homePrefs.hidden?.[tab] || [])
@@ -200,6 +242,13 @@ export default function Home() {
     hidden.has(id) ? hidden.delete(id) : hidden.add(id)
     saveHomePrefs({ ...homePrefs, hidden: { ...homePrefs.hidden, [tab]: [...hidden] } })
   }
+  const toggleStreamingCatalog = (key) => {
+    const selected = new Set(homePrefs.platforms?.[tab] || [])
+    selected.has(key) ? selected.delete(key) : selected.add(key)
+    saveHomePrefs({ ...homePrefs, platforms: { ...homePrefs.platforms, [tab]: [...selected] } })
+  }
+  const visiblePlatformCatalogs = platformCatalogs.filter(c => c.type === TAB_TYPE[tab])
+  const enabledPlatformCatalogs = new Set(homePrefs.platforms?.[tab] || [])
   const cardSize = homePrefs.cardSize || 'normal'
 
   return (
@@ -252,6 +301,44 @@ export default function Home() {
                 </button>
               </div>
             ))}
+          </div>
+          <div className="mt-4 border-t border-dark-700 pt-4">
+            <h3 className="mb-1 text-sm font-semibold text-white">Catálogos de plataformas</h3>
+            <p className="mb-3 text-xs text-dark-400">Activa filas de Netflix, HBO Max, Prime Video y otras. Solo se consultan al activarlas; la reproducción sigue buscando fuentes en OctoStream.</p>
+            {platformCatalogsLoading ? (
+              <p className="text-xs text-dark-500">Cargando plataformas disponibles…</p>
+            ) : platformCatalogError ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-amber-300">{platformCatalogError}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlatformCatalogError('')
+                    setPlatformCatalogsLoading(true)
+                    setPlatformCatalogReload(v => v + 1)
+                  }}
+                  className="rounded-lg bg-dark-700 px-2.5 py-1.5 text-dark-200 hover:text-white"
+                >Reintentar</button>
+              </div>
+            ) : visiblePlatformCatalogs.length ? (
+              <div className="flex flex-wrap gap-2">
+                {visiblePlatformCatalogs.map(catalog => {
+                  const active = enabledPlatformCatalogs.has(catalog.key)
+                  return (
+                    <button
+                      key={catalog.key}
+                      type="button"
+                      data-tv-card
+                      aria-pressed={active}
+                      onClick={() => toggleStreamingCatalog(catalog.key)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${active ? 'border-primary-500 bg-primary-600/25 text-white' : 'border-dark-700 bg-dark-900 text-dark-300 hover:border-dark-500 hover:text-white'}`}
+                    >{active ? '✓ ' : '+ '}{catalog.name}</button>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-dark-500">No hay catálogos de plataformas disponibles.</p>
+            )}
           </div>
         </section>
       )}

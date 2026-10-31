@@ -13,6 +13,22 @@ const DATA_KEYS = [
 ]
 
 const defaultProfile = () => ({ id: 'default', name: 'Principal', kids: false, createdAt: 0 })
+const toHex = bytes => [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('')
+const fromHex = hex => new Uint8Array((String(hex || '').match(/.{2}/g) || []).map(b => parseInt(b, 16)))
+async function derivePinHash(profileId, pin, saltBytes) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(`octostream:${profileId}:${pin}`),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  return crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 210000, hash: 'SHA-256' },
+    key,
+    256,
+  )
+}
 
 export function getProfiles() {
   try {
@@ -39,6 +55,10 @@ export async function createProfile(name, { kids = false, pin = '' } = {}) {
   const cleanName = String(name || '').trim().slice(0, 24)
   if (!cleanName) throw new Error('Escribe un nombre para el perfil.')
   const profiles = getProfiles()
+  const normalizedName = cleanName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  if (profiles.some(p => p.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === normalizedName)) {
+    throw new Error('Ya existe un perfil con ese nombre.')
+  }
   if (profiles.length >= MAX_PROFILES) throw new Error(`Máximo ${MAX_PROFILES} perfiles.`)
   const profile = {
     id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -49,8 +69,9 @@ export async function createProfile(name, { kids = false, pin = '' } = {}) {
   if (kids) {
     if (!/^\d{4,8}$/.test(pin)) throw new Error('El PIN infantil debe tener entre 4 y 8 dígitos.')
     if (!globalThis.crypto?.subtle) throw new Error('Este dispositivo no permite guardar el PIN de forma segura.')
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`octostream:${profile.id}:${pin}`))
-    profile.pinHash = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+    const salt = crypto.getRandomValues(new Uint8Array(16))
+    profile.pinSalt = toHex(salt)
+    profile.pinHash = toHex(await derivePinHash(profile.id, pin, salt))
   }
   profiles.push(profile)
   setItemSync(PROFILES_KEY, JSON.stringify(profiles))
@@ -68,9 +89,21 @@ export function setActiveProfileId(id) {
 export async function canLeaveProfile(profile, pin = '') {
   if (!profile?.kids || !profile.pinHash) return true
   if (!globalThis.crypto?.subtle) return false
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`octostream:${profile.id}:${pin}`))
-  const hash = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
-  return hash === profile.pinHash
+  if (profile.pinSalt) {
+    return toHex(await derivePinHash(profile.id, pin, fromHex(profile.pinSalt))) === profile.pinHash
+  }
+  // Migrate profiles created by 2.09.20, which stored a single SHA-256 hash.
+  const legacyDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`octostream:${profile.id}:${pin}`))
+  if (toHex(legacyDigest) !== profile.pinHash) return false
+  const profiles = getProfiles()
+  const migrated = profiles.find(item => item.id === profile.id)
+  if (migrated) {
+    const salt = crypto.getRandomValues(new Uint8Array(16))
+    migrated.pinSalt = toHex(salt)
+    migrated.pinHash = toHex(await derivePinHash(profile.id, pin, salt))
+    persistProfiles(profiles)
+  }
+  return true
 }
 
 export function deleteProfileData(id) {

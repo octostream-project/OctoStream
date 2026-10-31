@@ -5,7 +5,8 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { toast } from './ui/Toast.jsx'
 import Modal from './ui/Modal.jsx'
 import OctoLoader from './OctoLoader.jsx'
-import { Play, Trash2, Download, FolderOpen, HardDrive, Usb, FolderSearch } from 'lucide-react'
+import { Play, Trash2, Download, FolderOpen, HardDrive, Usb, FolderSearch, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { cancelQueuedDownload, getDownloadQueue, moveQueuedDownload, subscribeDownloadQueue } from '../utils/downloadQueue.js'
 
 // Una llamada nativa que nunca resuelve no puede dejar la UI girando.
 const withTimeout = (p, ms) => Promise.race([
@@ -19,6 +20,7 @@ const withTimeout = (p, ms) => Promise.race([
 export default function DownloadsList() {
   const [downloads, setDownloads] = useState([])
   const [active, setActive] = useState(null)
+  const [queue, setQueue] = useState(getDownloadQueue)
   const [dirInfo, setDirInfo] = useState(null)
   const [pickingDir, setPickingDir] = useState(false)
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
@@ -48,6 +50,7 @@ export default function DownloadsList() {
 
   useEffect(() => {
     let alive = true
+    const unsubscribeQueue = subscribeDownloadQueue(setQueue)
     const t = setTimeout(() => { refresh() }, 0)
     const sub = (async () => {
       const engine = await getTorrentEngine()
@@ -65,6 +68,7 @@ export default function DownloadsList() {
     return () => {
       alive = false
       clearTimeout(t)
+      unsubscribeQueue()
       try { listenerRef.current?.remove?.() } catch { /* noop */ }
       listenerRef.current = null
     }
@@ -263,6 +267,11 @@ export default function DownloadsList() {
   }
 
   if (!canDownload) return null
+  const queueActive = queue.find(job => job.status === 'starting' || job.status === 'downloading')
+  const shownActive = queue.length
+    ? (queueActive ? { name: queueActive.name, progress: queueActive.progress } : null)
+    : active
+  const waitingJobs = queue.filter(job => job.status === 'queued' || job.status === 'failed')
 
   return (
     <div>
@@ -293,20 +302,71 @@ export default function DownloadsList() {
         </div>
       </div>
 
-      {active && (
+      {shownActive && (
         <div className="bg-dark-700/50 rounded-lg p-3 mb-3">
           <div className="flex items-center gap-2 text-sm text-white">
             <OctoLoader size={15} className="text-primary-400 flex-shrink-0" />
-            <span className="truncate flex-1">{active.name}</span>
-            <span className="text-primary-400 text-xs flex-shrink-0">{Math.round((active.progress || 0) * 100)}%</span>
+            <span className="truncate flex-1">{shownActive.name}</span>
+            <span className="text-primary-400 text-xs flex-shrink-0">{Math.round((shownActive.progress || 0) * 100)}%</span>
           </div>
           <div className="w-full h-1.5 bg-dark-600 rounded-full mt-2 overflow-hidden">
-            <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${Math.round((active.progress || 0) * 100)}%` }} />
+            <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${Math.round((shownActive.progress || 0) * 100)}%` }} />
           </div>
         </div>
       )}
 
-      {downloads.length === 0 && !active ? (
+      {waitingJobs.length > 0 && (
+        <div className="space-y-2 mb-3" aria-label="Cola de descargas">
+          {waitingJobs.map(job => {
+            const queuedJobs = queue.filter(entry => entry.status === 'queued')
+            const position = queuedJobs.findIndex(entry => entry.id === job.id)
+            return (
+              <div key={job.id} className="flex items-center gap-3 bg-dark-700/40 rounded-lg p-3">
+                <Download size={15} className={job.status === 'failed' ? 'text-red-400' : 'text-dark-400'} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm truncate">{job.name}</p>
+                  <p className={`text-xs ${job.status === 'failed' ? 'text-red-300' : 'text-dark-500'}`}>
+                    {job.status === 'failed' ? (job.error || 'Error de descarga') : 'En cola; espera a que termine la reproducción'}
+                  </p>
+                </div>
+                {job.status === 'queued' && (
+                  <>
+                    <button
+                      onClick={() => moveQueuedDownload(job.id, -1)}
+                      disabled={position <= 0}
+                      className="btn-ghost p-2 disabled:opacity-30"
+                      title="Subir prioridad"
+                      aria-label={`Subir ${job.name} en la cola`}
+                    >
+                      <ArrowUp size={16} />
+                    </button>
+                    <button
+                      onClick={() => moveQueuedDownload(job.id, 1)}
+                      disabled={position < 0 || position === queuedJobs.length - 1}
+                      className="btn-ghost p-2 disabled:opacity-30"
+                      title="Bajar prioridad"
+                      aria-label={`Bajar ${job.name} en la cola`}
+                    >
+                      <ArrowDown size={16} />
+                    </button>
+                    <button
+                      onClick={() => cancelQueuedDownload(job.id)}
+                      className="btn-ghost p-2"
+                      title="Quitar de la cola"
+                      aria-label={`Quitar ${job.name} de la cola`}
+                    >
+                      <X size={16} />
+                    </button>
+                  </>
+                )}
+              </div>
+            )
+          })}
+          <p className="text-dark-500 text-xs">La cola dura mientras la app está abierta; los enlaces firmados no se guardan por privacidad.</p>
+        </div>
+      )}
+
+      {downloads.length === 0 && !shownActive && waitingJobs.length === 0 ? (
         <p className="text-dark-500 text-sm flex items-center gap-1">
           Nada descargado todavía. Usa el icono <Download size={13} className="inline-block" /> en los enlaces de una ficha.
         </p>

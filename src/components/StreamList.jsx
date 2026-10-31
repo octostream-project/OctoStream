@@ -3,6 +3,7 @@ import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, getLangPrioritySaved, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
 import { isAlldebridEnabled, hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
+import { compareStreamsByReliability, subscribeStreamReliability } from '../utils/streamReliability.js'
 
 // Re-render cuando cambia el progreso de los magnets en cola de AllDebrid.
 function useDebridJobsTick() {
@@ -10,11 +11,17 @@ function useDebridJobsTick() {
   useEffect(() => subscribeDebridJobs(() => setTick(t => t + 1)), [])
 }
 
+function useStreamReliabilityTick() {
+  const [, setTick] = useState(0)
+  useEffect(() => subscribeStreamReliability(() => setTick(t => t + 1)), [])
+}
+
 // Lista de fuentes de un contenido/episodio. Estaba duplicada dos veces en
 // Details.jsx (fuentes de película y de episodio): layout grid cuando hay
 // más de 6 enlaces, lista completa si no.
 export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
   useDebridJobsTick()
+  useStreamReliabilityTick()
   // Filtros de la lista (persisten entre fichas): idioma preferido,
   // solo listos en debrid, y solo fuentes con seeders.
   const FILTERS_KEY = 'octostream_stream_filters'
@@ -44,6 +51,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
     seeds: bySeeds,
     quality: (a, b) => qualityRank(b) - qualityRank(a) || bySeeds(a, b),
     cached: (a, b) => Number(b.cached === true) - Number(a.cached === true) || byLangSeeds(a, b),
+    reliable: (a, b) => compareStreamsByReliability(a, b, langRank),
   }
   const sortMode = comparators[filters.sort] ? filters.sort : 'language'
   const toggleFilter = (k) => setFilters(f => {
@@ -100,6 +108,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
           <option value="seeds">Más seeds</option>
           <option value="cached">Cacheados primero</option>
           <option value="quality">Calidad y seeds</option>
+          <option value="reliable">Fiabilidad (este dispositivo)</option>
         </select>
       </label>
     </div>

@@ -285,6 +285,7 @@ class SyncServer {
             url: j.url || '', title: j.title || '', type: j.type || 'hls',
             mode: j.mode || 'live', imdbId: j.imdbId || '',
             season: j.season || 0, episode: j.episode || 0,
+            partyId: /^[a-zA-Z0-9_-]{8,80}$/.test(j.partyId || '') ? j.partyId : '',
           })
         } catch {}
         this._json(res, 200, { ok: true }, origin)
