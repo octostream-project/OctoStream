@@ -1,18 +1,18 @@
 {
-  "versionCode": 20922,
-  "versionName": "2.09.22",
+  "versionCode": 20923,
+  "versionName": "2.09.23",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.22/octostream-2.09.22-arm64-v8a.apk",
-  "sha256": "3ecda3590e6e2a532a43e501cc0de3c0dd7c220148b777fe30b18162391ffa6d",
-  "notes": "Evita subir torrents a AllDebrid sin confirmacion; catalogos de plataformas, perfiles, ver juntos y cola de descargas",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-arm64-v8a.apk",
+  "sha256": "effe69c277beb88b5da2f68109a57ff3384e6ea5a28e66b72dc4091c78784c2f",
+  "notes": "AllDebrid solo anade magnets tras confirmacion; controles del ExoPlayer en horizontal y vuelta a la orientacion anterior",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.22/octostream-2.09.22-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.22/octostream-2.09.22-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.22/octostream-2.09.22-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.23/octostream-2.09.23-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "3ecda3590e6e2a532a43e501cc0de3c0dd7c220148b777fe30b18162391ffa6d",
-    "armeabi-v7a": "80a6a59e86418983a67d647b03b5e962b04785e70d1712e78063437cbdfe8b82",
-    "x86_64": "8a771f3c3d60cdccbf7549d5780e92359be98742783a57486782764c11797476"
+    "arm64-v8a": "effe69c277beb88b5da2f68109a57ff3384e6ea5a28e66b72dc4091c78784c2f",
+    "armeabi-v7a": "02291f1d0f9b3ac87e76b475e32c72929d2f3c1a918e00e2bc3083818eacb783",
+    "x86_64": "4f8d5606cc47624b3dc959edb1300938b9546da9982b7eb140ed2318d72eef50"
   }
 }

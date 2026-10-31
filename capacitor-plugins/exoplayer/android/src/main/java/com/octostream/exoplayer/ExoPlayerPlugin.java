@@ -2,9 +2,11 @@ package com.octostream.exoplayer;
 
 import com.octostream.exoplayer.R;
 
+import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -150,6 +152,8 @@ public class ExoPlayerPlugin extends Plugin {
     private ExoPlayer player = null;
     private PlayerView playerView = null;
     private Dialog dialog = null;
+    private int previousRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+    private boolean landscapeLockedForPlayback = false;
 
     // Mini-player PiP: un segundo ExoPlayer ligero en una vista flotante
     // (decorView cuando el player está cerrado, rootLayout cuando está
@@ -4476,6 +4480,27 @@ public class ExoPlayerPlugin extends Plugin {
         }
     }
 
+    private void lockLandscapeForPlayback() {
+        Activity activity = getActivity();
+        if (activity == null) return;
+        if (!landscapeLockedForPlayback) {
+            previousRequestedOrientation = activity.getRequestedOrientation();
+            landscapeLockedForPlayback = true;
+        }
+        activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+    }
+
+    private void restorePlaybackOrientation() {
+        if (!landscapeLockedForPlayback) return;
+        Activity activity = getActivity();
+        int orientation = previousRequestedOrientation;
+        previousRequestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        landscapeLockedForPlayback = false;
+        if (activity != null && !activity.isFinishing()) {
+            activity.setRequestedOrientation(orientation);
+        }
+    }
+
     private void openPlayer(String url, String streamType, boolean direct, String licenseUrl,
                             JSONObject headersJson, JSONObject drmHeadersJson, String title,
                             String mode, JSONArray channels, int chanIndex, String epgNowStr, String epgNextStr,
@@ -4580,6 +4605,10 @@ public class ExoPlayerPlugin extends Plugin {
         suppressBackUntilOpen = false;
         backExitPressedAt = 0;
         lastBackHandledAt = 0;
+
+        // Native controls need the full-width landscape layout on phones;
+        // keep the original app orientation and restore it when playback ends.
+        lockLandscapeForPlayback();
 
         // Create full-screen dialog
         dialog = new Dialog(context, android.R.style.Theme_Black_NoTitleBar_Fullscreen) {
@@ -10730,6 +10759,7 @@ public class ExoPlayerPlugin extends Plugin {
         // Si el mini-player PiP vivía dentro del diálogo, re-anclarlo al
         // decorView para que siga visible sobre la app.
         if (pipPlayer != null) attachPipToBestParent();
+        if (!suppressClosedEvent) restorePlaybackOrientation();
         if (!suppressClosedEvent) {
             JSObject event = new JSObject();
             event.put("state", "closed");
