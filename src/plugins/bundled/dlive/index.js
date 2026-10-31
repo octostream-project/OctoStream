@@ -130,19 +130,7 @@ const SPORT_LABEL = {
   'dlive-tennis': 'Tenis', 'dlive-motor': 'Motor', 'dlive-others': 'Otros',
 }
 
-// The site shows HH:mm for "today" (schedule resets daily); treat as local
-// time and flag live if it started within the last 3h.
-function eventDate(time) {
-  const m = String(time || '').match(/(\d{1,2}):(\d{2})/)
-  if (!m) return 0
-  const d = new Date()
-  d.setHours(Number(m[1]), Number(m[2]), 0, 0)
-  return d.getTime()
-}
-
 function toItem(e, catId) {
-  const matchDate = eventDate(e.time)
-  const isLive = e.live || (matchDate && Date.now() >= matchDate && Date.now() - matchDate < 3 * 3600 * 1000)
   return {
     id: eventId(e),
     type: 'channel',
@@ -155,8 +143,10 @@ function toItem(e, catId) {
     _league: { name: e.league || e.category },
     _score: null,
     _sofaSport: sofaSportFor(e.category, e.league),
-    _matchDate: matchDate,
-    _isLive: !!isLive,
+    // DLive only publishes HH:mm, not the event date. Never turn that into
+    // today's date; FCTV/Marca provide the authoritative kickoff timestamp.
+    _matchDate: 0,
+    _isLive: !!e.live,
     genre: SPORT_LABEL[catId] || 'Otros',
     _links: e.links,
   }

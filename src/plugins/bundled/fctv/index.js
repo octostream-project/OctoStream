@@ -16,6 +16,7 @@ import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '.
 import { teamsMatch, canonTeam } from '../../../utils/teamMatch.js'
 import { parseMasterQuality } from '../../../utils/streamProbe.js'
 import { langFromChannelLabel } from '../../../utils/streamMeta.js'
+import { isMatchInLiveWindow } from '../../../utils/sportsMatch.js'
 
 // slug → API sportType (values reverse-engineered from the official app)
 const SPORT_TYPES = {
@@ -502,7 +503,7 @@ export function fctvLookupItem(item) {
     if (!best || Math.abs(e.dateMs - (qd || Date.now())) < Math.abs(best.dateMs - (qd || Date.now()))) best = e
   }
   if (!best) { lookupCache.set(cacheKey, null); return null }
-  const matchDate = best.dateMs || qd || Date.now()
+  const matchDate = best.dateMs || qd || 0
   const m = { matchId: best.matchId, sportType: best.sportType, leagueSlug: best.leagueSlug, slug: best.slug, matchDate }
   const webDomain = cache?.webDomain || OFFLINE_CFG.webDomain
   const name = `${home} vs ${away}`
@@ -555,7 +556,9 @@ function matchToItem(m, cfg, streamEntry) {
     _leagueSlug: m.leagueSlug,
     _slug: m.slug,
     _matchDate: m.matchDate,
-    _isLive: hasStream,
+    // Stream availability is not live status: FCTV also exposes stale and
+    // upcoming streams. Only mark a match live around its real kickoff.
+    _isLive: hasStream && isMatchInLiveWindow(m.matchDate),
     // Structured metadata for the sports page (team crests, league, kickoff).
     _home: m.home?.name ? { name: m.home.name, logo: m.home.logo || null } : null,
     _away: m.away?.name ? { name: m.away.name, logo: m.away.logo || null } : null,

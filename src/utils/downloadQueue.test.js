@@ -101,6 +101,42 @@ describe('download queue', () => {
     queue.destroy()
   })
 
+  it('pauses an active job and can resume it explicitly', async () => {
+    const engine = mockEngine()
+    const queue = createDownloadQueue({
+      getEngine: async () => engine,
+      isPlaybackActive: async () => false,
+    })
+    const start = vi.fn(e => e.download({ url: 'magnet:?xt=urn:btih:pause' }))
+    const id = queue.enqueue({ name: 'pause me', kind: 'torrent', start })
+    await tick()
+
+    expect(await queue.pauseActive()).toBe(true)
+    expect(queue.getSnapshot().find(job => job.id === id)?.status).toBe('paused')
+    expect(queue.resumeQueued(id)).toBe(true)
+    await tick()
+    expect(start).toHaveBeenCalledTimes(2)
+    queue.destroy()
+  })
+
+  it('retries a failed job using its in-memory start handler', async () => {
+    const engine = mockEngine()
+    const queue = createDownloadQueue({
+      getEngine: async () => engine,
+      isPlaybackActive: async () => false,
+    })
+    const start = vi.fn(e => e.download({ url: 'magnet:?xt=urn:btih:retry' }))
+    const id = queue.enqueue({ name: 'retry me', kind: 'torrent', start })
+    await tick()
+
+    engine.emit({ state: 'error', progress: 0 })
+    expect(queue.getSnapshot().find(job => job.id === id)?.status).toBe('failed')
+    expect(queue.retryFailed(id)).toBe(true)
+    await tick()
+    expect(start).toHaveBeenCalledTimes(2)
+    queue.destroy()
+  })
+
   it('finishes HTTP jobs on their completion event even if the bridge resolves early', async () => {
     const engine = mockEngine()
     const queue = createDownloadQueue({
@@ -116,6 +152,57 @@ describe('download queue', () => {
     expect(queue.getSnapshot().find(job => job.id === id)?.status).toBe('downloading')
     engine.emit({ state: 'finished', progress: 1, fileName: 'direct.mp4' })
     expect(queue.getSnapshot().find(job => job.id === id)?.status).toBe('completed')
+    queue.destroy()
+  })
+
+  it('persists queued torrent jobs and restores them on the next session', async () => {
+    const mem = {}
+    const store = { get: k => mem[k] ?? null, set: (k, v) => { mem[k] = v } }
+    const engine = mockEngine()
+    engine.download = vi.fn(async () => new Promise(() => {})) // never completes
+    const make = () => createDownloadQueue({
+      getEngine: async () => engine,
+      isPlaybackActive: async () => false,
+      persistStore: store,
+    })
+    const q1 = make()
+    q1.enqueue({
+      name: 'peli',
+      kind: 'torrent',
+      persist: { kind: 'torrent', url: 'magnet:?xt=urn:btih:abc', season: 1, episode: 2 },
+      start: e => e.download({ url: 'magnet:?xt=urn:btih:abc' }),
+    })
+    await tick()
+    const saved = mem.octostream_download_queue
+    expect(saved[0].persist.url).toBe('magnet:?xt=urn:btih:abc')
+    q1.destroy()
+
+    const q2 = make()
+    const restored = q2.restorePersisted()
+    expect(restored).toBe(1)
+    await tick()
+    expect(engine.download).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'magnet:?xt=urn:btih:abc', season: 1, episode: 2 }))
+    q2.destroy()
+  })
+
+  it('does not persist plain http jobs (signed URLs must not hit disk)', async () => {
+    const mem = {}
+    const store = { get: k => mem[k] ?? null, set: (k, v) => { mem[k] = v } }
+    const queue = createDownloadQueue({
+      getEngine: async () => mockEngine(),
+      isPlaybackActive: async () => false,
+      persistStore: store,
+    })
+    queue.enqueue({
+      name: 'signed',
+      kind: 'http',
+      persist: { kind: 'http', url: 'https://cdn.example/signed?token=x' },
+      start: () => ({}),
+    })
+    await tick()
+    const saved = mem.octostream_download_queue || []
+    expect(saved).toHaveLength(0)
     queue.destroy()
   })
 })

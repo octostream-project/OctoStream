@@ -5660,6 +5660,27 @@ public class ExoPlayerPlugin extends Plugin {
         }
     }
 
+    // googlevideo firma la URL con la IP que resolvió (NewPipe sale por red
+    // física): reproducir por el túnel la invalida con 403. Mismo bypass que
+    // GEO_HOST de CloudProxy.
+    private boolean isYouTubeDomain(String url) {
+        if (url == null) return false;
+        try {
+            String host = Uri.parse(url).getHost();
+            if (host == null) return false;
+            host = host.toLowerCase(java.util.Locale.ROOT);
+            return host.equals("googlevideo.com") || host.endsWith(".googlevideo.com")
+                    || host.equals("youtube.com") || host.endsWith(".youtube.com")
+                    || host.equals("youtube-nocookie.com") || host.endsWith(".youtube-nocookie.com")
+                    || host.equals("youtu.be") || host.endsWith(".youtu.be")
+                    || host.equals("ytimg.com") || host.endsWith(".ytimg.com")
+                    || host.equals("ggpht.com") || host.endsWith(".ggpht.com")
+                    || host.equals("youtubei.googleapis.com") || host.endsWith(".youtubei.googleapis.com");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private MediaSource buildMediaSource(String url, String streamType,
                                          DataSource.Factory dataSourceFactory,
                                          DrmSessionManager drmSessionManager,
@@ -7325,7 +7346,7 @@ public class ExoPlayerPlugin extends Plugin {
     // una URL debe salir por el proxy HTTP local de CloudProxy.
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
-        if (isTdtSpainDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
+        if (isTdtSpainDomain(url) || isYouTubeDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
         // La única salida física permitida para streams externos es la marcada
         // explícitamente como TDT/direct arriba. Si WARP cae, conservar la ruta
         // del proxy hace que el stream falle y active la reconexión, en vez de
@@ -7345,7 +7366,7 @@ public class ExoPlayerPlugin extends Plugin {
             boolean direct, boolean forceBypassProxy) {
         String ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
         boolean useWarpProxy = shouldUseWarpProxy(url, direct, forceBypassProxy);
-        if (useWarpProxy || direct || forceBypassProxy || isTdtSpainDomain(url)) {
+        if (useWarpProxy || direct || forceBypassProxy || isTdtSpainDomain(url) || isYouTubeDomain(url)) {
             try {
                 OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                         .connectTimeout(15, TimeUnit.SECONDS)
@@ -7877,7 +7898,7 @@ public class ExoPlayerPlugin extends Plugin {
         // solo con iconos (estilo Stremio): CC±/1x/Fit/boost viven en este menú.
         String[] options = {"Calidad", "Idioma de audio", "Subtítulos", "Velocidad",
                 "Relación de aspecto", "Sincronía de subtítulos", "Amplificador de volumen",
-                "Temporizador de apagado"};
+                "Temporizador de apagado", "Guardar marcador"};
         showInPlayerMenu("Ajustes de reproducción", options, -1, (which) -> {
             switch (which) {
                 case 0: showQualityMenu(); break;
@@ -7888,8 +7909,25 @@ public class ExoPlayerPlugin extends Plugin {
                 case 5: showSubtitleDelayMenu(); break;
                 case 6: showBoostMenu(); break;
                 case 7: showSleepTimerMenu(); break;
+                case 8: saveBookmarkHere(); break;
             }
         });
+    }
+
+    // Marcador: JS guarda la posición en el perfil activo — el nativo solo
+    // emite el evento y confirma con un Toast (sin URLs ni datos sensibles).
+    private void saveBookmarkHere() {
+        if (player == null) return;
+        long pos = Math.max(0, player.getCurrentPosition());
+        long dur = Math.max(0, player.getDuration());
+        com.getcapacitor.JSObject ev = new com.getcapacitor.JSObject();
+        ev.put("position", pos);
+        ev.put("duration", dur);
+        notifyListeners("bookmarkRequested", ev);
+        long s = pos / 1000;
+        Toast.makeText(getContext(),
+                "Marcador guardado en " + (s / 60) + ":" + String.format(java.util.Locale.US, "%02d", s % 60),
+                Toast.LENGTH_SHORT).show();
     }
 
     // Apagar la app al cabo de X minutos (película/dormir). El título del

@@ -460,6 +460,7 @@ export const tmdbPlugin = createPlugin(
         const videos = data.videos.results.filter(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
         // Prefer Spanish trailers (es-ES or es), then any, then English
         const trailer =
+          videos.find(v => v.iso_639_1 === 'es' && v.iso_3166_1 === 'ES') ||
           videos.find(v => v.iso_639_1 === 'es' || v.iso_639_1 === 'es-ES') ||
           videos.find(v => v.iso_639_1 === 'es-419') ||
           videos[0]

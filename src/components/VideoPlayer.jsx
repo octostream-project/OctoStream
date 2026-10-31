@@ -8,7 +8,7 @@ import {
   playStream, stopPlayback, pausePlayback, resumePlayback, seekTo,
   isExoPlayerAvailable, isDesktopPlayerAvailable, playEmbed, playRelay,
   resolveEmbed, setChannels, setEpisodes, setNextEpisode,
-  setCastRequestListener, setLoadingText, setPlaybackStateListener,
+  setCastRequestListener, setBookmarkRequestListener, setLoadingText, setPlaybackStateListener,
   isMpvEmbedded, mpvOscState, mpvOscMenu, mpvMouse, mpvKey, mpvPip, mpvClick,
   isPlayerActive,
 } from '../utils/exoPlayer.js'
@@ -20,7 +20,9 @@ import { unlockLink as adUnlockLink } from '../plugins/bundled/alldebrid.js'
 import { pluginManager } from '../plugins/manager.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { useStore } from '../store/useStore.js'
-import { X, ExternalLink, Captions } from 'lucide-react'
+import { addBookmark, mediaKeyFor } from '../utils/bookmarks.js'
+import { playbackHelpForError, sanitizePlaybackError } from '../utils/playbackDiagnostics.js'
+import { X, ExternalLink, Captions, Bookmark } from 'lucide-react'
 import CastIcon from './CastIcon.jsx'
 import CastMenu from './CastMenu.jsx'
 import { sendStop, sendWatchPartyState } from '../utils/remotePlay.js'
@@ -49,7 +51,7 @@ function torrentStatusText(ev) {
   return `Descargando torrent… ${pct}%\n${parts.join(' · ')}`
 }
 
-function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null, onLoadSeason = null, partyId = '' }) {
+function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta, startTime = 0, channels = null, channelIndex = -1, onZapChannel = null, nextEpisode = null, onPlayNext = null, episodes = null, onPlayEpisode = null, onLoadSeason = null, partyId = '', onRequestAlternative = null }) {
   const updateProgress = useStore(s => s.updateProgress)
   const [loading, setLoading] = useState(true)
   const [resolvingEmbed, setResolvingEmbed] = useState(false)
@@ -157,6 +159,11 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   const episodesRef = useRef(episodes)
   const onPlayEpisodeRef = useRef(onPlayEpisode)
   const onLoadSeasonRef = useRef(onLoadSeason)
+  // Reintento automático con otra fuente: el padre decide el siguiente
+  // enlace no probado y lo asigna a su estado → la prop stream cambia y el
+  // efecto principal re-inicia la reproducción sin salir del player.
+  const onRequestAlternativeRef = useRef(onRequestAlternative)
+  useEffect(() => { onRequestAlternativeRef.current = onRequestAlternative })
   // Lista que está mostrando el panel nativo AHORA MISMO — cambia cuando el
   // usuario elige otra temporada en los chips (seasonSelected → setEpisodes).
   const panelEpsRef = useRef({ season: meta?.season ?? 0, eps: episodes || [] })
@@ -355,6 +362,28 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     if (playerOpenTimerRef.current) {
       clearTimeout(playerOpenTimerRef.current)
       playerOpenTimerRef.current = null
+    }
+
+    // Sustituye al setError de los caminos fatales: primero ofrece al padre
+    // cambiar a otra fuente; si devuelve false (no quedan / límite), se
+    // muestra el error como antes. Una sola petición por stream.
+    let alternativeAsked = false
+    const tryAlternativeOrFail = (msg) => {
+      const ask = onRequestAlternativeRef.current
+      if (!ask || alternativeAsked || closedRef.current || cancelled || mode === 'live') {
+        setError(msg)
+        return
+      }
+      alternativeAsked = true
+      Promise.resolve()
+        .then(() => ask(stream, { position: currentTimeRef.current }))
+        .then((switched) => {
+          if (cancelled || closedRef.current) return
+          if (!switched) setError(msg)
+          // switched === true → el padre cambia la prop stream y el efecto
+          // principal re-inicia con el nuevo enlace automáticamente.
+        })
+        .catch(() => { if (!cancelled && !closedRef.current) setError(msg) })
     }
 
     const streamChanged = lastStreamRef.current !== stream
@@ -784,7 +813,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           setTorrentProgress(null)
           restoreAppDom()
           setPlayerOpen(false)
-          setError(e?.message || 'No se pudo iniciar el motor torrent')
+          tryAlternativeOrFail(e?.message || 'No se pudo iniciar el motor torrent')
           setLoading(false)
           return
         }
@@ -1015,14 +1044,14 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                   if (!cancelled && !closedRef.current) {
                     restoreAppDom()
                     setPlayerOpen(false)
-                    setError(`No se pudo reproducir tras reconectar WARP: ${e?.message || 'error desconocido'}`)
+                    tryAlternativeOrFail(`No se pudo reproducir tras reconectar WARP: ${e?.message || 'error desconocido'}`)
                     stopPlayback().catch(() => {})
                   }
                 })
               } else {
                 restoreAppDom()
                 setPlayerOpen(false)
-                setError('WARP no pudo reconectar — prueba con otro enlace')
+                tryAlternativeOrFail('WARP no pudo reconectar — prueba con otro enlace')
                 stopPlayback().catch(() => {})
               }
             })
@@ -1053,7 +1082,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                     recordOutcomeOnce(false)
                     restoreAppDom()
                     setPlayerOpen(false)
-                    setError(`No se pudo reproducir el stream: ${e?.message || 'error desconocido'}`)
+                    tryAlternativeOrFail(`No se pudo reproducir el stream: ${e?.message || 'error desconocido'}`)
                     stopPlayback().catch(() => {})
                   }
                 })
@@ -1062,7 +1091,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
                 recordOutcomeOnce(false)
                 restoreAppDom()
                 setPlayerOpen(false)
-                setError('No se pudo renovar el enlace — prueba con otro')
+                tryAlternativeOrFail('No se pudo renovar el enlace — prueba con otro')
                 stopPlayback().catch(() => {})
               }
             }).catch(e => {
@@ -1072,7 +1101,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
               setResolvingEmbed(false)
               restoreAppDom()
               setPlayerOpen(false)
-              setError(`No se pudo renovar el enlace: ${e?.message || 'error'}`)
+              tryAlternativeOrFail(`No se pudo renovar el enlace: ${e?.message || 'error'}`)
               stopPlayback().catch(() => {})
             })
             return
@@ -1083,7 +1112,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           // encima del error — cerrar para que se vea.
           restoreAppDom()
           setPlayerOpen(false)
-          setError(`No se pudo reproducir: ${msg || 'error desconocido'}`)
+          tryAlternativeOrFail(`No se pudo reproducir: ${msg || 'error desconocido'}`)
           stopPlayback().catch(() => {})
         } else if (state.state === 'ended') {
           // Episode finished - save final progress as 100% so the tick appears
@@ -1171,10 +1200,10 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       }
       const startNative = () => playStream(playArgs, onPlaybackState).catch(e => {
         recordOutcomeOnce(false)
-        console.error('[Player] native player error:', e?.message)
+        console.error('[Player] native player error:', playbackHelpForError(e?.message))
         restoreAppDom()
         setPlayerOpen(false)
-        setError(`Error al iniciar el reproductor: ${e?.message || 'unknown'}`)
+        tryAlternativeOrFail(`Error al iniciar el reproductor: ${e?.message || 'unknown'}`)
       })
       // CDN Smart Link (FCTV directo): los segmentos del playlist son
       // punteros _ctump/_ctuph — el fetch directo devuelve HTTP 487. El
@@ -1236,7 +1265,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       console.error('[Player] init error:', e?.message || e)
       if (!cancelled) {
         recordOutcomeOnce(false)
-        setError(`Error al iniciar reproducción: ${e?.message || 'unknown'}`)
+        tryAlternativeOrFail(`Error al iniciar reproducción: ${e?.message || 'unknown'}`)
         setLoading(false)
       }
     })
@@ -1597,6 +1626,37 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
     })
   }, [])
 
+  // Marcadores: botón del menú nativo (Android) + botón/tecla en la UI.
+  const saveBookmarkAtCurrentPos = useCallback((posMs = null) => {
+    if (mode === 'live') return false
+    const m = currentMetaRef.current || meta
+    const key = mediaKeyFor(m)
+    if (!key) return false
+    const t = posMs != null ? posMs / 1000 : currentTimeRef.current
+    return !!addBookmark(key, {
+      t,
+      d: durationRef.current,
+      title: title || m?.name || '',
+    })
+  }, [mode, meta, title])
+
+  useEffect(() => {
+    if (!isAndroidNative()) return undefined
+    return setBookmarkRequestListener((event) => {
+      saveBookmarkAtCurrentPos(event?.position ?? null)
+    })
+  }, [saveBookmarkAtCurrentPos])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'b' && e.key !== 'B') return
+      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return
+      if (saveBookmarkAtCurrentPos()) setCopiedUrl(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [saveBookmarkAtCurrentPos])
+
   const isEmbed = stream && (stream.streamType === 'embed' || stream.streamType === 'iframe')
 
   return (
@@ -1681,6 +1741,18 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             </div>
           )}
 
+          {/* Marcador: guarda la posición actual del vídeo (tecla B) */}
+          {mode !== 'live' && (
+            <button
+              onClick={() => saveBookmarkAtCurrentPos()}
+              tabIndex={0}
+              className="btn-ghost p-2 focus:bg-primary-600/30 focus:outline-none rounded-lg"
+              title="Guardar marcador aquí (B)"
+            >
+              <Bookmark size={24} />
+            </button>
+          )}
+
           {/* Enviar a TV / Cast */}
           <div className="relative">
             <button
@@ -1742,8 +1814,14 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       )}
 
       {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-          <p className="text-red-400 text-lg text-center px-8">{error}</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6">
+          <p className="text-red-400 text-lg text-center">{sanitizePlaybackError(error)}</p>
+          <details className="max-w-xl text-center text-sm text-dark-300">
+            <summary tabIndex={0} data-tv-card className="cursor-pointer text-primary-300 hover:text-primary-200">
+              Diagnóstico y siguiente paso
+            </summary>
+            <p role="status" className="mt-2">{playbackHelpForError(error)}</p>
+          </details>
           <button onClick={onClose} className="btn-primary">Cerrar</button>
         </div>
       )}

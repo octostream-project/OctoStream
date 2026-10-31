@@ -124,6 +124,11 @@ function getLangPriority() {
 }
 
 // Sort streams by language priority. Streams with no language go last.
+// Palantir siempre primero (BD propia curada) — dentro de cada bloque
+// manda el orden de idioma habitual.
+const PROVIDER_PRIORITY = { palantir: 0 }
+const providerRank = (stream) =>
+  PROVIDER_PRIORITY[String(stream?.pluginId || stream?.pluginName || '').toLowerCase()] ?? 1
 export function sortByLangPriority(streams) {
   if (!streams || streams.length === 0) return streams
   const priority = getLangPriority()
@@ -133,7 +138,7 @@ export function sortByLangPriority(streams) {
     const idx = priority.indexOf(lang)
     return idx === -1 ? priority.length : idx
   }
-  return [...streams].sort((a, b) => langRank(a) - langRank(b))
+  return [...streams].sort((a, b) => (providerRank(a) - providerRank(b)) || (langRank(a) - langRank(b)))
 }
 
 // ─── Idioma por nombre de canal/emisora ─────────────────────────────────────

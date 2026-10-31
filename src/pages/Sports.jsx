@@ -6,13 +6,14 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { useTranslation } from '../i18n/index.js'
-import { Trophy, AlertCircle, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand } from 'lucide-react'
+import { Trophy, AlertCircle, ArrowLeft, Play, Goal, Dribbble, CircleDot, Gauge, Shield, Flag, Snowflake, Zap, Swords, Bike, Hand, CalendarDays, ChevronLeft, ChevronRight, Radio } from 'lucide-react'
 import { CAL_LEAGUES, MARCA_TO_SOFA } from '../data/sportsLeagues.js'
 import { fetchMarcaCalendar, MARCA_SLUGS } from '../utils/marcaLive.js'
-import { teamsMatch, leagueKey } from '../utils/teamMatch.js'
+import { teamsMatch, leagueKey, normTeam } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
 import { sortLinks, isGenericLabel } from '../plugins/bundled/dlive/parse.js'
+import { matchesForSportsView, preferFctvMatchDate } from '../utils/sportsMatch.js'
 
 const SPORTS_PLUGIN = 'fctv'
 const DLIVE_PLUGIN = 'dlive'
@@ -29,6 +30,33 @@ const finishedMatches = new Map() // id → { at, catId, item }
 // while-revalidate). Los items ya llegan enriquecidos con escudos.
 const catalogSnapshot = new Map() // catId → { items, ts }
 const SNAPSHOT_TTL = 10 * 60 * 1000
+
+// Marcador pegajoso por partido (pareja de equipos normalizada): el
+// proveedor a veces devuelve el score en una pasada y lo omite en la
+// siguiente — sin memoria la tarjeta lo mostraba unos segundos y lo
+// perdía en el refresco silencioso de 60s.
+const scoreMemory = new Map() // key → { score, ts }
+const SCORE_MEM_TTL = 6 * 60 * 60 * 1000
+const scoreKey = (i) => {
+  const a = i._home?.name, b = i._away?.name
+  if (!a || !b) return null
+  return [normTeam(a), normTeam(b)].sort().join('|')
+}
+const applyStickyScores = (list) => {
+  const now = Date.now()
+  for (const it of list) {
+    const k = scoreKey(it)
+    if (!k) continue
+    if (it._score?.home != null && it._score?.away != null) {
+      scoreMemory.set(k, { score: it._score, ts: now })
+    } else {
+      const mem = scoreMemory.get(k)
+      if (mem && now - mem.ts < SCORE_MEM_TTL) it._score = mem.score
+      else scoreMemory.delete(k)
+    }
+  }
+  return list
+}
 
 // Mismo partido = mismo PAR de equipos, sin importar quién figura como local.
 // FCTV usa el orden oficial del fixture pero DLive parsea "A vs B" del título
@@ -325,7 +353,11 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
   const SportIcon = sportIconFor(item)
   // Un finalizado con kickoff en el futuro es un falso positivo (el proveedor
   // lo marcó live antes del saque): mostrar la hora, no FINALIZADO.
-  const finished = item._justFinished && (!item._matchDate || item._matchDate <= Date.now())
+  // Con marcador ya es un resultado: FINALIZADO aunque la fecha sea la
+  // fabricada "hoy" de DLive — el chip de hora engañaba ("ayer" → "Hoy").
+  // Excepción: un live con marcador en juego (1-0) sigue siendo EN DIRECTO.
+  const finished = (item._justFinished || (hasScore && !live))
+    && (!item._matchDate || item._matchDate <= Date.now())
 
   return (
     <button
@@ -454,6 +486,8 @@ export default function Sports() {
   const [playing, setPlaying] = useState(null) // { stream, item }
   const [resolvingId, setResolvingId] = useState(null)
   const [selectedLeague, setSelectedLeague] = useState(null) // group | null
+  const [matchView, setMatchView] = useState('all')
+  const [dayOffset, setDayOffset] = useState(0)
   const [marcaResults, setMarcaResults] = useState(new Map()) // leagueSlug → [{home,away,homeScore,awayScore}]
   const [marcaLive, setMarcaLive] = useState(new Map()) // leagueSlug → jornadas[] (scrape runtime de marca.com)
   const [sitemapTick, setSitemapTick] = useState(0) // bump cuando el índice FCTV (sitemap) está listo
@@ -476,6 +510,8 @@ export default function Sports() {
     if (Date.now() - leagueClosedAtRef.current < 400) return
     lastLeagueRef.current = group.name
     leagueOpenedAtRef.current = Date.now()
+    setMatchView('all')
+    setDayOffset(0)
     setSelectedLeague(group)
   }
 
@@ -628,7 +664,6 @@ export default function Sports() {
             const f = merged.find(i => sameMatch(i, d))
             if (f) {
               f._dliveItem = d
-              if (!f._isLive && d._isLive) f._isLive = true
               // Heredar escudos/logo de liga de DLive si FCTV no los tiene.
               for (const side of ['_home', '_away']) {
                 if (f[side] && !f[side].logo && d[side]?.logo) f[side].logo = d[side].logo
@@ -638,7 +673,7 @@ export default function Sports() {
               merged.push({ ...d, pluginId: DLIVE_PLUGIN })
             }
           }
-          return dedupeMatches(merged)
+          return applyStickyScores(dedupeMatches(merged))
         }
         const paint = () => {
           if (cancelled || fctvItems === null) return
@@ -701,7 +736,18 @@ export default function Sports() {
         }))
         if (cancelled) return
       }
-      if (!cancelled) setMarcaResults(map)
+      // Fusión por slug, no sustitución: si una liga trae MENOS resultados
+      // que la pasada anterior (Sofascore 403, página a medio jugar),
+      // conserva los buenos — el mapa entero no parpadea al fallback.
+      const nRes = (evs) => (evs || []).filter(e => e.homeScore != null).length
+      if (!cancelled && map.size) setMarcaResults(prev => {
+        const next = new Map(prev)
+        for (const [slug, evs] of map) {
+          if (nRes(evs) < nRes(prev.get(slug))) continue
+          next.set(slug, evs)
+        }
+        return next
+      })
     }
     refresh()
     // Jornadas reales desde marca.com (mismo scrape que el workflow CI): la
@@ -709,10 +755,25 @@ export default function Sports() {
     // empaquetado se queda congelado en la jornada del build.
     const refreshMarca = () => fetchMarcaCalendar(
       CAL_LEAGUES.filter(lg => MARCA_SLUGS.has(lg.slug)).map(lg => lg.slug), ctl.signal)
-      .then(m => { if (!cancelled && m.size) setMarcaLive(prev => new Map([...prev, ...m])) })
+      .then(m => {
+        if (cancelled || !m.size) return
+        // Por slug: una pasada con menos resultados no pisa los anteriores.
+        const nRes = (js) => (js || []).reduce((n, j) => n + j.matches.filter(mm => mm.result).length, 0)
+        setMarcaLive(prev => {
+          const next = new Map(prev)
+          for (const [slug, js] of m) {
+            if (nRes(js) < nRes(prev.get(slug))) continue
+            next.set(slug, js)
+          }
+          return next
+        })
+      })
       .catch(() => {})
     refreshMarca()
-    const iv = setInterval(() => { refresh(); refreshMarca() }, 6 * 60 * 60 * 1000)
+    // Los resultados pueden caer cualquier minuto de la jornada: refresco
+    // frecuente — las cachés internas (marcaLive adaptativa, Sofascore 1h)
+    // son las que gobiernan las peticiones reales.
+    const iv = setInterval(() => { refresh(); refreshMarca() }, 10 * 60 * 1000)
     return () => { cancelled = true; ctl.abort(); clearInterval(iv) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCat])
@@ -913,14 +974,24 @@ export default function Sports() {
       // 2) Sofascore si algún día responde,
       // 3) el fichero Marca empaquetado (fallback offline, puede quedar viejo).
       const liveJornadas = marcaLive.get(lg.slug)
-      const jornadasSrc = liveJornadas?.some(j => j.matches.length) ? liveJornadas
-        : conv?.some(j => j.matches.length >= (lg.utId ? 1 : 3)) ? conv
-        : lg.jornadas
+      // La fuente con más resultados reales gana: el scrape de Marca ganaba
+      // siempre que tuviera jornadas (aunque fueran la próxima, sin jugar)
+      // y tapaba los marcadores que Sofascore ya había pintado → flash.
+      const nResults = (js) => (js || []).reduce((n, j) =>
+        n + j.matches.filter(m => m.result || m.homeScore != null).length, 0)
+      const hasMatches = (js) => js?.some(j => j.matches.length)
+      const jornadasSrc = !hasMatches(liveJornadas) && !hasMatches(conv) ? lg.jornadas
+        : nResults(liveJornadas) >= nResults(conv) ? liveJornadas || conv || lg.jornadas
+        : conv
       const jornadas = jornadasSrc.map(j => ({
         round: j.round,
         name: j.name || null,
         items: j.matches.map((m, i) => {
           const item = normalizeMarcaMatch(m, j.round, lg.slug, i)
+          // La tarjeta se reconstruye en cada render: si la fuente elegida
+          // pierde el resultado en una pasada, la memoria pegajosa lo
+          // repone (misma clave por pareja de equipos que el catálogo).
+          applyStickyScores([item])
           // Contexto de liga para los matchers: sin él una tarjeta de Liga F
           // ("Real Madrid") podría fundirse con el partido masculino.
           item._league = { name: lg.name, logo: lg.logo || null }
@@ -938,6 +1009,9 @@ export default function Sports() {
             item._isLive = f._isLive
             if (f._justFinished) item._justFinished = true
             if (!item._score && f._score) item._score = f._score
+            // FCTV es la fuente autoritativa: sobrescribe también una fecha
+            // Marca/DLive que parezca válida pero sea la hora de hoy fabricada.
+            item._matchDate = preferFctvMatchDate(f._matchDate, item._matchDate)
             for (const side of ['_home', '_away']) {
               if (item[side] && !item[side].logo && f[side]?.logo) item[side].logo = f[side].logo
             }
@@ -952,12 +1026,15 @@ export default function Sports() {
           if (d) {
             claimedFctv.add(d.id)
             item._dliveItem = d
-            if (d._isLive) item._isLive = true
             if (d._justFinished) item._justFinished = true
             for (const side of ['_home', '_away']) {
               if (item[side] && !item[side].logo && d[side]?.logo) item[side].logo = d[side].logo
             }
           }
+          // El marcador también llega vía f._score (item FCTV fusionado):
+          // si en la próxima pasada FCTV lo omite, la memoria lo repone y
+          // la tarjeta no se desplaza a EN DIRECTO al perder su score.
+          applyStickyScores([item])
           return item
         }),
       }))
@@ -965,12 +1042,21 @@ export default function Sports() {
       // EN DIRECTO (con la tarjeta de escudos fusionada). Los FCTV en directo
       // sin tarjeta de calendario también van ahí; los que no están en directo
       // ni en la jornada se descartan (evita duplicados sin escudos).
+      // Solo se mueve a EN DIRECTO lo que puede estar jugándose ahora:
+      // fecha pasada/en ≤15 min o sin fecha. Un partido con kickoff futuro
+      // NO sale aunque el proveedor lo marque live por error — la flag
+      // parpadea y vaciaba jornadas enteras.
+      const hasResult = (i) => i._score?.home != null && i._score?.away != null
+      const nowMovable = Date.now()
+      const movable = (i) => (i._isLive || i._justFinished) && !hasResult(i)
+        && (!i._matchDate || i._matchDate <= nowMovable + LIVE_EARLY_MS)
       const liveItems = dedupeMatches([
-        ...jornadas.flatMap(j => j.items).filter(i => i._isLive || i._justFinished),
+        ...jornadas.flatMap(j => j.items).filter(movable),
         ...(fctvGroup?.items || []).filter(fi => !claimedFctv.has(fi.id) && (fi._isLive || fi._justFinished)),
       ])
-      // Los recién finalizados tampoco vuelven a la jornada durante sus 5 min.
-      jornadas.forEach(j => { j.items = j.items.filter(i => !i._isLive && !i._justFinished) })
+      // Espejo del criterio: lo inamovible se queda en su jornada aunque la
+      // flag live del proveedor oscile.
+      jornadas.forEach(j => { j.items = j.items.filter(i => !movable(i)) })
       // Jornada en curso: la primera (en orden) que tiene algún partido sin
       // terminar (kickoff en el futuro o en las últimas 3h — los que están en
       // juego se movieron a liveItems pero su ronda sigue siendo la actual).
@@ -1061,44 +1147,61 @@ export default function Sports() {
     if (selectedLeague && items.length > 0 && !activeLeague) setSelectedLeague(null)
   }, [selectedLeague, allGroups, activeLeague, items.length])
 
-  // Jornadas visibles: solo UNA — la de esta semana. Es la que se está
-  // jugando hoy (incluye sus resultados) o, si ya terminó, la próxima con
-  // el partido más cercano en el tiempo — no un aplazado a un mes vista.
+  const viewingDay = new Date()
+  viewingDay.setDate(viewingDay.getDate() + dayOffset)
+  const dayStart = new Date(viewingDay.getFullYear(), viewingDay.getMonth(), viewingDay.getDate()).getTime()
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000
+  const dayLabel = dayOffset === 0
+    ? 'Hoy'
+    : viewingDay.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
+  const markedResult = (i) => i._score?.home != null && i._score?.away != null
+
+  // En "Todos" conservamos la vista compacta (últimas jornadas + próxima).
+  // Las otras pestañas recorren todos los partidos que entregó la fuente y
+  // filtran por estado/día, sin depender de una sola jornada seleccionada.
   const visibleJornadas = activeLeague?.marca ? (() => {
-    const list = activeLeague.jornadas.filter(j => j.items.length)
+    const source = activeLeague.jornadas
+    if (matchView !== 'all') {
+      return source.map(j => ({
+        ...j,
+        items: matchesForSportsView(j.items, matchView, dayStart, dayEnd),
+      })).filter(j => j.items.length)
+    }
+    const list = source.filter(j => j.items.length)
     if (!list.length) return []
     const now = Date.now()
-    const todayStart = new Date().setHours(0, 0, 0, 0)
-    // Fechas de todos los partidos de la jornada, incluidos los que están en
-    // la sección EN DIRECTO (salieron de j.items).
     const datesOf = (j) => [
       ...j.items.map(i => i._matchDate || 0),
       ...activeLeague.liveItems.filter(i => i._round === j.round).map(i => i._matchDate || 0),
     ].filter(Boolean)
     const lastPlayed = (j) => Math.max(0, ...datesOf(j).filter(d => d <= now))
     const nextKick = (j) => Math.min(Infinity, ...datesOf(j).filter(d => d > now - 3 * 3600e3))
-    // Anterior: la última jornada con partidos jugados hoy (incluye la que
-    // está en juego ahora mismo).
-    const prev = [...list].reverse().find(j => lastPlayed(j) >= todayStart)
-    // Siguiente: la jornada del próximo partido más cercano en el tiempo;
-    // si todo está jugado (datos viejos), la más reciente — no la primera.
+    const previous = [...list].reverse().filter(j => lastPlayed(j) > 0
+      || j.items.some(markedResult)).slice(0, 2)
     const next = list.reduce((best, j) => {
       const t = nextKick(j), b = nextKick(best)
       return t < b || (t === b && lastPlayed(j) > lastPlayed(best)) ? j : best
     }, list[0])
-    // Solo sale la jornada de esta semana: la que se jugó/juega hoy si la
-    // hay (con sus resultados), si no la próxima.
-    const current = prev || next
-    return current ? [current] : []
+    const out = [...previous].sort((a, b) => a.round - b.round)
+    if (next && !out.includes(next)) out.push(next)
+    return out
   })() : []
-  // Partidos visibles en ligas sin calendario: directos, recién finalizados
-  // y próximos — los jugados hace >3h ya no se muestran.
+  const liveSource = activeLeague?.marca
+    ? activeLeague.liveItems
+    : activeLeague?.items || []
+  const visibleLiveItems = activeLeague?.marca
+    ? matchView === 'all' ? activeLeague.liveItems
+      : matchesForSportsView(liveSource, matchView, dayStart, dayEnd)
+    : []
+  // Partidos visibles en ligas sin calendario.
   const visibleFlatItems = activeLeague && !activeLeague.marca
-    ? activeLeague.items.filter(i =>
-        i._isLive || i._justFinished || !i._matchDate || i._matchDate > Date.now() - 3 * 3600e3)
+    ? matchView === 'all'
+      ? activeLeague.items.filter(i =>
+          i._isLive || i._justFinished || !i._matchDate || i._matchDate > Date.now() - 3 * 3600e3)
+      : matchesForSportsView(activeLeague.items, matchView, dayStart, dayEnd)
     : []
   const visibleCount = activeLeague?.marca
-    ? activeLeague.liveItems.length + visibleJornadas.reduce((n, j) => n + j.items.length, 0)
+    ? visibleLiveItems.length + visibleJornadas.reduce((n, j) => n + j.items.length, 0)
     : visibleFlatItems.length
 
   // Al abrir una liga de calendario: bajar directo a la primera jornada
@@ -1157,7 +1260,13 @@ export default function Sports() {
               type="button"
               tabIndex={0}
               data-tv-card
-              onClick={() => { setActiveCat(cat); setSelectedLeague(null); lastLeagueRef.current = null }}
+              onClick={() => {
+                setActiveCat(cat)
+                setSelectedLeague(null)
+                setMatchView('all')
+                setDayOffset(0)
+                lastLeagueRef.current = null
+              }}
               className={`flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 activeCat?.id === cat.id
                   ? 'bg-primary-600 text-white'
@@ -1201,15 +1310,79 @@ export default function Sports() {
             <h2 className="text-lg font-semibold text-white/90">{activeLeague.name}</h2>
             <span className="text-xs text-dark-500">{visibleCount}</span>
           </div>
+          <div data-tv-row className="flex gap-2 overflow-x-auto pb-1">
+            {[
+              ['all', 'Todos'],
+              ['live', 'En directo'],
+              ['today', 'Hoy'],
+              ['results', 'Resultados'],
+              ['upcoming', 'Próximos'],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                tabIndex={0}
+                data-tv-card
+                aria-pressed={matchView === id}
+                onClick={() => {
+                  setMatchView(id)
+                  setDayOffset(0)
+                }}
+                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${
+                  matchView === id
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-dark-800 text-dark-300 hover:text-white'
+                }`}
+              >
+                {id === 'live' && <Radio size={15} />}
+                {label}
+              </button>
+            ))}
+          </div>
+          {matchView !== 'all' && matchView !== 'live' && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                tabIndex={0}
+                data-tv-card
+                aria-label="Día anterior"
+                onClick={() => setDayOffset(offset => offset - 1)}
+                className="btn-ghost p-2 rounded-lg"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <span className="min-w-32 text-center text-sm font-medium text-white">
+                <CalendarDays size={15} className="inline mr-1.5 text-primary-400" />
+                {dayLabel}
+              </span>
+              <button
+                type="button"
+                tabIndex={0}
+                data-tv-card
+                aria-label="Día siguiente"
+                onClick={() => setDayOffset(offset => offset + 1)}
+                className="btn-ghost p-2 rounded-lg"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
+          {visibleCount === 0 && (
+            <p role="status" className="text-center text-sm text-dark-400 py-8">
+              {matchView === 'live'
+                ? 'No hay partidos en directo en esta liga.'
+                : `No hay partidos para ${dayLabel.toLowerCase()} en esta vista.`}
+            </p>
+          )}
           {activeLeague.marca ? (
             // Liga de calendario: partidos en directo arriba (tarjetas con
             // escudos movidas desde su jornada), luego las jornadas.
             <>
-              {activeLeague.liveItems.length > 0 && (
+              {visibleLiveItems.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium text-red-400">{t('sports.live')}</h3>
                   <div data-tv-grid className="sports-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {activeLeague.liveItems.map((item, i) => (
+                    {visibleLiveItems.map((item, i) => (
                       <MatchCard
                         key={item.id}
                         item={item}
@@ -1241,7 +1414,7 @@ export default function Sports() {
                         liveLabel={t('sports.live')}
                         finishedLabel={t('sports.finished')}
                         loadingLabel={t('sports.loading')}
-                        initial={activeLeague.liveItems.length === 0 && isCurrent && i === 0}
+                        initial={visibleLiveItems.length === 0 && isCurrent && i === 0}
                       />
                     ))}
                   </div>

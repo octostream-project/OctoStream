@@ -199,8 +199,13 @@ export const palantirFactory = (config) => {
         if (!url) return null
         const audio = (r.audio || '').toUpperCase()
         const info = r.info ? ` · ${r.info}` : ''
+        // Nombre visible: el archivo del enlace (o info de la DB), no
+        // "Palantir" — el proveedor ya se ve en la columna pluginName.
+        let fileName = ''
+        try { fileName = decodeURIComponent(new URL(url).pathname.split('/').pop() || '') } catch { /* raro */ }
+        const label = fileName || String(r.info || '').trim() || '1fichier'
         return {
-          name: 'Palantir',
+          name: label,
           title: `1fichier ${r.calidad || ''} ${audio}${info}`.replace(/\s+/g, ' ').trim(),
           server: '1fichier',
           pluginName: 'Palantir',

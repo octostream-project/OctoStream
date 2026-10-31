@@ -1,18 +1,18 @@
 {
-  "versionCode": 20924,
-  "versionName": "2.09.24",
+  "versionCode": 20925,
+  "versionName": "2.09.25",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-arm64-v8a.apk",
-  "sha256": "89a269f240f4cef92bae8851fe5a700bc187929d84bd5559695d8039a4d21480",
-  "notes": "Categorias de plataformas Netflix, HBO Max y mas por comedia, terror y generos; reproduccion con resolutores OctoStream",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-arm64-v8a.apk",
+  "sha256": "e36ae7d32e86eab62f58739766f2b7244a8fbb8ebb0ddaf01d86b276abd9fdd3",
+  "notes": "Deportes por fecha y resultados; diagnostico seguro del reproductor; descargas pausables y reintentables; vista previa de sincronizacion LAN; mejoras TV; DocumaniaTV, YouTube/NewPipe, Plataformas y fuentes.",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.24/octostream-2.09.24-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "89a269f240f4cef92bae8851fe5a700bc187929d84bd5559695d8039a4d21480",
-    "armeabi-v7a": "7480f1d2e745cae9da3c09730f6f2420d091e5c8dd1f39d16d192f5ca100771d",
-    "x86_64": "50f9031471f657eb7a977ea40607908c1d88683af8ac65eca9ee967b776c66d4"
+    "arm64-v8a": "e36ae7d32e86eab62f58739766f2b7244a8fbb8ebb0ddaf01d86b276abd9fdd3",
+    "armeabi-v7a": "3505706f0ad4475e05e4076605bbdc77dcd9f9d600c1bc65ca54d2b988f1c8f7",
+    "x86_64": "da26ff26792ae4d2d73295a6283f87cf2ca8b2a30c4ab0b5f70d001d27cd6f20"
   }
 }

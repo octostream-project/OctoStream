@@ -43,6 +43,8 @@ export function mpvKey(name) { mpvApi()?.key?.(name) }
 
 // The native Cast button delegates to the existing web Cast implementation.
 let castRequestListener = null
+// El menú nativo "Guardar marcador" delega en el almacén JS (perfilado).
+let bookmarkRequestListener = null
 
 // Listen for playback state events from native ExoPlayer
 if (isAndroidNative()) {
@@ -51,7 +53,9 @@ if (isAndroidNative()) {
     // 'position' llega cada 5s durante toda la reproducción — no loguearlo:
     // en Android cada console.log cruza el bridge a logcat (spam constante).
     if (event.state !== 'position') {
-      console.log('[ExoPlayer] State:', event.state, event.message || '')
+      // Los mensajes nativos pueden incluir URLs de media firmadas; no
+      // volcarlos a logcat, conservar solo el estado.
+      console.log('[ExoPlayer] State:', event.state)
     }
     // Al cerrar el player muere también el tap de audio IA y su sesión.
     if (event.state === 'closed') disposeAiSubs()
@@ -69,6 +73,9 @@ if (isAndroidNative()) {
   ExoPlayer.addListener('castRequested', (event) => {
     console.info('[ExoPlayer] castRequested received', event?.title || '')
     if (castRequestListener) castRequestListener(event)
+  })
+  ExoPlayer.addListener('bookmarkRequested', (event) => {
+    if (bookmarkRequestListener) bookmarkRequestListener(event)
   })
 } else if (isElectron() && window.octostream?.embed?.onState) {
   // Estados del player embebido en ventana propia (embed_webview_playing) —
@@ -94,6 +101,13 @@ export function setCastRequestListener(listener) {
   castRequestListener = listener
   return () => {
     if (castRequestListener === listener) castRequestListener = null
+  }
+}
+
+export function setBookmarkRequestListener(listener) {
+  bookmarkRequestListener = listener
+  return () => {
+    if (bookmarkRequestListener === listener) bookmarkRequestListener = null
   }
 }
 

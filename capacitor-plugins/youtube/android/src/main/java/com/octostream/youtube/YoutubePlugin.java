@@ -65,7 +65,16 @@ public class YoutubePlugin extends Plugin {
 
                 // Create StreamExtractor from URL
                 StreamExtractor extractor = youtube.getStreamExtractor(url);
-                extractor.fetchPage();
+                try {
+                    extractor.fetchPage();
+                } catch (Exception first) {
+                    // Bot-check (LOGIN_REQUIRED) en el cliente por defecto:
+                    // un extractor nuevo rota internamente a otro cliente
+                    // (WEB/IOS) que suele esquivar el bloqueo.
+                    android.util.Log.w(TAG, "resolve retry tras " + first.getClass().getSimpleName());
+                    extractor = youtube.getStreamExtractor(url);
+                    extractor.fetchPage();
+                }
 
                 // Get video title
                 String title = extractor.getName();

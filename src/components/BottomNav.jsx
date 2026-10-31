@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Search, Heart, Antenna, Clock, Settings as SettingsIcon, Youtube, Calendar as CalendarIcon, Trophy, Link2 } from 'lucide-react'
+import { Home, Search, Heart, Antenna, Clock, Settings as SettingsIcon, Youtube, Calendar as CalendarIcon, Trophy, Link2, PlaySquare } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 
 function BottomNav() {
@@ -14,6 +14,7 @@ function BottomNav() {
 
   const items = [
     { to: '/', icon: Home, label: 'Inicio' },
+    { to: '/platforms', icon: PlaySquare, label: 'Plataformas' },
     { to: '/live-tv', icon: Antenna, label: 'TV' },
     { to: '/sports', icon: Trophy, label: 'Deportes' },
     { to: '/search', icon: Search, label: 'Buscar' },

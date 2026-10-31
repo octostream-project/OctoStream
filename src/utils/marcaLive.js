@@ -20,7 +20,10 @@ export const MARCA_SLUGS = new Set([
 const PAGE_URL = (slug) => `https://www.marca.com/futbol/${slug}/calendario.html`
 const MARCA_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
 const CACHE_TTL = 6 * 60 * 60 * 1000
-const cache = new Map() // slug → { ts, jornadas }
+// Jornada con partidos de hoy sin resultado: los marcadores llegan en
+// caliente — caché corta para que la tarjeta se actualice al rato.
+const CACHE_TTL_LIVE = 10 * 60 * 1000
+const cache = new Map() // slug → { ts, ttl, jornadas }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 
@@ -127,17 +130,26 @@ async function scrapeLeague(slug, signal) {
   // Primera jornada sin resultados = próxima jornada — la página solo lleva
   // la última jugada y la siguiente, que es lo que la vista necesita.
   const nextIdx = secs.findIndex(s => !s.html.includes('resultado-partido'))
+  // Últimas 3 jornadas jugadas + la próxima: la vista puede mostrar los
+  // resultados recientes, no solo la semana en curso.
   const pick = nextIdx > 0
-    ? [secs[nextIdx - 1], secs[nextIdx]]
-    : nextIdx === 0 ? [secs[0]] : secs.slice(-2)
+    ? secs.slice(Math.max(0, nextIdx - 3), nextIdx + 1)
+    : nextIdx === 0 ? [secs[0]] : secs.slice(-4)
 
-  return pick.map(({ n, html: sec }) => {
+  const jornadas = pick.map(({ n, html: sec }) => {
     const matches = parseJornada(sec)
     for (const m of matches) {
       m.link = links.get(`${m.home.id}_${m.away.id}`) || links.get(`${m.away.id}_${m.home.id}`) || null
     }
     return { round: n, matches }
   })
+
+  // ¿Hay partidos hoy sin resultado? Entonces el marcador puede cambiar en
+  // minutos — caché corta; fuera de jornada, la página no cambia en horas.
+  const now = new Date()
+  const today = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}`
+  const openMatch = jornadas.some(j => j.matches.some(m => !m.result && m.date === today))
+  return { jornadas, ttl: openMatch ? CACHE_TTL_LIVE : CACHE_TTL }
 }
 
 /**
@@ -151,9 +163,9 @@ export async function fetchMarcaCalendar(leagueSlugs, signal) {
   const jobs = []
   for (const s of leagueSlugs) {
     const hit = cache.get(s)
-    if (hit && Date.now() - hit.ts < CACHE_TTL) { out.set(s, hit.jornadas); continue }
+    if (hit && Date.now() - hit.ts < hit.ttl) { out.set(s, hit.jornadas); continue }
     jobs.push(() => scrapeLeague(s, signal)
-      .then(jornadas => { cache.set(s, { ts: Date.now(), jornadas }); out.set(s, jornadas) })
+      .then(({ jornadas, ttl }) => { cache.set(s, { ts: Date.now(), ttl, jornadas }); out.set(s, jornadas) })
       .catch(() => {})) // liga sin datos: el fallback empaquetado/Sofascore cubre
   }
   // Concurrencia 4: suficiente para 8 ligas sin martillear marca.com.

@@ -30,25 +30,15 @@ public class YoutubeDownloader extends Downloader {
 
     private final OkHttpClient client;
 
-    private static ProxySelector warpProxySelector() {
+    // La resolución sale por la red física — igual que la reproducción de
+    // googlevideo, que bypass-geo usa la IP física (la firma de la URL va
+    // ligada a ella). Además, por WARP la IP de Cloudflare dispara el
+    // bot-check LOGIN_REQUIRED de YouTube de forma sistemática.
+    private static ProxySelector directProxySelector() {
         return new ProxySelector() {
             @Override
             public List<Proxy> select(URI uri) {
-                String scheme = "https".equalsIgnoreCase(uri.getScheme()) ? "https" : "http";
-                String host = System.getProperty(scheme + ".proxyHost", "127.0.0.1");
-                String portValue = System.getProperty(scheme + ".proxyPort", "1820");
-                int port;
-                try {
-                    port = Integer.parseInt(portValue);
-                    if (port < 1 || port > 65535) port = 1820;
-                } catch (NumberFormatException ignored) {
-                    port = 1820;
-                }
-                // Fail closed to the local listener while WARP is starting;
-                // never let NewPipe silently resolve YouTube over the device IP.
-                if (host == null || host.isEmpty()) host = "127.0.0.1";
-                return Collections.singletonList(new Proxy(
-                        Proxy.Type.HTTP, new InetSocketAddress(host, port)));
+                return Collections.singletonList(Proxy.NO_PROXY);
             }
 
             @Override
@@ -82,7 +72,7 @@ public class YoutubeDownloader extends Downloader {
         };
 
         this.client = new OkHttpClient.Builder()
-                .proxySelector(warpProxySelector())
+                .proxySelector(directProxySelector())
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .addInterceptor(consentInterceptor)

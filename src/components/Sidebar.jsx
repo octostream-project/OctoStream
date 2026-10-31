@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
-import { Home, Search, Heart, Radio, Film, Tv, Clock, Link2, Settings as SettingsIcon, Antenna, Calendar as CalendarIcon, Trophy, Users } from 'lucide-react'
+import { Home, Search, Heart, Radio, Film, Tv, Clock, Link2, Settings as SettingsIcon, Antenna, Calendar as CalendarIcon, Trophy, Users, PlaySquare } from 'lucide-react'
 import { useStore } from '../store/useStore.js'
 import { pluginManager } from '../plugins/manager.js'
 
@@ -29,6 +29,7 @@ export default function Sidebar({ open, onClose }) {
 
   const navItems = [
     { to: '/', icon: Home, label: 'Inicio' },
+    { to: '/platforms', icon: PlaySquare, label: 'Plataformas' },
     { to: '/live-tv', icon: Antenna, label: 'TV en vivo' },
     { to: '/sports', icon: Trophy, label: 'Deportes' },
     { to: '/search', icon: Search, label: 'Buscar' },

@@ -10,6 +10,7 @@ import { sanitizeUrl } from '../utils/sanitizeUrl.js'
 import { inferStreamType } from '../utils/streamType.js'
 import { parseStreamLang, parseStreamQuality, sortByLangPriority } from '../utils/streamMeta.js'
 import StreamList from '../components/StreamList.jsx'
+import BookmarkChips from '../components/BookmarkChips.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
@@ -168,6 +169,14 @@ export default function Details() {
       const id = enqueueDownload({
         name,
         kind: 'torrent',
+        // Persistible: el magnet/enlace no está firmado — se reencola solo.
+        persist: {
+          kind: 'torrent',
+          url: stream.url,
+          season: meta?.season ?? undefined,
+          episode: meta?.episode ?? undefined,
+          fileIndex: fileIndex ?? undefined,
+        },
         start: downloadEngine => downloadEngine.download({
           url: stream.url,
           season: meta?.season ?? undefined,
@@ -203,6 +212,10 @@ export default function Details() {
       const id = enqueueDownload({
         name: displayName,
         kind: 'http',
+        // Solo debrid es persistible (se guarda el enlace original del host,
+        // nunca la URL desbloqueada ni las cabeceras). Un http directo puede
+        // llevar firma temporal → no se guarda.
+        persist: stream.streamType === 'debrid' ? { kind: 'debrid', url: stream.url } : undefined,
         start: async downloadEngine => {
           let url = stream.url
           if (stream.streamType === 'debrid') {
@@ -931,41 +944,93 @@ export default function Details() {
     }
   }
 
+  // Reproducir desde un marcador guardado — mismo criterio de fuente que
+  // handleResume: servidor previo si existe, si no la mejor fuente ordenada.
+  const playFromBookmark = (t) => {
+    if (selectedEpisode) {
+      handlePlayEpisode(selectedEpisode, { resumeAt: t, forcePlay: true })
+      return
+    }
+    if (!streams.length) return
+    const savedServer = historyItem?.server || ''
+    const savedStream = savedServer ? streams.find(s => (s.server || s.pluginName) === savedServer) : null
+    handlePlay(savedStream || sortByLangPriority(streams)[0], true)
+    setResumeTime(t)
+  }
+
+  // Reproduce el episodio (season,episode) de la ficha cargando la temporada
+  // desde caché/TMDB — comparte la lógica de "Seguir viendo" y del botón
+  // "Siguiente episodio" que manda resumeSeason/resumeEpisode por navigate.
+  const playEpisodeByNumber = async (seasonNum, epNum, { resumeAt = null } = {}) => {
+    const season = meta?.seasonsList?.find(s => s.seasonNumber === seasonNum)
+    if (!season) return
+    const cacheKey = `${meta.id}-s${seasonNum}`
+    let eps = episodesCacheRef.current[cacheKey]
+    if (!eps) {
+      try {
+        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: seasonNum })
+      } catch { eps = null }
+      if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
+    }
+    const ep = eps?.find(e => e.season === seasonNum && e.episode === epNum)
+    if (!ep) return
+    setSelectedSeason(season)
+    setSeasonEpisodes(eps || [])
+    handlePlayEpisode(ep, { resumeAt, forcePlay: true })
+  }
+
   // Reanuda el episodio guardado del historial ("Seguir viendo" de Home y
   // banner "Continuar viendo" de la ficha). forcePlay porque reanudar es una
   // acción explícita del usuario — no depende del ajuste de autoplay ni
   // espera los 60s del autoplay diferido.
-  const resumeSavedEpisode = async () => {
-    const season = meta?.seasonsList?.find(s => s.seasonNumber === historyItem.season)
-    if (!season) return
-    const cacheKey = `${meta.id}-s${historyItem.season}`
-    let eps = episodesCacheRef.current[cacheKey]
-    if (!eps) {
-      try {
-        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: historyItem.season })
-      } catch { eps = null }
-      if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
-    }
-    const ep = eps?.find(e => e.season === historyItem.season && e.episode === historyItem.episode)
-    if (!ep) return
-    setSelectedSeason(season)
-    setSeasonEpisodes(eps || [])
-    handlePlayEpisode(ep, { resumeAt: savedTime, forcePlay: true })
-  }
+  const resumeSavedEpisode = () =>
+    playEpisodeByNumber(historyItem.season, historyItem.episode, { resumeAt: savedTime })
 
   // "Seguir viendo" navega a la ficha con autoplay:true. En series el load()
   // sale temprano al detectar seasonsList, así que el resume va en un efecto
   // aparte que espera a que meta esté cargada (usarla en load() leería el
   // meta del closure — null en el primer render → crash en meta.name).
+  // resumeSeason/resumeEpisode (botón "Siguiente" de Continuar viendo):
+  // reproduce ese episodio directamente, sin exigir progreso del anterior.
   useEffect(() => {
     if (autoplayConsumedRef.current) return
     if (!location.state?.autoplay || !meta?.seasonsList?.length) return
-    if (historyItem?.season == null || historyItem?.episode == null) return
-    if (!(savedProgress > 0.05 && savedProgress < 0.95) || !(savedTime > 0)) return
+    const direct = location.state?.resumeSeason != null && location.state?.resumeEpisode != null
+    if (!direct) {
+      if (historyItem?.season == null || historyItem?.episode == null) return
+      if (!(savedProgress > 0.05 && savedProgress < 0.95) || !(savedTime > 0)) return
+    }
     autoplayConsumedRef.current = true
-    resumeSavedEpisode()
+    if (direct) playEpisodeByNumber(location.state.resumeSeason, location.state.resumeEpisode)
+    else resumeSavedEpisode()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, location.state?.autoplay, historyItem, savedProgress, savedTime])
+
+  // Reintento automático de fuentes: cuando un stream muere al abrirse,
+  // VideoPlayer pide la siguiente fuente no probada (máx. 3 por medio) y la
+  // lanza en caliente — el usuario no vuelve a la lista a elegir otra.
+  const autoRetryRef = useRef({ tried: new Set(), count: 0 })
+  const autoRetryKey = (s) => s?.url || `${s?.server || s?.pluginName || ''}|${s?.name || ''}`
+  useEffect(() => {
+    autoRetryRef.current = { tried: new Set(), count: 0 }
+  }, [id, selectedEpisode?.id])
+  const handleAutoAlternative = useCallback(async (failed, { position } = {}) => {
+    const st = autoRetryRef.current
+    st.tried.add(autoRetryKey(failed))
+    if (st.count >= 3) return false
+    const pool = selectedEpisode ? episodeStreams : streams
+    const next = sortByLangPriority(pool)
+      .find(s => !s.processing && !st.tried.has(autoRetryKey(s)))
+    if (!next) return false
+    st.tried.add(autoRetryKey(next))
+    st.count++
+    toast('El enlace falló — probando otra fuente…')
+    handlePlay(next, true)
+    // Reanudar donde murió el anterior (handlePlay resetea resumeTime).
+    if (position > 0) setResumeTime(position)
+    return true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEpisode, episodeStreams, streams])
 
   // Carga pura de episodios de una temporada (caché → provider → TMDB →
   // placeholders por episodeCount). Devuelve el array sin tocar la ficha —
@@ -1676,6 +1741,7 @@ export default function Details() {
           onLoadSeason={handleLoadSeasonForPlayer}
           onPlayEpisode={(ep) => handlePlayEpisode(ep, { forcePlay: true })}
           onPlayNext={onPlayNext}
+          onRequestAlternative={handleAutoAlternative}
           onClose={() => {
             cancelAutoplay()
             nextEpisodeTriggeredRef.current = false
@@ -2181,6 +2247,7 @@ export default function Details() {
             <h2 className="text-xl font-bold text-white mb-4">
               Fuentes disponibles
             </h2>
+            <BookmarkChips meta={meta} refreshToken={selectedStream} onPlayAt={playFromBookmark} />
             {resolvingStream && (
               <div className="flex items-center gap-2 text-primary-400 mb-4">
                 <OctoLoader size={20} />
@@ -2343,6 +2410,14 @@ export default function Details() {
               <p className="text-dark-300 text-sm leading-relaxed">{selectedEpisode.description}</p>
             )}
           </div>
+        </div>
+
+        <div className="mt-4">
+          <BookmarkChips
+            meta={{ ...meta, season: selectedEpisode.season, episode: selectedEpisode.episode }}
+            refreshToken={selectedStream}
+            onPlayAt={playFromBookmark}
+          />
         </div>
 
         {episodeLoading ? (

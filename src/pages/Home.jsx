@@ -3,6 +3,7 @@ import { pluginManager } from '../plugins/manager.js'
 import ContentRow from '../components/ContentRow.jsx'
 import ContentCard from '../components/ContentCard.jsx'
 import ContinueWatching from '../components/ContinueWatching.jsx'
+import NewEpisodesNotice from '../components/NewEpisodesNotice.jsx'
 import { Clapperboard, Film, Tv, PlayCircle, Globe, SlidersHorizontal, ChevronUp, ChevronDown, Eye, EyeOff } from 'lucide-react'
 import Chip from '../components/ui/Chip.jsx'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
@@ -297,6 +298,7 @@ export default function Home() {
       </header>
 
       <ContinueWatching />
+      <NewEpisodesNotice />
 
       {customizing && (
         <section className="mb-5 rounded-2xl border border-dark-700 bg-dark-800/70 p-4" aria-label="Personalizar portada">

@@ -41,6 +41,7 @@ import { useStore } from '../store/useStore.js'
 import {
   localSyncPayload,
   mergeRemoteData,
+  previewRemoteSync,
   loadSyncCategories,
   saveSyncCategories,
   DEFAULT_SYNC_CATEGORIES,
@@ -58,12 +59,39 @@ beforeEach(() => {
   })
 })
 
+describe('previewRemoteSync', () => {
+  it('summarizes selected incoming data without returning credential values', () => {
+    const preview = previewRemoteSync({
+      sections: ['lists', 'accounts'],
+      favorites: [{ id: 'movie-1' }],
+      watchlist: [{ id: 'show-1' }, { id: 'show-2' }],
+      settings: { octostream_alldebrid_key: 'secret-key-value' },
+    }, ['lists', 'accounts'])
+
+    expect(preview.categories).toContain('Favoritos y Mi lista')
+    expect(preview.counts).toMatchObject({ favorites: 1, watchlist: 2, settings: 1 })
+    expect(JSON.stringify(preview)).not.toContain('secret-key-value')
+  })
+
+  it('excludes categories not selected locally or by the sender', () => {
+    const preview = previewRemoteSync({
+      sections: ['lists'],
+      favorites: [{ id: 'movie-1' }],
+      watchHistory: [{ id: 'episode-1' }],
+    }, ['history'])
+
+    expect(preview.categories).toEqual([])
+    expect(preview.counts.favorites).toBe(0)
+    expect(preview.counts.history).toBe(0)
+  })
+})
+
 describe('localSyncPayload categories', () => {
   it('includes only lists when lists is selected', async () => {
     const payload = await localSyncPayload(['lists'])
 
     expect(payload.kind).toBe('octostream-sync')
-    expect(payload.version).toBe(2)
+    expect(payload.version).toBe(3)
     expect(payload.sections).toEqual(['lists'])
     expect(payload.favorites).toHaveLength(1)
     expect(payload.watchlist).toHaveLength(1)
@@ -219,5 +247,72 @@ describe('mergeRemoteData categories', () => {
     expect(counts.watchlist).toBe(0)
     expect(counts.eps).toBe(0)
     expect(useStore.getState().watchlist).toEqual([{ id: 'w1', type: 'series', name: 'Pendiente' }])
+  })
+
+  it('routes secondary profile data to its own storage, never into the active one', () => {
+    localStorage.setItem('octostream_profiles', JSON.stringify([
+      { id: 'default', name: 'Principal' },
+      { id: 'p_ana', name: 'Ana', kids: false },
+    ]))
+    useStore.setState({
+      activeProfileId: 'default',
+      profiles: [
+        { id: 'default', name: 'Principal' },
+        { id: 'p_ana', name: 'Ana', kids: false },
+      ],
+    })
+    const counts = mergeRemoteData({
+      profileId: 'default',
+      profileName: 'Principal',
+      profileKids: false,
+      profiles: [
+        { id: 'default', name: 'Principal', kids: false },
+        { id: 'p_ana_remote', name: 'Ana', kids: false },
+        { id: 'p_peques', name: 'Peques', kids: true, pinHash: 'hh', pinSalt: 'ss' },
+      ],
+      favorites: [{ id: 'f2', type: 'movie' }],
+      profileData: {
+        p_ana_remote: { favorites: [{ id: 'ana-f1', type: 'movie' }] },
+        p_peques: { watchedEpisodes: { 's1:S1:E9': { watchedAt: 30, progress: 1 } } },
+      },
+    }, ['lists', 'history'])
+
+    // counts.favs suma todas las fusiones (Principal + Ana = 2); lo
+    // importante es a dónde fue cada una.
+    expect(counts.favs).toBe(2)
+    expect(useStore.getState().favorites.map(i => i.id)).toEqual(['f1', 'f2'])
+    // Ana remota → Ana local por nombre: en SU storage, no en el activo.
+    const anaFavs = JSON.parse(localStorage.getItem('octostream_profile_p_ana_favorites') || '[]')
+    expect(anaFavs.map(i => i.id)).toEqual(['ana-f1'])
+    // Peques remoto se crea (con hash del PIN, no el PIN) y sus datos van a su clave.
+    const profiles = JSON.parse(localStorage.getItem('octostream_profiles'))
+    const peques = profiles.find(p => p.name === 'Peques')
+    expect(peques).toBeTruthy()
+    expect(peques.kids).toBe(true)
+    expect(peques.pinHash).toBe('hh')
+    const pequesEps = JSON.parse(localStorage.getItem(`octostream_profile_${peques.id}_watched_episodes`) || '{}')
+    expect(pequesEps['s1:S1:E9'].progress).toBe(1)
+    // El perfil activo no recibió nada de los perfiles ajenos.
+    expect(useStore.getState().watchedEpisodes['s1:S1:E9']).toBeUndefined()
+  })
+
+  it('payload includes the profile registry and per-profile data', async () => {
+    localStorage.setItem('octostream_profiles', JSON.stringify([
+      { id: 'default', name: 'Principal' },
+      { id: 'p_ana', name: 'Ana', kids: false, pinHash: 'h', pinSalt: 's' },
+    ]))
+    useStore.setState({
+      profiles: [
+        { id: 'default', name: 'Principal' },
+        { id: 'p_ana', name: 'Ana', kids: false, pinHash: 'h', pinSalt: 's' },
+      ],
+    })
+    localStorage.setItem('octostream_profile_p_ana_favorites', JSON.stringify([{ id: 'af1', type: 'movie' }]))
+
+    const payload = await localSyncPayload(['lists'])
+    expect(payload.profiles).toHaveLength(2)
+    expect(payload.profiles.find(p => p.id === 'p_ana').pinHash).toBe('h')
+    expect(payload.profileData.p_ana.favorites[0].id).toBe('af1')
+    expect(payload.profileData.default).toBeUndefined()
   })
 })

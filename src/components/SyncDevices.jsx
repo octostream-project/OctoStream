@@ -5,7 +5,7 @@ import { httpGetJson } from '../utils/httpClient.js'
 import OctoLoader from './OctoLoader.jsx'
 import Modal from './ui/Modal.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
-import { mergeRemoteData, localSyncPayload, SYNC_CATEGORIES, loadSyncCategories, saveSyncCategories } from '../utils/syncMerge.js'
+import { mergeRemoteData, localSyncPayload, previewRemoteSync, SYNC_CATEGORIES, loadSyncCategories, saveSyncCategories } from '../utils/syncMerge.js'
 import { logAdKeyPropagation } from '../plugins/bundled/alldebrid.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
@@ -28,6 +28,7 @@ export default function SyncDevices() {
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
   const [pairedDevices, setPairedDevices] = useState([])
   const [confirmForget, setConfirmForget] = useState(false)
+  const [pendingImport, setPendingImport] = useState(null)
   const [syncCats, setSyncCats] = useState(loadSyncCategories)
   const syncListenerRef = useRef(null)
 
@@ -229,8 +230,9 @@ export default function SyncDevices() {
         setMessage('El otro dispositivo rechazó el emparejamiento.')
         return
       }
-      const counts = mergeData(remoteData)
-      finishOk(`Descargado y unido${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ' — sin cambios'}`)
+      setPendingImport({ remoteData, alias: dev?.alias || dev?.ip || 'dispositivo', action: 'pull' })
+      setStatus('idle')
+      setMessage('')
     } catch (e) {
       failWith(e, 'descargar')
     }
@@ -266,14 +268,41 @@ export default function SyncDevices() {
         setMessage('Datos enviados, pero el otro dispositivo no compartió los suyos.')
         return
       }
-      const counts = mergeData(remoteData)
-      finishOk(`Sincronizado: enviado y recibido${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ' — sin cambios'}`)
+      setPendingImport({ remoteData, alias: dev?.alias || dev?.ip || 'dispositivo', action: 'sync' })
+      setStatus('idle')
+      setMessage('')
     } catch (e) {
       failWith(e, 'sincronizar')
     }
   }
 
+  const applyPendingImport = () => {
+    if (!pendingImport) return
+    const counts = mergeData(pendingImport.remoteData)
+    const verb = pendingImport.action === 'sync' ? 'Sincronizado: enviado y recibido' : 'Descargado y unido'
+    finishOk(`${verb}${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ' — sin cambios'}`)
+    setPendingImport(null)
+  }
+
+  const cancelPendingImport = () => {
+    const wasSync = pendingImport?.action === 'sync'
+    setPendingImport(null)
+    setStatus('idle')
+    setMessage(wasSync
+      ? 'Se enviaron tus datos; cancelaste la importación de los datos recibidos.'
+      : 'Importación cancelada; no se han aplicado cambios.')
+  }
+
   const busy = status === 'connecting' || status === 'syncing'
+  const preview = pendingImport ? previewRemoteSync(pendingImport.remoteData, syncCats) : null
+  const previewCounts = preview ? [
+    preview.counts.favorites ? `${preview.counts.favorites} favoritos` : '',
+    preview.counts.watchlist ? `${preview.counts.watchlist} elementos de Mi lista` : '',
+    preview.counts.history ? `${preview.counts.history} elementos de historial` : '',
+    preview.counts.episodes ? `${preview.counts.episodes} registros de episodios` : '',
+    preview.counts.settings ? `${preview.counts.settings} ajustes/credenciales (valores ocultos)` : '',
+    preview.counts.profiles ? `${preview.counts.profiles} perfiles` : '',
+  ].filter(Boolean) : []
 
   return (
     <div className="space-y-4">
@@ -310,7 +339,7 @@ export default function SyncDevices() {
         <p className="text-xs text-dark-500 mb-3">
           Elige las secciones que se envían y se aplican al sincronizar.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <div data-tv-row className="flex flex-wrap gap-2">
           {SYNC_CATEGORIES.map(cat => (
             <label
               key={cat.id}
@@ -342,7 +371,7 @@ export default function SyncDevices() {
           Dispositivos en tu red
         </h3>
         {discovered.length > 0 ? (
-          <div className="space-y-2">
+          <div data-tv-list className="space-y-2">
             {discovered.map(d => (
               <button
                 key={d.deviceId || d.ip}
@@ -381,7 +410,7 @@ export default function SyncDevices() {
 
         {/* IP manual */}
         <p className="text-xs text-dark-500 mt-4 mb-2">O por IP manual:</p>
-        <div className="flex gap-2">
+        <div data-tv-row className="flex gap-2">
           <input
             type="text"
             value={remoteIp}
@@ -419,6 +448,9 @@ export default function SyncDevices() {
           <AlertCircle size={18} />
           <p className="text-sm text-red-300">{message}</p>
         </div>
+      )}
+      {status === 'idle' && message && (
+        <div role="status" className="text-sm text-dark-300 bg-dark-800 rounded-lg p-3">{message}</div>
       )}
       {lastSync && (
         <p className="text-xs text-dark-500 text-center">Última sincronización: {lastSync}</p>
@@ -521,6 +553,36 @@ export default function SyncDevices() {
             <p className="text-xs text-dark-500 mt-4 text-center">
               La primera vez, el otro dispositivo pedirá aceptar la conexión en su pantalla.
             </p>
+        </Modal>
+      )}
+
+      {pendingImport && (
+        <Modal onClose={cancelPendingImport} labelledBy="sync-import-title">
+          <h3 id="sync-import-title" className="text-white font-semibold mb-1">
+            Revisar datos de {pendingImport.alias}
+          </h3>
+          <p className="text-xs text-dark-400 mb-3">
+            Se fusionarán con tus datos; no se reemplazarán. Categorías comunes: {preview.categories.join(', ') || 'ninguna'}.
+          </p>
+          {previewCounts.length > 0 ? (
+            <ul className="space-y-1 mb-4 text-sm text-dark-200">
+              {previewCounts.map(line => <li key={line}>• {line}</li>)}
+            </ul>
+          ) : (
+            <p className="text-sm text-dark-400 mb-4">No hay elementos visibles en las categorías seleccionadas.</p>
+          )}
+          <p className="text-xs text-dark-500 mb-4">
+            Los valores de cuentas y claves nunca se muestran en esta vista previa.
+            {pendingImport.action === 'sync' && ' El envío a ese dispositivo ya se completó.'}
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" data-tv-card tabIndex={0} onClick={cancelPendingImport} className="btn-ghost text-sm">
+              Cancelar importación
+            </button>
+            <button type="button" data-tv-card tabIndex={0} onClick={applyPendingImport} className="btn-primary text-sm">
+              Fusionar datos
+            </button>
+          </div>
         </Modal>
       )}
     </div>

@@ -21,6 +21,31 @@ export default function ContinueWatching() {
     prefetchTimer.current = setTimeout(() => prefetchYouTubeStream(id), 400)
   }
 
+  // Primer episodio sin terminar DESPUÉS del que figura en el historial —
+  // base del botón "Siguiente T·E" cuando el capítulo actual ya está visto.
+  const findNextEpisode = (item) => {
+    if (item.type !== 'series' || !item.seasonsList?.length
+        || item.season == null || item.episode == null) return null
+    const curKey = `${item.id}:S${item.season}:E${item.episode}`
+    const curProgress = watchedEpisodes[curKey]?.progress ?? item.progress ?? 0
+    if (curProgress < 0.95) return null // aún en curso — reanudar, no saltar
+    const sorted = [...item.seasonsList].sort((a, b) => a.seasonNumber - b.seasonNumber)
+    let afterCurrent = false
+    for (const season of sorted) {
+      for (let ep = 1; ep <= (season.episodeCount || 0); ep++) {
+        if (!afterCurrent) {
+          if (season.seasonNumber === item.season && ep === item.episode) afterCurrent = true
+          continue
+        }
+        const k = `${item.id}:S${season.seasonNumber}:E${ep}`
+        if ((watchedEpisodes[k]?.progress || 0) < 0.97) {
+          return { season: season.seasonNumber, episode: ep }
+        }
+      }
+    }
+    return null
+  }
+
   // Check if a series is fully watched (all seasons/episodes)
   const isSeriesComplete = (item) => {
     if (!item.seasonsList || item.seasonsList.length === 0) return false
@@ -61,16 +86,23 @@ export default function ContinueWatching() {
           // For series: completed only when ALL episodes across ALL seasons are watched
           const isDone = isSeries ? isSeriesComplete(item) : (item.progress && item.progress >= 0.95)
           const hasProgress = item.progress && item.progress > 0.05
+          const nextEp = isSeries && !isDone ? findNextEpisode(item) : null
+          const openItem = () => {
+            if (item.type === 'youtube') {
+              navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster, currentTime: item.currentTime || 0 } } })
+            } else {
+              // Siguiente episodio calculado → Details lo reproduce directo.
+              navigate(`/details/${item.type}/${item.id}`, {
+                state: nextEp
+                  ? { autoplay: true, resumeSeason: nextEp.season, resumeEpisode: nextEp.episode }
+                  : { autoplay: true },
+              })
+            }
+          }
           return (
             <div
               key={`${item.type}-${item.id}`}
-              onClick={() => {
-                if (item.type === 'youtube') {
-                  navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster, currentTime: item.currentTime || 0 } } })
-                } else {
-                  navigate(`/details/${item.type}/${item.id}`, { state: { autoplay: true } })
-                }
-              }}
+              onClick={openItem}
               className="card group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 focus-visible:ring-offset-dark-900 cursor-pointer flex-shrink-0 w-28 sm:w-32"
               tabIndex={0}
               data-tv-card
@@ -82,11 +114,7 @@ export default function ContinueWatching() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  if (item.type === 'youtube') {
-                    navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster, currentTime: item.currentTime || 0 } } })
-                  } else {
-                    navigate(`/details/${item.type}/${item.id}`, { state: { autoplay: true } })
-                  }
+                  openItem()
                 }
               }}
             >
@@ -118,7 +146,7 @@ export default function ContinueWatching() {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300" />
                 <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300">
                   <div className="flex items-center justify-center bg-primary-600/90 backdrop-blur-sm rounded-lg py-2 text-sm font-medium shadow-lg">
-                    <Play size={16} className="mr-1" /> {isDone ? 'Ver de nuevo' : isLive && !hasProgress ? 'Ver' : 'Continuar'}
+                    <Play size={16} className="mr-1" /> {isDone ? 'Ver de nuevo' : nextEp ? `Siguiente T${nextEp.season}·E${nextEp.episode}` : isLive && !hasProgress ? 'Ver' : 'Continuar'}
                   </div>
                 </div>
               </div>

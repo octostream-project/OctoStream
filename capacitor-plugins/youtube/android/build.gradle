@@ -36,7 +36,7 @@ repositories {
 dependencies {
     implementation project(':capacitor-android')
     // NewPipeExtractor: extracts direct video URLs from YouTube without API key
-    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:6faf406'
     // OkHttp for YoutubeDownloader (NewPipeExtractor requires a Downloader impl)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

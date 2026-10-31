@@ -7,7 +7,7 @@ import OctoLoader from '../components/OctoLoader.jsx'
 import Toggle from '../components/ui/Toggle.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import SyncDevices from '../components/SyncDevices.jsx'
-import { isAndroidNative, isElectron } from '../utils/platform.js'
+import { isAndroidNative, isElectron, isAndroidTv } from '../utils/platform.js'
 import { CloudProxy } from '../utils/cloudProxy.js'
 import { getPin as adGetPin, checkPin as adCheckPin, getAccountInfo as adAccountInfo, getLinkHistory as adLinkHistory, getAdKeyLog } from '../plugins/bundled/alldebrid.js'
 import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails, warpStrictEnabled, checkIpLeak } from '../utils/warpStatus.js'
@@ -83,11 +83,13 @@ export default function Settings() {
   const [backupMsg, setBackupMsg] = useState('')
   const [backupCats, setBackupCats] = useState(() => Object.fromEntries(BACKUP_CATEGORIES.map(c => [c.id, true])))
 
-  // Móvil: las pestañas horizontales quedan mal en pantallas estrechas —
-  // se usa un menú de secciones (lista vertical) con vista de detalle.
+  // Móvil y Android TV: las pestañas horizontales quedan mal en pantallas
+  // estrechas o con mando — se usa un menú de secciones (lista vertical de
+  // tarjetas grandes) con vista de detalle y Back para volver al menú.
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
   )
+  const menuLayout = isMobile || isAndroidTv()
   const [mobileMenu, setMobileMenu] = useState(true)
   const [uiScale, setUiScalePct] = useState(() => getUiScale() || 100)
   useEffect(() => {
@@ -97,10 +99,10 @@ export default function Settings() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  // En móvil, el Back del sistema (gesto/botón) vuelve al menú de secciones
-  // en vez de salir de Ajustes.
+  // En móvil/TV, el Back del sistema (gesto/botón/mando) vuelve al menú de
+  // secciones en vez de salir de Ajustes.
   useEffect(() => {
-    if (!isMobile || mobileMenu) return
+    if (!menuLayout || mobileMenu) return
     const onBack = event => {
       if (event.key !== 'Back' && event.key !== 'Escape') return
       event.preventDefault()
@@ -109,7 +111,7 @@ export default function Settings() {
     }
     document.addEventListener('keydown', onBack)
     return () => document.removeEventListener('keydown', onBack)
-  }, [isMobile, mobileMenu])
+  }, [menuLayout, mobileMenu])
 
   // API keys
   const [apiKey, setApiKey] = useState(localStorage.getItem('octostream_tmdb_key') || '')
@@ -785,23 +787,29 @@ export default function Settings() {
 
   return (
     <div className="p-4 lg:p-6 max-w-2xl settings-page">
-      {!isMobile && (
+      {!menuLayout && (
       <div className="flex items-center gap-3 mb-6">
         <SettingsIcon className="text-primary-500" size={28} />
         <h1 className="text-2xl font-bold text-white">Configuración</h1>
       </div>
       )}
 
-      {/* Móvil: menú de secciones a pantalla completa */}
-      {isMobile && mobileMenu && (
+      {/* Móvil/TV: menú de secciones a pantalla completa */}
+      {menuLayout && mobileMenu && (
         <div className="space-y-2">
+          {menuLayout && !isMobile && (
+            <h1 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
+              <SettingsIcon className="text-primary-500" size={28} /> Configuración
+            </h1>
+          )}
           {TABS.map(tab => {
             const Icon = tab.icon
             return (
               <button
                 key={tab.id}
+                data-tv-item
                 onClick={() => { setActiveTab(tab.id); setMobileMenu(false) }}
-                className="w-full flex items-center gap-3 p-4 bg-dark-800 rounded-xl border border-dark-700 text-left active:bg-dark-700"
+                className="w-full flex items-center gap-3 p-4 bg-dark-800 rounded-xl border border-dark-700 text-left active:bg-dark-700 focus:bg-dark-700 focus:border-primary-500 focus:outline-none"
               >
                 <div className="w-9 h-9 bg-primary-600/20 rounded-lg flex items-center justify-center shrink-0">
                   <Icon className="text-primary-400" size={20} />
@@ -814,15 +822,28 @@ export default function Settings() {
         </div>
       )}
 
-      {(!isMobile || !mobileMenu) && (
+      {(!menuLayout || !mobileMenu) && (
       <div className="settings-body">
-      {/* Móvil: solo el nombre de la sección; Back del sistema vuelve al menú */}
-      {isMobile && (() => {
+      {/* Móvil/TV: nombre de la sección + botón Menú (Back también vuelve) */}
+      {menuLayout && (() => {
         const tab = TABS.find(t => t.id === activeTab)
-        return <h2 className="text-base font-semibold text-white mb-3">{tab?.name}</h2>
+        return (
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              type="button"
+              data-tv-item
+              onClick={() => setMobileMenu(true)}
+              className="rounded-lg p-1.5 text-dark-300 hover:text-white hover:bg-dark-700 focus:bg-dark-700 focus:text-white focus:outline-none"
+              aria-label="Volver al menú de ajustes"
+            >
+              <ChevronRight size={20} className="rotate-180" />
+            </button>
+            <h2 className="text-base font-semibold text-white">{tab?.name}</h2>
+          </div>
+        )
       })()}
-      {/* Tabs — siempre fila horizontal bajo el título (también en TV) */}
-      {!isMobile && (
+      {/* Tabs — fila horizontal bajo el título (no en móvil/TV: van por menú) */}
+      {!menuLayout && (
       <div className="settings-tabs flex gap-2 mb-6 border-b border-dark-700 overflow-x-auto whitespace-nowrap" data-tv-row>
         {TABS.map((tab, idx) => {
           const Icon = tab.icon

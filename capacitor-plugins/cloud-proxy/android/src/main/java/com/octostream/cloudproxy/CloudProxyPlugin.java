@@ -1970,7 +1970,12 @@ public class CloudProxyPlugin extends Plugin {
     private static final java.util.regex.Pattern GEO_HOST = java.util.regex.Pattern.compile(
         "(^|\\.)(" +
         "tdtspain\\.com|tdtchannels\\.com|rtve\\.es|mediaset\\.net|mediasetinfinity\\.es|" +
-        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net)$",
+        "atresplayer\\.com|atresmedia\\.com|dai\\.google\\.com|doubleclick\\.net|" +
+        // YouTube: la IP que resuelve (NewPipe, red física) debe ser la misma
+        // que reproduce (googlevideo firma la URL con esa IP); por el túnel
+        // además YouTube dispara el bot-check LOGIN_REQUIRED.
+        "youtube\\.com|youtu\\.be|youtube-nocookie\\.com|googlevideo\\.com|" +
+        "youtubei\\.googleapis\\.com|youtube\\.googleapis\\.com|ytimg\\.com|ggpht\\.com)$",
         java.util.regex.Pattern.CASE_INSENSITIVE);
 
     public static boolean isGeoBypassHost(String url) {

@@ -5,8 +5,16 @@ import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { toast } from './ui/Toast.jsx'
 import Modal from './ui/Modal.jsx'
 import OctoLoader from './OctoLoader.jsx'
-import { Play, Trash2, Download, FolderOpen, HardDrive, Usb, FolderSearch, X, ArrowUp, ArrowDown } from 'lucide-react'
-import { cancelQueuedDownload, getDownloadQueue, moveQueuedDownload, subscribeDownloadQueue } from '../utils/downloadQueue.js'
+import { Play, Trash2, Download, FolderOpen, HardDrive, Usb, FolderSearch, X, ArrowUp, ArrowDown, Pause, RotateCcw } from 'lucide-react'
+import {
+  cancelQueuedDownload,
+  getDownloadQueue,
+  moveQueuedDownload,
+  pauseActiveDownload,
+  resumeQueuedDownload,
+  retryFailedDownload,
+  subscribeDownloadQueue,
+} from '../utils/downloadQueue.js'
 
 // Una llamada nativa que nunca resuelve no puede dejar la UI girando.
 const withTimeout = (p, ms) => Promise.race([
@@ -22,6 +30,7 @@ export default function DownloadsList() {
   const [active, setActive] = useState(null)
   const [queue, setQueue] = useState(getDownloadQueue)
   const [dirInfo, setDirInfo] = useState(null)
+  const [freeBytes, setFreeBytes] = useState(null)
   const [pickingDir, setPickingDir] = useState(false)
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
   const [dirPickerMessage, setDirPickerMessage] = useState('')
@@ -44,7 +53,20 @@ export default function DownloadsList() {
         setActive(null)
       }
       const dir = await engine?.getDownloadDir?.()
-      if (dir?.path) setDirInfo(dir)
+      if (dir?.path) {
+        setDirInfo(dir)
+        const volumeResult = await withTimeout(engine?.downloadVolumes?.(), 6000)
+        const path = dir.path.replace(/\\/g, '/').replace(/\/+$/, '')
+        const volume = (volumeResult?.volumes || [])
+          .filter(v => {
+            const volumePath = String(v.path || '').replace(/\\/g, '/').replace(/\/+$/, '')
+            return volumePath && (path === volumePath || path.startsWith(`${volumePath}/`))
+          })
+          .sort((a, b) => b.path.length - a.path.length)[0]
+        setFreeBytes(Number(volume?.freeBytes) > 0 ? Number(volume.freeBytes) : null)
+      } else {
+        setFreeBytes(null)
+      }
     } catch { /* motor no disponible */ }
   }, [canDownload])
 
@@ -269,13 +291,16 @@ export default function DownloadsList() {
   if (!canDownload) return null
   const queueActive = queue.find(job => job.status === 'starting' || job.status === 'downloading')
   const shownActive = queue.length
-    ? (queueActive ? { name: queueActive.name, progress: queueActive.progress } : null)
+    ? (queueActive ? { id: queueActive.id, name: queueActive.name, progress: queueActive.progress } : null)
     : active
-  const waitingJobs = queue.filter(job => job.status === 'queued' || job.status === 'failed')
+  const waitingJobs = queue.filter(job => ['queued', 'paused', 'failed'].includes(job.status))
+  const freeSpaceLabel = freeBytes == null ? '' : freeBytes >= 1e9
+    ? `${(freeBytes / 1e9).toFixed(1)} GB libres`
+    : `${Math.round(freeBytes / 1e6)} MB libres`
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div data-tv-row className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex-shrink-0 w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
             <Download className="text-primary-400" size={20} />
@@ -287,6 +312,7 @@ export default function DownloadsList() {
                 ? (dirInfo.treeMode || dirInfo.path.startsWith('content://') ? 'Carpeta elegida' : dirInfo.path)
                 : 'Carpeta interna de la app'}
             </p>
+            {freeSpaceLabel && <p className="text-xs text-dark-400">{freeSpaceLabel}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -308,6 +334,19 @@ export default function DownloadsList() {
             <OctoLoader size={15} className="text-primary-400 flex-shrink-0" />
             <span className="truncate flex-1">{shownActive.name}</span>
             <span className="text-primary-400 text-xs flex-shrink-0">{Math.round((shownActive.progress || 0) * 100)}%</span>
+            {shownActive.id && (
+              <button
+                type="button"
+                tabIndex={0}
+                data-tv-card
+                onClick={() => pauseActiveDownload()}
+                className="btn-ghost p-2"
+                title="Pausar descarga"
+                aria-label={`Pausar ${shownActive.name}`}
+              >
+                <Pause size={16} />
+              </button>
+            )}
           </div>
           <div className="w-full h-1.5 bg-dark-600 rounded-full mt-2 overflow-hidden">
             <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${Math.round((shownActive.progress || 0) * 100)}%` }} />
@@ -316,7 +355,7 @@ export default function DownloadsList() {
       )}
 
       {waitingJobs.length > 0 && (
-        <div className="space-y-2 mb-3" aria-label="Cola de descargas">
+        <div data-tv-list className="space-y-2 mb-3" aria-label="Cola de descargas">
           {waitingJobs.map(job => {
             const queuedJobs = queue.filter(entry => entry.status === 'queued')
             const position = queuedJobs.findIndex(entry => entry.id === job.id)
@@ -326,9 +365,39 @@ export default function DownloadsList() {
                 <div className="min-w-0 flex-1">
                   <p className="text-white text-sm truncate">{job.name}</p>
                   <p className={`text-xs ${job.status === 'failed' ? 'text-red-300' : 'text-dark-500'}`}>
-                    {job.status === 'failed' ? (job.error || 'Error de descarga') : 'En cola; espera a que termine la reproducción'}
+                    {job.status === 'failed'
+                      ? (job.error || 'Error de descarga')
+                      : job.status === 'paused'
+                        ? 'Pausada; pulsa reanudar cuando quieras continuar'
+                        : 'En cola; espera a que termine la reproducción'}
                   </p>
                 </div>
+                {job.status === 'failed' && (
+                  <button
+                    type="button"
+                    tabIndex={0}
+                    data-tv-card
+                    onClick={() => retryFailedDownload(job.id)}
+                    className="btn-ghost p-2 text-primary-300"
+                    title="Reintentar descarga"
+                    aria-label={`Reintentar ${job.name}`}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
+                {job.status === 'paused' && (
+                  <button
+                    type="button"
+                    tabIndex={0}
+                    data-tv-card
+                    onClick={() => resumeQueuedDownload(job.id)}
+                    className="btn-ghost p-2 text-primary-300"
+                    title="Reanudar descarga"
+                    aria-label={`Reanudar ${job.name}`}
+                  >
+                    <Play size={16} />
+                  </button>
+                )}
                 {job.status === 'queued' && (
                   <>
                     <button
@@ -362,7 +431,7 @@ export default function DownloadsList() {
               </div>
             )
           })}
-          <p className="text-dark-500 text-xs">La cola dura mientras la app está abierta; los enlaces firmados no se guardan por privacidad.</p>
+          <p className="text-dark-500 text-xs">La cola pendiente se conserva al cerrar la app. Las URLs firmadas no se guardan por privacidad.</p>
         </div>
       )}
 
@@ -371,7 +440,7 @@ export default function DownloadsList() {
           Nada descargado todavía. Usa el icono <Download size={13} className="inline-block" /> en los enlaces de una ficha.
         </p>
       ) : (
-        <div className="space-y-2">
+        <div data-tv-list className="space-y-2">
           {downloads.map((f, i) => (
             <div key={f.path || i} className="flex items-center gap-3 bg-dark-700/50 rounded-lg p-3">
               <div className="flex-1 min-w-0">
@@ -422,7 +491,7 @@ export default function DownloadsList() {
               <OctoLoader size={15} className="text-primary-400" /> Buscando almacenamiento…
             </div>
           ) : (
-            <div className="space-y-2 mb-4">
+            <div data-tv-list className="space-y-2 mb-4">
               {volumes.length === 0 && (
                 <p className="text-dark-500 text-sm py-2">
                   No se detectó almacenamiento — prueba con el selector del sistema.

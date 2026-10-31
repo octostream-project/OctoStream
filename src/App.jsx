@@ -23,6 +23,7 @@ import { toast } from './components/ui/Toast.jsx'
 
 // Lazy-loaded pages: each route becomes its own chunk.
 const Home = lazy(() => import('./pages/Home.jsx'))
+const Platforms = lazy(() => import('./pages/Platforms.jsx'))
 const Search = lazy(() => import('./pages/Search.jsx'))
 const YouTube = lazy(() => import('./pages/YouTube.jsx'))
 const Details = lazy(() => import('./pages/Details.jsx'))
@@ -543,6 +544,7 @@ export default function App() {
               {routesMounted && (
               <Routes>
                 <Route path="/" element={<Home />} />
+                <Route path="/platforms" element={<Platforms />} />
                 <Route path="/search" element={<Search />} />
                 <Route path="/youtube" element={<YouTube />} />
                 <Route path="/favorites" element={<Favorites />} />
