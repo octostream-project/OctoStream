@@ -17,7 +17,7 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
-import { isAlldebridEnabled, isAlldebridSupported, unlockLink as adUnlockLink, resolveMagnet as adResolveMagnet } from '../alldebrid.js'
+import { isAlldebridEnabled, isAlldebridSupported, unlockLink as adUnlockLink } from '../alldebrid.js'
 
 // AllDebrid es el único servicio debrid configurado.
 const anyDebridEnabled = () => isAlldebridEnabled()
@@ -185,19 +185,6 @@ async function debridUnlock(url) {
     logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
     return null
   }
-}
-
-async function debridResolveMagnet(url) {
-  if (isAlldebridEnabled()) {
-    try {
-      const result = await adResolveMagnet(url)
-      if (result?.links?.length) {
-        console.log(`[AllDebrid] Resolved magnet: ${result.links[0]?.name || hostOf(result.links[0]?.link || '')}`)
-        return { links: result.links.map(l => l.link), via: 'AllDebrid' }
-      }
-    } catch (e) { logWarn('[AllDebrid] Failed to resolve magnet:', String(e?.message || e)) }
-  }
-  return null
 }
 
 // Validate a channel search result by TMDB/IMDb ID when the channel exposes it.
@@ -720,91 +707,24 @@ async function resolveStreams(streams, onBatch, context = {}) {
   }
 
   const expanded = []
-  const debridEnabled = anyDebridEnabled()
   const { withDefaultTrackers } = await import('../../../utils/torrentFile.js')
 
-  // Resolve all embed streams in parallel (much faster than sequential)
+  // Stream discovery must not upload magnets to AllDebrid. Torrents remain
+  // on the local P2P path; any cache request must be a separate, explicit
+  // user action outside this resolver.
   const directStreams = limited.filter(s =>
     s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'dash' ||
     (s.streamType === 'torrent' && torrentSearchEnabled())
   )
-  const debridTasks = []
   for (const s of directStreams) {
-    // Extract quality from direct URL if not already set
-    const urlQuality = extractQualityFromUrl(s.url) || 'HD'
-
-    // For torrents, try debrid services (converts magnet to direct stream).
-    // .torrent URLs are converted to magnets first so debrid can ingest them.
-    // Se lanzan en paralelo — un torrent no cacheado tarda ~30s de timeout y
-    // en serie multiplicaría la espera por cada resultado.
-
-    if (s.streamType === 'torrent' && debridEnabled) {
-      debridTasks.push((async () => {
-        let magnetUrl = null
-        try {
-          const { torrentUrlToMagnet, withDefaultTrackers } = await import('../../../utils/torrentFile.js')
-          magnetUrl = /magnet:/.test(s.url) ? s.url : null
-          if (!magnetUrl && /^https?:\/\//i.test(s.url)) {
-            magnetUrl = await torrentUrlToMagnet(s.url)
-          }
-          if (magnetUrl) magnetUrl = withDefaultTrackers(magnetUrl)
-          if (!magnetUrl) return [{ ...s, quality: urlQuality }]
-          // Season/episode del contexto de la petición — el stream también
-          // puede traerlos (filas por episodio de dontorrent).
-          const ep = {
-            season: s.season ?? context.season,
-            episode: s.episode ?? context.episode,
-          }
-          const resolved = await debridResolveMagnet(magnetUrl, ep)
-          if (resolved?.links?.length) {
-            return resolved.links.map(link => ({
-              ...s,
-              url: link,
-              streamType: /\.m3u8/i.test(link) || /m3u8/i.test(link) ? 'hls' : 'mp4',
-              quality: urlQuality,
-              server: s.server + ' (Debrid)',
-              originalUrl: s.url,
-              viaDebrid: resolved.via,
-              // La URL firmada de debrid caduca en reproducciones largas:
-              // re-resolver el magnet para obtener un link fresco (el
-              // resolveEmbedJs del fallback originalUrl no sabe qué hacer
-              // con una página de torrent).
-              _refreshUrl: async () => {
-                const fresh = await debridResolveMagnet(magnetUrl, ep)
-                const links = fresh?.links || []
-                return links.find(l => l !== link) || links[0] || null
-              },
-            }))
-          }
-        } catch (e) {
-          logWarn(`[Debrid] Failed to resolve magnet: ${hostOf(s.url)}`, String(e?.message || e))
-        }
-        // Debrid no lo tenía cacheado → cae a P2P con el magnet ya enriquecido
-        // con trackers públicos; se marca para que el usuario distinga el
-        // fallback del stream "(Debrid)".
-        return [{ ...s, url: magnetUrl || s.url, quality: urlQuality, server: s.server + ' (P2P)' }]
-      })())
-      continue
-    }
-
-    // Magnet sin trackers (Torrentio/Wolfmax4k los emiten pelados) → el
-    // motor P2P depende solo de DHT: el metadata fetch puede tardar
-    // minutos o no arrancar nunca ("resolviendo" infinito). Enriquecer
-    // con trackers públicos igual que hace el path debrid.
+    const quality = extractQualityFromUrl(s.url) || 'HD'
     const url = s.streamType === 'torrent' && /^magnet:/i.test(s.url)
       ? withDefaultTrackers(s.url) : s.url
-    expanded.push(s.quality ? { ...s, url } : { ...s, url, quality: urlQuality })
+    expanded.push(s.quality ? { ...s, url } : { ...s, url, quality })
   }
-  // Emit direct streams immediately (they're already playable) — ANTES de
-  // esperar a debrid: cada magnet puede tardar ~30s de poll y retenerlos
-  // dejaba la lista entera vacía ~1 min con debrid activado.
   if (onBatch && expanded.length > 0) onBatch(expanded)
-  for (const entries of await Promise.all(debridTasks)) expanded.push(...entries)
-  // Los resultados debrid (o el fallback P2P) llegan tarde: re-emitir.
-  if (onBatch && debridTasks.length > 0) onBatch(expanded)
 
-  // Los torrent nunca pasan por resolución embed: habilitados van por la vía
-  // directa (debrid/magnet); deshabilitados se descartan aquí.
+  // Torrent streams stay on the direct local P2P path, never the embed path.
   const embedStreams = limited.filter(s =>
     !(s.streamType === 'mp4' || s.streamType === 'hls' || s.streamType === 'torrent' || s.streamType === 'usenet' || s.streamType === 'dash')
   )

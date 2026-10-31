@@ -39,6 +39,32 @@ afterEach(() => {
 })
 
 describe('Plurtasko hierarchy', () => {
+  it('never uploads a torrent to AllDebrid just while resolving a stream list', async () => {
+    const originalFetch = global.fetch
+    localStorage.setItem('octostream_alldebrid_key', 'test-key')
+    global.fetch = vi.fn()
+    channel.getStreams = vi.fn().mockResolvedValue([{
+      url: 'magnet:?xt=urn:btih:0123456789012345678901234567890123456789',
+      streamType: 'torrent',
+      server: 'Test torrent provider',
+    }])
+
+    try {
+      const plugin = plurtaskoFactory({ manifest: {} })
+      const streams = await plugin.getStreams({
+        type: CONTENT_TYPES.MOVIE,
+        id: 'animeflvone:https://provider.example/movie',
+        name: 'Test movie',
+      })
+
+      expect(streams.some(stream => stream.streamType === 'torrent')).toBe(true)
+      expect(global.fetch).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = originalFetch
+      localStorage.removeItem('octostream_alldebrid_key')
+    }
+  })
+
   it('derives seasons from provider episodes', async () => {
     channel.getMeta = vi.fn().mockResolvedValue({
       id: 'animeflvone:https://vww.animeflv.one/anime/demo',
