@@ -1197,6 +1197,10 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
             } : null)
           }
           currentTimeRef.current = pos
+          // Re-plays dentro de la sesión (re-resolve, error retry) deben
+          // partir de la posición actual, no del resume original — si no,
+          // cada recarga de enlace rebobina la peli.
+          if (playArgs) playArgs.startTime = pos
           if (dur > 0) durationRef.current = dur
         }
       }

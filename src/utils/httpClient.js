@@ -374,7 +374,7 @@ export async function httpGetBlob(url, headers = {}, signal) {
  * Fetch blob/binary and return both body and response headers.
  * Needed by providers that return session tokens in headers (e.g. FCTV).
  */
-export async function httpGetBlobWithHeaders(url, headers = {}, signal) {
+export async function httpGetBlobWithHeaders(url, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
     try {
@@ -384,6 +384,7 @@ export async function httpGetBlobWithHeaders(url, headers = {}, signal) {
         url,
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
         responseType: 'blob',
+        bypassVpn,
       })
       if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
       if (isBase64(response.data)) return { data: response.data, headers: response.headers || {} }

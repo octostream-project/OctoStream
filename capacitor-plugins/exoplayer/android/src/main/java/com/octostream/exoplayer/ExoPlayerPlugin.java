@@ -4269,7 +4269,8 @@ public class ExoPlayerPlugin extends Plugin {
                 DebridRangeRelay ready = null;
                 try {
                     OkHttpClient client = createStreamHttpClient(url, false, false, requestedVps);
-                    ready = DebridRangeRelay.probe(url, client, probeHeaders);
+                    ready = DebridRangeRelay.probe(url, client, probeHeaders,
+                        lowEndDevice ? 48 : 128);
                 } catch (Exception e) {
                     Log.i(TAG, "Debrid Range unsupported/unavailable; using direct source: "
                             + e.getClass().getSimpleName());
@@ -5128,7 +5129,9 @@ public class ExoPlayerPlugin extends Plugin {
                 debridRelay = pendingDebridRelay;
                 pendingDebridRelay = null;
                 Log.i(TAG, "Debrid Range relay active, exit="
-                        + (com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr() != null
+                        + (com.octostream.cloudproxy.CloudProxyPlugin.isDebridDirect()
+                                ? "direct"
+                                : com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr() != null
                                 ? "VPS" : "WARP"));
             } catch (Exception e) {
                 Log.w(TAG, "Debrid relay bind failed; using direct source");

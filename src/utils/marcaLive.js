@@ -37,10 +37,13 @@ function b64ToBytes(b64) {
 // Marca sirve ISO-8859-15: decodificar con el charset real del header o los
 // acentos salen corruptos ("Málaga" → mojibake).
 async function fetchPage(slug, signal) {
+  // bypassVpn: el calendario sale por la red física — Marca es un site ES
+  // que no necesita túnel, y si WARP cae/bloqueado (fútbol→Cloudflare) el
+  // scrape seguía muriendo y la vista mostraba el calendario viejo.
   const { data, headers } = await httpGetBlobWithHeaders(PAGE_URL(slug), {
     'User-Agent': MARCA_UA,
     'Accept-Language': 'es',
-  }, signal)
+  }, signal, true)
   // Android devuelve base64 (blob nativo); web/Electron un Blob real.
   const buf = typeof data === 'string'
     ? (/^[A-Za-z0-9+/]+={0,2}$/.test(data) ? b64ToBytes(data) : new TextEncoder().encode(data))

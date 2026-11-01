@@ -156,6 +156,9 @@ public class CloudProxyPlugin extends Plugin {
     // pÃºblica del VPS. Sin Ã©l, el forward 2820 sale por el aether remoto y
     // una URL desbloqueada ahÃ­ darÃ­a 403 al reproducirla por 2831.
     public static String getVpsSocksAddr() {
+        // debrid_direct: el media también sale por la IP de casa — si solo el
+        // unlock fuera directo, el mismatch IP-bound daría 403 al reproducir.
+        if (debridDirect) return null;
         SshDirectProxy dp = directProxy;
         return isNativeSshUp() && dp != null && dp.isRunning()
                 ? "127.0.0.1:" + nativeSshPort : null;

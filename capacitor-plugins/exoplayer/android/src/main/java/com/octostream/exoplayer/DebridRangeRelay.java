@@ -34,15 +34,15 @@ import okhttp3.Response;
 final class DebridRangeRelay implements AutoCloseable {
     private static final String TAG = "DebridRangeRelay";
     private static final int CHUNK = 1024 * 1024;
-    private static final int CACHE_CHUNKS = 48;
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
 
     private final String url;
     private final OkHttpClient client;
     private final Headers headers;
     private final long length;
+    private final int cacheChunks;
     private final String path = "/media/" + UUID.randomUUID();
-    private final ExecutorService downloads = Executors.newFixedThreadPool(4);
+    private final ExecutorService downloads = Executors.newFixedThreadPool(6);
     private final ExecutorService connections = Executors.newFixedThreadPool(3);
     private final Map<Long, Future<byte[]>> pending = new ConcurrentHashMap<>();
     private final LinkedHashMap<Long, byte[]> cache = new LinkedHashMap<>(16, 0.75f, true);
@@ -55,17 +55,18 @@ final class DebridRangeRelay implements AutoCloseable {
     private ServerSocket server;
     private Thread acceptThread;
 
-    private DebridRangeRelay(String url, OkHttpClient client, Headers headers, long length) {
+    private DebridRangeRelay(String url, OkHttpClient client, Headers headers, long length, int cacheChunks) {
         this.url = url;
         this.client = client;
         this.headers = headers;
         this.length = length;
+        this.cacheChunks = cacheChunks;
     }
 
     // Called off the Android UI thread. A 206 for byte zero is required;
     // no Range or unknown length means the existing direct player is safer.
-    static DebridRangeRelay probe(String url, OkHttpClient client, Map<String, String> requestHeaders)
-            throws IOException {
+    static DebridRangeRelay probe(String url, OkHttpClient client, Map<String, String> requestHeaders,
+            int cacheChunks) throws IOException {
         Headers.Builder safe = new Headers.Builder();
         for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
             String key = entry.getKey();
@@ -84,7 +85,7 @@ final class DebridRangeRelay implements AutoCloseable {
             if (size <= 1 || response.body() == null || response.body().byteStream().read() < 0) {
                 throw new IOException("Range probe failed");
             }
-            return new DebridRangeRelay(url, client, headers, size);
+            return new DebridRangeRelay(url, client, headers, size, cacheChunks);
         }
     }
 
@@ -201,7 +202,7 @@ final class DebridRangeRelay implements AutoCloseable {
             byte[] data = download(i);
             synchronized (DebridRangeRelay.this) {
                 cache.put(i, data);
-                while (cache.size() > CACHE_CHUNKS) cache.remove(cache.keySet().iterator().next());
+                while (cache.size() > cacheChunks) cache.remove(cache.keySet().iterator().next());
             }
             failures.set(0);
             return data;
