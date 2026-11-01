@@ -32,7 +32,8 @@ const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' 
 // comparten la misma IP de salida del VPS; sin VPS cae al proxy WARP y la
 // consistencia IP se mantiene igual.
 async function apiGetJson(url) {
-  try { if (isAndroidNative()) await waitForWarp(20000) } catch {}
+  // httpClient comprueba VPS/WARP en el momento de la petición. Un waitForWarp
+  // previo duplicaba el gate y bloqueaba hasta 20s con SSH vivo y WARP caído.
   return httpGetJson(url, {}, undefined, false, true, true)
 }
 
@@ -41,7 +42,7 @@ async function apiGetJson(url) {
 // el PIN si WARP está caído:
 // vincular la cuenta no puede exigir tener la VPN ya configurada.
 async function apiGetJsonPin(url) {
-  try { if (isAndroidNative()) await waitForWarp(15000) } catch {}
+  try { if (isAndroidNative()) await waitForWarp(15000) } catch { /* ignorado */ }
   try {
     return await httpGetJson(url, {}, undefined, false, false)
   } catch (e) {
@@ -53,7 +54,7 @@ async function apiGetJsonPin(url) {
 
 // RealDebrid fue eliminado del proyecto: limpia el token persistido de
 // instalaciones viejas para que no quede credencial huérfana en el dispositivo.
-try { removeItemSync('octostream_realdebrid_token') } catch {}
+try { removeItemSync('octostream_realdebrid_token') } catch { /* ignorado */ }
 
 // Dedup inflight + caché corta de desbloqueos. Details y Plurtasko pueden
 // resolver la misma URL a la vez (y el picker se reabre a menudo): compartir
@@ -66,7 +67,7 @@ const magnetInflight = new Map()
 const magnetCache = new Map()
 
 // Get API key from localStorage
-export function getAlldebridApiKey() {
+function getAlldebridApiKey() {
   try {
     return getItemSync('octostream_alldebrid_key') || ''
   } catch {
@@ -155,7 +156,6 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
   const url = apiUrl(endpoint, method === 'GET' ? params : {}, base)
   let data
   if (method === 'POST') {
-    try { if (isAndroidNative()) await waitForWarp(20000) } catch {}
     data = await httpPostJson(
       url,
       new URLSearchParams(params).toString(),
@@ -174,7 +174,7 @@ async function apiFetch(endpoint, params = {}, retry = true, method = 'GET', bas
     // On bad API key, clear it and re-authenticate via PIN flow
     if (code === 'AUTH_BAD_APIKEY' && retry) {
       console.warn('[AllDebrid] API key invalid, clearing for re-authentication')
-      try { removeItemSync('octostream_alldebrid_key') } catch {}
+      try { removeItemSync('octostream_alldebrid_key') } catch { /* ignorado */ }
       throw new Error('AllDebrid: API key invalid, please re-authenticate')
     }
     const msg = data.error?.message || 'Unknown AllDebrid error'
@@ -203,19 +203,27 @@ async function waitDelayed(delayedId, timeoutMs = 120000) {
 // Returns { link, filename, filesize, streamable, id } or null on failure.
 // `link` is the direct, already-unlocked URL. data.streams entries are NOT
 // returned: they are still-restricted variants that need /link/streaming.
-export async function unlockLink(linkUrl) {
-  const hit = unlockCache.get(linkUrl)
+export async function unlockLink(linkUrl, { refresh = false } = {}) {
+  // A link that just returned 403 may be signed for the previous exit IP.
+  // Do not let the short cache (or an older in-flight unlock) return it again.
+  if (refresh) unlockCache.delete(linkUrl)
+  const hit = refresh ? null : unlockCache.get(linkUrl)
   if (hit && Date.now() - hit.t < UNLOCK_CACHE_TTL) return hit.res
   unlockCache.delete(linkUrl)
-  let p = unlockInflight.get(linkUrl)
+  let p = refresh ? null : unlockInflight.get(linkUrl)
   if (!p) {
     p = unlockLinkRemote(linkUrl)
     unlockInflight.set(linkUrl, p)
-    p.finally(() => { if (unlockInflight.get(linkUrl) === p) unlockInflight.delete(linkUrl) })
   }
-  const res = await p
-  if (res?.link) unlockCache.set(linkUrl, { t: Date.now(), res })
-  return res
+  try {
+    const res = await p
+    if (res?.link && unlockInflight.get(linkUrl) === p) {
+      unlockCache.set(linkUrl, { t: Date.now(), res })
+    }
+    return res
+  } finally {
+    if (unlockInflight.get(linkUrl) === p) unlockInflight.delete(linkUrl)
+  }
 }
 
 async function unlockLinkRemote(linkUrl) {

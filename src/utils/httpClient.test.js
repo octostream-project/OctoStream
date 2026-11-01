@@ -14,6 +14,7 @@ vi.mock('./platform.js', () => ({
 vi.mock('./cloudProxy.js', () => ({
   CloudProxy: {
     directFetch: vi.fn(),
+    getDebridRoute: vi.fn(),
   },
 }))
 
@@ -34,6 +35,8 @@ import { waitForWarp } from './warpStatus.js'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  CloudProxy.getDebridRoute.mockResolvedValue({ ssh: false, vps: false })
+  waitForWarp.mockResolvedValue(true)
 })
 
 describe('httpGetJson', () => {
@@ -82,6 +85,30 @@ describe('httpGetJson', () => {
       vps: true,
     }))
     expect(CapacitorHttp.request).not.toHaveBeenCalled()
+  })
+
+  it('uses a live VPS even when general WARP is down', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.getDebridRoute.mockResolvedValue({ ssh: true, vps: true })
+    waitForWarp.mockResolvedValue(false)
+    CloudProxy.directFetch.mockResolvedValue({ status: 200, data: '{"ok":true}' })
+
+    await expect(httpGetJson('https://api.alldebrid.com/v4/user', {}, undefined, false, true, true))
+      .resolves.toEqual({ ok: true })
+    expect(waitForWarp).not.toHaveBeenCalled()
+    expect(CloudProxy.directFetch).toHaveBeenCalledOnce()
+  })
+
+  it('never falls back to WARP or WebView when configured SSH is down', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.getDebridRoute.mockResolvedValue({ ssh: true, vps: false })
+    globalThis.fetch = vi.fn()
+
+    await expect(httpGetJson('https://api.alldebrid.com/v4/user', {}, undefined, false, false, true))
+      .rejects.toMatchObject({ code: 'VPS_NOT_CONNECTED' })
+    expect(CloudProxy.directFetch).not.toHaveBeenCalled()
+    expect(CapacitorHttp.request).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('does not bypass WARP by host for non-TDT traffic to broadcaster domains', async () => {

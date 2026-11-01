@@ -130,7 +130,7 @@ export const flizzmovies = {
             pluginId: 'plurtasko',
           })
         }
-      } catch {}
+      } catch { /* ignorado */ }
     }
 
     return streams

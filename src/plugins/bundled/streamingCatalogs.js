@@ -4,7 +4,7 @@ import { httpGetJson } from '../../utils/httpClient.js'
 // Keep it isolated from the external-plugin loader: users can browse these
 // rows, but this integration never delegates playback to a remote addon.
 const CATALOG_HOST = '7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club'
-export const DEFAULT_STREAMING_CATALOG_MANIFEST = 'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsaGJtLG1wOSxjcnUsbmZrLGF0cDo6RVM6MTc5MzQwMDI1MzQ3MTowOjA6SVM%3D/manifest.json'
+const DEFAULT_STREAMING_CATALOG_MANIFEST = 'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsaGJtLG1wOSxjcnUsbmZrLGF0cDo6RVM6MTc5MzQwMDI1MzQ3MTowOjA6SVM%3D/manifest.json'
 const CACHE_TTL_MS = 10 * 60 * 1000
 const manifestCatalogsCache = new Map()
 let catalogCache = new Map()

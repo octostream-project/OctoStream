@@ -152,7 +152,7 @@ export const serieskao = {
       try {
         const decoded = atob(link)
         if (decoded.startsWith('http')) link = decoded
-      } catch {}
+      } catch { /* ignorado */ }
 
       if (/1fichier\.|short\.|plustream\.|player-cdn\.|embedsito|disable|xupalace|uploadfox/i.test(link)) continue
 

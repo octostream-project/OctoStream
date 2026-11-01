@@ -433,35 +433,6 @@ export async function stopPlayback() {
   return ExoPlayer.stop()
 }
 
-/**
- * Abre un segundo ExoPlayer en mini-ventana flotante (PiP interno).
- * El mini conserva el audio; el player principal queda muteado mientras el
- * PiP esté activo. Tap/OK en el mini intercambia los contenidos.
- */
-export async function playPip(options) {
-  if (!isAndroidNative()) return { status: 'unsupported' }
-  const url = sanitizeHttpUrl(options?.url)
-  if (!url) return { status: 'failed' }
-  try {
-    return await ExoPlayer.playPip({
-      url,
-      streamType: options.streamType || 'hls',
-      direct: options.direct === true,
-    bypassVpn: options.bypassVpn === true,
-      headers: options.headers || {},
-      title: options.title || '',
-    })
-  } catch {
-    return { status: 'failed' }
-  }
-}
-
-/** Cierra el mini-player PiP y restaura el audio del principal. */
-export async function stopPip() {
-  if (!isAndroidNative()) return
-  try { await ExoPlayer.stopPip() } catch { /* noop */ }
-}
-
 /** Indica si hay un mini-player PiP reproduciendo. */
 export async function isPipActive() {
   if (!isAndroidNative()) return false

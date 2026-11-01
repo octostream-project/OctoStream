@@ -665,7 +665,7 @@ export class PluginManager {
 }
 
 // Clear stale TMDB disk cache and stream cache on startup
-try { removeItemSync('octostream_tmdb_cache') } catch {}
+try { removeItemSync('octostream_tmdb_cache') } catch { /* ignorado */ }
 PluginManager.clearStreamCache()
 
 export const pluginManager = new PluginManager()

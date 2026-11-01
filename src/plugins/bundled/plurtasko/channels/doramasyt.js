@@ -161,7 +161,7 @@ export const doramasyt = {
             pluginId: 'plurtasko',
           })
         }
-      } catch {}
+      } catch { /* ignorado */ }
     }
 
     // Fallback: direct download links on page

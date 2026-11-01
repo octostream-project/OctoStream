@@ -20,7 +20,7 @@ export const GEO_BYPASS_HOSTS = [
 ]
 
 const esc = h => h.replace(/\./g, '\\.')
-export const GEO_HOST_RE = new RegExp(
+const GEO_HOST_RE = new RegExp(
   `(^|\\.)(${GEO_BYPASS_HOSTS.map(esc).join('|')})$`,
   'i'
 )

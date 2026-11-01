@@ -53,7 +53,7 @@ export const jkanime = {
             pluginId: 'plurtasko',
           })
         }
-      } catch {}
+      } catch { /* ignorado */ }
     }
 
     if (items.length > 0) return items.slice(0, top)
@@ -242,14 +242,14 @@ export const jkanime = {
     if (vServers) {
       // Parse as JSON first (most reliable), fall back to regex object extraction
       let serverList = null
-      try { serverList = JSON.parse(vServers) } catch {}
+      try { serverList = JSON.parse(vServers) } catch { /* ignorado */ }
       if (Array.isArray(serverList)) {
         for (const obj of serverList) {
           const remoteB64 = obj.remote
           const srvName = obj.server || obj.title || obj.name
           if (!remoteB64) continue
           let remoteUrl = ''
-          try { remoteUrl = atob(remoteB64) } catch {}
+          try { remoteUrl = atob(remoteB64) } catch { /* ignorado */ }
           if (!remoteUrl.startsWith('http')) remoteUrl = remoteB64.startsWith('http') ? remoteB64 : ''
           if (!remoteUrl) continue
           const server = this._detectServer(remoteUrl) || (srvName || '').toLowerCase()
@@ -263,7 +263,7 @@ export const jkanime = {
           const srvName = findSingleMatch(m[1], '"(?:server|title|name)"\\s*:\\s*"(.*?)"')
           if (!remoteB64) continue
           let remoteUrl = ''
-          try { remoteUrl = atob(remoteB64) } catch {}
+          try { remoteUrl = atob(remoteB64) } catch { /* ignorado */ }
           if (!remoteUrl.startsWith('http')) remoteUrl = remoteB64.startsWith('http') ? remoteB64 : ''
           if (!remoteUrl) continue
           const server = this._detectServer(remoteUrl) || (srvName || '').toLowerCase()

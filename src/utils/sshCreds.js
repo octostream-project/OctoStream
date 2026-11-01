@@ -11,13 +11,13 @@
 import { isAndroidNative } from './platform.js'
 import { CloudProxy } from './cloudProxy.js'
 
-export const SSH_KEYS = {
+const SSH_KEYS = {
   host: 'octostream_warp_remote',
   user: 'octostream_warp_ssh_user',
   pass: 'octostream_warp_ssh_pass',
   port: 'octostream_warp_ssh_port',
 }
-export const SSH_KEY_LIST = Object.values(SSH_KEYS)
+const SSH_KEY_LIST = Object.values(SSH_KEYS)
 
 // Devuelve {key: value} de las credenciales SSH presentes — las claves
 // octostream_* del transporte para que encajen en settings del payload.

@@ -161,7 +161,7 @@ const norm = (s) => String(s || '').toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').trim()
 
-export const eventKey = (e) => (e.home && e.away)
+const eventKey = (e) => (e.home && e.away)
   ? `${norm(e.home)}|${norm(e.away)}|${norm(e.league)}`
   : `t|${norm(e.title)}|${norm(e.category)}`
 

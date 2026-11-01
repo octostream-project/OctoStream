@@ -2,6 +2,7 @@ import { isAndroidNative } from './platform.js'
 import { isPlayerActive } from './exoPlayer.js'
 import { getTorrentEngine } from './torrentEngine.js'
 import { getJsonSync, setJsonSync } from './storage.js'
+import { toast } from '../components/ui/Toast.jsx'
 
 const MAX_JOBS = 40
 const PERSIST_KEY = 'octostream_download_queue'
@@ -42,7 +43,7 @@ function persistedStart(persist, name) {
     const { unlockLink } = await import('../plugins/bundled/alldebrid.js')
     const result = await unlockLink(persist.url)
     if (!result?.link) throw new Error(result?.error || 'No se pudo desbloquear el enlace')
-    return engine.downloadHttp({ url: result.link, name })
+    return engine.downloadHttp({ url: result.link, name, vps: true })
   }
 }
 
@@ -142,7 +143,10 @@ export function createDownloadQueue({
     if (activeJob !== job) return
     job.status = status
     job.error = error ? String(error).slice(0, 240) : ''
-    if (status === 'completed') job.progress = 1
+    if (status === 'completed') {
+      job.progress = 1
+      toast(`${job.name || 'Descarga'} descargada — lista para ver`)
+    }
     job.start = null
     activeJob = null
     activeEngine = null

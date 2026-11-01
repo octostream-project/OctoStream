@@ -27,13 +27,15 @@ export interface CloudProxyStatus {
   /** Effective remote host and whether SSH mode is configured. */
   remote?: string;
   ssh?: boolean;
-  /** SSH forward to the VPS is live (debrid-only egress on
-   *  127.0.0.1:2819/2820). False while reconnecting — debrid streams then
-   *  fall back to the WARP proxy, never to the physical network. */
+    /** SSH forward to the VPS is live (debrid-only egress on
+     *  127.0.0.1:2819/2820). If SSH is configured but down, debrid requests
+     *  fail closed rather than switching to a different exit IP. */
   vps?: boolean;
 }
 
 export interface CloudProxyPlugin {
+  /** Debrid exit status without a general WARP health probe. */
+  getDebridRoute(): Promise<{ ssh: boolean; vps: boolean; direct?: boolean }>;
   /**
    * Start the Aether local proxy for Cloudflare WARP.
    * Routes app traffic through the WARP tunnel (MASQUE over QUIC).
@@ -106,9 +108,9 @@ export interface CloudProxyPlugin {
     connectTimeout?: number;
     readTimeout?: number;
     /** Debrid traffic: route via the SSH forward to the VPS (127.0.0.1:2820)
-     *  instead of the physical network or the general WARP proxy. Falls back
-     *  to the default proxy (aether) when no VPS tunnel is up — never goes
-     *  out in the clear. Not restricted to the geo-bypass host list. */
+       *  instead of the physical network or the general WARP proxy. Uses
+       *  aether only when no SSH VPS is configured; configured SSH down fails
+       *  closed. Not restricted to the geo-bypass host list. */
     vps?: boolean;
   }): Promise<{ status: number; headers: Record<string, string>; data: unknown; url?: string }>;
 }

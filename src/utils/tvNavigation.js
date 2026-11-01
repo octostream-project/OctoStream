@@ -773,24 +773,6 @@ export function initTvNavigation() {
   setTimeout(first, 250)
 }
 
-export function destroyTvNavigation() {
-  document.removeEventListener('keydown', onKeyDown, true)
-  document.removeEventListener('keyup', onKeyUp, true)
-  document.removeEventListener('click', onClickCapture, true)
-  document.removeEventListener('focusin', onFocusIn, true)
-  document.removeEventListener('focusout', onFocusOut, true)
-  document.removeEventListener('pointerdown', onPointerDown, true)
-  if (inputTimer) { clearTimeout(inputTimer); inputTimer = null }
-  for (const remove of scrollListeners) remove()
-  scrollListeners = []
-  mainObserver?.disconnect()
-  mainObserver = null
-  if (mutationTimer) { clearTimeout(mutationTimer); mutationTimer = null }
-  mainScrollEl = null
-  refocusGeneration++
-  initialized = false
-}
-
 let refocusGeneration = 0
 
 export function refocusAfterPageChange() {

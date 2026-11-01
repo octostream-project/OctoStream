@@ -74,7 +74,7 @@ export function getLastDevice() {
 }
 
 function saveLastDevice(device) {
-  try { localStorage.setItem(LAST_DEVICE_KEY, JSON.stringify(device)) } catch {}
+  try { localStorage.setItem(LAST_DEVICE_KEY, JSON.stringify(device)) } catch { /* ignorado */ }
 }
 
 // ── Identidad propia y tokens de emparejamiento ──────────────────────────
@@ -83,7 +83,7 @@ function saveLastDevice(device) {
 // guarda y manda como X-Pair-Token — la autorización es por identidad, no
 // por IP (sobrevive a cambios de DHCP y no es falsificable con la IP sola).
 
-export async function getDeviceInfo() {
+async function getDeviceInfo() {
   const SyncServer = await getSyncServer()
   if (!SyncServer?.getDeviceInfo) return null
   try { return await SyncServer.getDeviceInfo() } catch { return null }
@@ -98,10 +98,10 @@ function saveToken(deviceId, info) {
     const t = loadTokens()
     t[deviceId] = { token: info.token, alias: info.alias || '', fingerprint: info.fingerprint || '' }
     localStorage.setItem(TOKENS_KEY, JSON.stringify(t))
-  } catch {}
+  } catch { /* ignorado */ }
 }
 export function forgetTokens() {
-  try { localStorage.removeItem(TOKENS_KEY) } catch {}
+  try { localStorage.removeItem(TOKENS_KEY) } catch { /* ignorado */ }
 }
 
 // Dispositivos vistos por UDP broadcast (anuncio automático estilo LocalSend).
@@ -128,7 +128,7 @@ function linkSignal(signal, timeoutMs) {
 // /pair: el receptor responde {pending:true} mientras el usuario decide;
 // se re-pregunta hasta aceptar ({ok, token}), rechazar (403), cancelar o
 // agotar el tiempo. Devuelve true | 'denied' | 'aborted' | 'unsupported'.
-export async function pairDevice(deviceUrl, devId, signal) {
+async function pairDevice(deviceUrl, devId, signal) {
   const me = await getDeviceInfo()
   if (!me?.deviceId) return 'unsupported'
   const deadline = Date.now() + 75000

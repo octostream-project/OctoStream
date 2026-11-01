@@ -181,7 +181,7 @@ export const tioanime = {
             const fileUrl = findSingleMatch(umiHtml, '"file":"(.*?)"')
             if (fileUrl) link = fileUrl.replace(/\\\//g, '/')
           }
-        } catch {}
+        } catch { /* ignorado */ }
       }
 
       const server = this._detectServer(link)

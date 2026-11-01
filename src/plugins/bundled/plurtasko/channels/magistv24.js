@@ -12,7 +12,7 @@
 import { CONTENT_TYPES } from '../../../base.js'
 import { fetchHtml, postHtml } from '../http.js'
 import { findSingleMatch, findMultipleMatches, normalizeServer, detectServerFromUrl } from '../scraper.js'
-import { extractQualityFromText, detectLangFromText } from '../meta.js'
+import { detectLangFromText } from '../meta.js'
 
 const HOST = 'https://magistv24.com/'
 const NAME = 'MagisTV24'

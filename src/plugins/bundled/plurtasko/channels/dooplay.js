@@ -11,7 +11,6 @@
 import { CONTENT_TYPES } from '../../../base.js'
 import { fetchHtml, postHtml, cleanHtml, decodeEntities, absoluteUrl, googleSiteSearch } from '../http.js'
 import { findSingleMatch, findMultipleMatches, detectServerFromUrl, normalizeServer } from '../scraper.js'
-import { detectLangFromText } from '../meta.js'
 
 const ARTICLE_RE = '<article[^>]*>([\\s\\S]*?)</article>'
 // The data-post/data-type/data-nume attribute order varies between options

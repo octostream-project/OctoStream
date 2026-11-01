@@ -5,7 +5,7 @@ import { fetchJson, fetchText, httpPostJson, httpPostText } from './http.js'
 import { getRtveHls, getU7d } from './data.js'
 import { logWarn } from '../../../utils/logger.js'
 
-export function resolveRtveHls(ch, rtveMap) {
+function resolveRtveHls(ch, rtveMap) {
   const chid = String(ch.id || '')
   const name = String(ch.name || '')
   const url = rtveMap[chid] || rtveMap[normKey(chid)] || rtveMap[normKey(name)]
@@ -26,7 +26,7 @@ export function resolveRtveHls(ch, rtveMap) {
   return null
 }
 
-export async function resolveAtresLive(ch, streamTypes) {
+async function resolveAtresLive(ch, streamTypes) {
   const def = streamTypes.stream11 || {}
   const page = String(ch.url || '')
   let key = page.match(/atresplayer\.com(\/.*)$/)?.[1] || page
@@ -58,7 +58,7 @@ export async function resolveAtresLive(ch, streamTypes) {
   return null
 }
 
-export async function resolveMediasetLive(ch, streamTypes) {
+async function resolveMediasetLive(ch, streamTypes) {
   const def = streamTypes.stream10 || {}
   const attrs = def.atributtes || def.attributes || {}
   const hdr = { 'User-Agent': UA, Origin: 'https://www.mediasetinfinity.es', Referer: 'https://www.mediasetinfinity.es/' }

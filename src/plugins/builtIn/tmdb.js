@@ -47,7 +47,7 @@ const QUALITY_DROP = { medium: 1, low: 2 }
 const QUALITY_MIN_IDX = { poster: 1, backdrop: 1, profile: 1 }
 
 let cachedImgQuality = null
-export function getImageQuality() {
+function getImageQuality() {
   if (cachedImgQuality) return cachedImgQuality
   try {
     const q = getItemSync('octostream_image_quality')

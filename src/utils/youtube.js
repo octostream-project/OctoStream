@@ -53,7 +53,7 @@ async function getPlugin() {
  * @param {string} url - YouTube URL (watch?v=, /embed/, youtu.be/)
  * @returns {Promise<{title: string, streams: Array<{url, mimeType, quality, format}>} | null>}
  */
-export async function resolveYouTube(url) {
+async function resolveYouTube(url) {
   const wrapper = await getPlugin()
   if (!wrapper) return null
 
@@ -91,11 +91,6 @@ const STREAM_CACHE_TTL_MS = 15 * 60 * 1000
 function ytVideoId(url) {
   const m = String(url || '').match(/(?:watch\?v=|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{6,})/)
   return m ? m[1] : null
-}
-
-export function invalidateYouTubeStream(url) {
-  const id = ytVideoId(url)
-  if (id) streamCache.delete(id)
 }
 
 /**
@@ -205,15 +200,6 @@ export async function searchYouTubeFull(query, nextPage = null) {
   }
 }
 
-/**
- * Search YouTube videos using NewPipeExtractor.
- * @param {string} query - Search query
- * @returns {Promise<Array<{name, url, uploader, duration, views, thumbnailUrl, isLive}> | null>}
- */
-export async function searchYouTube(query) {
-  const result = await searchYouTubeFull(query)
-  return result && !result.error ? result.items : null
-}
 
 /**
  * Get a YouTube channel's info + first-tab videos.

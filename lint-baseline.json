@@ -24,7 +24,6 @@
     "react/no-unescaped-entities"
   ],
   "src/pages/Settings.jsx": [
-    "no-empty",
     "react/no-unescaped-entities"
   ],
   "src/pages/Sports.jsx": [
@@ -33,9 +32,6 @@
     "react-hooks/purity",
     "react-hooks/refs",
     "react-hooks/set-state-in-effect"
-  ],
-  "src/plugins/bundled/alldebrid.js": [
-    "no-empty"
   ],
   "src/plugins/bundled/dlive/parse.js": [
     "no-misleading-character-class"
@@ -46,70 +42,26 @@
   "src/plugins/bundled/plurtasko/channels/animeflvone.js": [
     "no-useless-escape"
   ],
-  "src/plugins/bundled/plurtasko/channels/animeyt.js": [
-    "no-empty"
-  ],
   "src/plugins/bundled/plurtasko/channels/doramaexpress.js": [
-    "no-empty",
     "no-useless-escape"
   ],
-  "src/plugins/bundled/plurtasko/channels/doramasyt.js": [
-    "no-empty"
-  ],
-  "src/plugins/bundled/plurtasko/channels/entrepeliculasyseries.js": [
-    "no-empty"
-  ],
-  "src/plugins/bundled/plurtasko/channels/flizzmovies.js": [
-    "no-empty"
-  ],
-  "src/plugins/bundled/plurtasko/channels/jkanime.js": [
-    "no-empty"
-  ],
-  "src/plugins/bundled/plurtasko/channels/serieskao.js": [
-    "no-empty"
-  ],
-  "src/plugins/bundled/plurtasko/channels/tioanime.js": [
-    "no-empty"
-  ],
   "src/plugins/bundled/plurtasko/http.js": [
-    "no-empty",
     "no-useless-escape"
   ],
   "src/plugins/bundled/plurtasko/index.js": [
     "no-control-regex",
-    "no-empty",
     "no-useless-escape"
   ],
   "src/plugins/bundled/plurtasko/meta.js": [
     "no-useless-escape"
   ],
   "src/plugins/bundled/plurtasko/resolver.js": [
-    "no-empty",
     "no-useless-escape"
   ],
   "src/plugins/bundled/plurtasko/scraper.js": [
     "no-useless-escape"
   ],
-  "src/plugins/manager.js": [
-    "no-empty"
-  ],
-  "src/utils/httpClient.js": [
-    "no-empty",
-    "no-useless-catch"
-  ],
-  "src/utils/remotePlay.js": [
-    "no-empty"
-  ],
   "src/utils/sofascore.js": [
     "no-useless-escape"
-  ],
-  "src/utils/torrentFile.js": [
-    "no-empty"
-  ],
-  "src/utils/uiScale.js": [
-    "no-empty"
-  ],
-  "src/utils/warpStatus.js": [
-    "no-empty"
   ]
 }

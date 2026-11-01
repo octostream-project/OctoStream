@@ -35,7 +35,7 @@ async function fetchViaJina(url, signal) {
       }
       return result
     }
-  } catch {}
+  } catch { /* ignorado */ }
   return ''
 }
 
@@ -134,7 +134,7 @@ async function connectWarpForBlocked() {
       clearDownDomains()
       return true
     }
-  } catch {}
+  } catch { /* ignorado */ }
   return false
 }
 
@@ -198,7 +198,7 @@ function markDomainDown(url) {
     const host = new URL(url).hostname
     downDomains.set(host, Date.now())
     console.log(`[Plurtasko] Marked ${host} as DOWN for ${DOWN_TTL_MS / 1000}s`)
-  } catch {}
+  } catch { /* ignorado */ }
 }
 
 // Clear all down-domain entries — called when WARP connects, so previously
@@ -302,7 +302,7 @@ async function fetchHtmlInner(url, signal, extraHeaders) {
       console.log(`[Plurtasko] Skipping ${hostOf(url)} (permanently blocked)`)
       return ''
     }
-  } catch {}
+  } catch { /* ignorado */ }
 
   // Skip domains known to be down
   if (isDomainDown(url)) {
@@ -415,7 +415,7 @@ export async function postHtml(url, body, signal, extraHeaders) {
     return result
   } catch (e) {
     if (await connectWarpForBlocked()) {
-      try { return (await httpPostText(url, body, headers, signal)) || '' } catch {}
+      try { return (await httpPostText(url, body, headers, signal)) || '' } catch { /* ignorado */ }
     }
     console.warn(`[Plurtasko] postHtml failed: ${hostOf(url)}`, e?.message || e)
     return ''
@@ -487,12 +487,12 @@ export function makeHostRotator(hosts, persistKey = null) {
       if (saved && hosts.some(h => h.replace(/\/+$/, '') === saved.replace(/\/+$/, ''))) {
         working = saved
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   const setWorking = (h) => {
     working = h
     if (persistKey) {
-      try { typeof localStorage !== 'undefined' && localStorage.setItem(persistKey, h) } catch {}
+      try { typeof localStorage !== 'undefined' && localStorage.setItem(persistKey, h) } catch { /* ignorado */ }
     }
   }
   return {

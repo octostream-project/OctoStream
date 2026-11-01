@@ -4,8 +4,6 @@
 // exact byte span of that dict, hash it, and build a magnet: URI. The "dn"
 // display name and tracker list are added when present.
 
-import { httpGetBlob } from './httpClient.js'
-
 // Minimal bencode scanner over a Uint8Array. Returns for each parsed value its
 // span [start, end) so the raw "info" dict bytes can be hashed verbatim.
 function scanValue(bytes, pos) {
@@ -94,7 +92,7 @@ function parseTorrent(bytes) {
         p = scanValue(inner, p)
       }
     }
-  } catch {}
+  } catch { /* ignorado */ }
   return { infoSpan, name, trackers }
 }
 
@@ -149,25 +147,4 @@ export function withDefaultTrackers(magnetUrl) {
   return out
 }
 
-// Fetch a .torrent URL and convert it to a magnet URI. Returns null on failure.
-// httpGetBlob devuelve un Blob en web/Electron pero un string base64 en
-// Android (CapacitorHttp): hay que manejar ambos o la conversión siempre
-// fallaba en Android y el torrent nunca llegaba a Debrid.
-export async function torrentUrlToMagnet(url, signal) {
-  try {
-    const data = await httpGetBlob(url, {}, signal)
-    let bytes
-    if (typeof data === 'string') {
-      const bin = atob(data)
-      bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    } else {
-      if (!data || data.size < 20 || data.size > 20 * 1024 * 1024) return null
-      bytes = new Uint8Array(await data.arrayBuffer())
-    }
-    if (bytes.length < 20 || bytes.length > 20 * 1024 * 1024) return null
-    return await torrentBytesToMagnet(bytes)
-  } catch {
-    return null
-  }
-}
+

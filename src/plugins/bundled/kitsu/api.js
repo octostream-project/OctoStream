@@ -59,7 +59,7 @@ async function requestJson(url, signal, attempt = 0) {
   }
 }
 
-export async function kitsuGet(path, params = {}, signal) {
+async function kitsuGet(path, params = {}, signal) {
   const qs = new URLSearchParams(params).toString()
   const url = `${KITSU_BASE}${path}${qs ? '?' + qs : ''}`
   const cached = getCached(url)

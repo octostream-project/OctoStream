@@ -19,7 +19,7 @@ export const MARCA_TO_SOFA = {
 // nombre, ambigua (hay una "Copa del Rey" por deporte). Sin datos (offline u
 // off-season) la tarjeta no se muestra. Tercera RFEF no tiene torneo único
 // en Sofascore (son 18 grupos separados): solo aparece con directos.
-export const EXTRA_SOFA_LEAGUES = [
+const EXTRA_SOFA_LEAGUES = [
   { slug: 'primera-rfef', name: 'Primera Federación', utId: 17073 },
   { slug: 'segunda-rfef', name: 'Segunda Federación', utId: 544 },
   { slug: 'liga-f', name: 'Liga F', utId: 1127 },

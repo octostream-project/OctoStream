@@ -148,6 +148,11 @@ import okio.BufferedSink;
 public class ExoPlayerPlugin extends Plugin {
 
     private static final String TAG = "ExoPlayerPlugin";
+    // Relay segmentado debrid sobre la ruta direct-tcpip del VPS: una sola
+    // conexion rinde ~9 Mbit/s (cap por conexion medido), el archivo remux
+    // 1080p pide mas. Pool acotado para no saturar la cuenta AllDebrid si
+    // varios dispositivos de la familia reproducen a la vez.
+    private static final boolean DEBRID_RELAY_ENABLED = true;
     private static final int ACCENT_COLOR = 0xFF7B5BF5; // morado estilo Stremio
     private ExoPlayer player = null;
     private PlayerView playerView = null;
@@ -177,6 +182,9 @@ public class ExoPlayerPlugin extends Plugin {
     // (2820) en vez del proxy WARP general (1820) — la URL quedó IP-bound
     // a la salida del VPS al desbloquear.
     private boolean currentVps = false;
+    private DebridRangeRelay debridRelay = null;
+    private DebridRangeRelay pendingDebridRelay = null;
+    private final java.util.concurrent.atomic.AtomicLong playRequestId = new java.util.concurrent.atomic.AtomicLong();
     // Ruta con la que JS resolvió el enlace (null = sin marcar): si salió
     // por WARP la URL quedó ligada a la IP de salida del túnel y debe
     // reproducirse por el proxy aunque la sonda falle; si salió por la
@@ -271,9 +279,15 @@ public class ExoPlayerPlugin extends Plugin {
     // Rebuffer crónico: READY→BUFFERING repetido en ciclos cortos ("se para
     // cada pocos segundos"). Cada pausa es breve y el watchdog de 20s nunca
     // salta — sin contador de tasa esto era irrecuperable en TVs débiles.
+    // La tasa sola se escapa del patrón "para cada ~40s" (dos stalls no
+    // llegan a 3 en la ventana de 60s y el tercero resetea): bufferedAccumMs
+    // acumula el tiempo total parado dentro de la ventana como segundo
+    // criterio (ver onRebuffer).
     private boolean wasPlayingReady = false;
     private int rebufferCount = 0;
     private long rebufferWindowStart = 0;
+    private long bufferEnteredAtMs = 0;   // inicio del stall en curso (0 = no hay)
+    private long bufferedAccumMs = 0;     // ms en BUFFERING acumulados en la ventana
     private boolean warpBypassedAfterRebuffer = false;
     private boolean qualityCapped = false;
     // Dispositivo débil (TV Box antigua): isLowRamDevice o sin ABI 64-bit.
@@ -4102,8 +4116,8 @@ public class ExoPlayerPlugin extends Plugin {
         String streamType = call.getString("streamType", "hls");
         boolean direct = call.getBoolean("direct", false);
         boolean bypassVpn = call.getBoolean("bypassVpn", false);
-        boundToWarp = call.getBoolean("warpBound");
-        currentVps = Boolean.TRUE.equals(call.getBoolean("vps", false));
+        final Boolean requestedWarpBound = call.getBoolean("warpBound");
+        final boolean requestedVps = Boolean.TRUE.equals(call.getBoolean("vps", false));
         String licenseUrl = call.getString("licenseUrl", null);
         JSONObject headersJson = call.getObject("headers", new JSObject());
         JSONObject drmHeadersJson = call.getObject("drmHeaders", new JSObject());
@@ -4192,8 +4206,15 @@ public class ExoPlayerPlugin extends Plugin {
             }
         } catch (Exception ignored) {}
 
-        mainHandler.post(() -> {
+        final long requestId = playRequestId.incrementAndGet();
+        Runnable open = () -> {
+            if (requestId != playRequestId.get()) {
+                call.reject("Playback request superseded");
+                return;
+            }
             try {
+                boundToWarp = requestedWarpBound;
+                currentVps = requestedVps;
                 providerSubConfigs = subs.isEmpty() ? null : subs;
                 longBuffering = longBuf;
                 fastStart = fastStartFlag;
@@ -4208,12 +4229,65 @@ public class ExoPlayerPlugin extends Plugin {
                 if (!overlaySubUris.isEmpty()) applyLocalOverlaySubtitles(overlaySubUris);
                 call.resolve(new JSObject().put("status", "playing"));
             } catch (Exception e) {
+                if (debridRelay != null) {
+                    debridRelay.close();
+                    debridRelay = null;
+                }
                 // Log only the message, not the full stack trace (avoids StackOverflow
                 // when the exception has a circular cause chain from PlayerView inflation)
                 Log.e(TAG, "Error opening player: " + e.getMessage());
                 call.reject("Failed to open player: " + e.getMessage());
+            } finally {
+                if (pendingDebridRelay != null) {
+                    pendingDebridRelay.close();
+                    pendingDebridRelay = null;
+                }
             }
-        });
+        };
+        // Probe on a worker: a debrid CDN may take seconds to answer even a
+        // one-byte request. Never block the UI thread or force Range on hosts
+        // that ignore it. Other streams keep the existing direct path.
+        // URL distinta: el relay anterior ya no sirve (la misma URL se
+        // reutiliza más abajo — sobrevive al closePlayer entre playStream).
+        if (debridRelay != null
+                && (!url.equals(debridRelay.getSourceUrl()) || !debridRelay.isRunning())) {
+            debridRelay.close();
+            debridRelay = null;
+        }
+        // Segunda playStream de la misma fuente (reload/re-resolve): reutilizar
+        // el relay vivo en vez de sondear y crear otro — era doble descarga.
+        final boolean relayAlive = debridRelay != null
+                && url.equals(debridRelay.getSourceUrl()) && debridRelay.isRunning();
+        if (DEBRID_RELAY_ENABLED && requestedVps && !direct && !localFile && !relayAlive
+                && "vod".equals(playerModeForCall)
+                && "mp4".equalsIgnoreCase(streamType)
+                && (licenseUrl == null || licenseUrl.isEmpty())) {
+            final Map<String, String> probeHeaders = parseHeaders(headersJson);
+            probeHeaders.putIfAbsent("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            new Thread(() -> {
+                DebridRangeRelay ready = null;
+                try {
+                    OkHttpClient client = createStreamHttpClient(url, false, false, requestedVps);
+                    ready = DebridRangeRelay.probe(url, client, probeHeaders);
+                } catch (Exception e) {
+                    Log.i(TAG, "Debrid Range unsupported/unavailable; using direct source: "
+                            + e.getClass().getSimpleName());
+                }
+                final DebridRangeRelay relay = ready;
+                mainHandler.post(() -> {
+                    if (requestId != playRequestId.get()) {
+                        if (relay != null) relay.close();
+                        call.reject("Playback request superseded");
+                        return;
+                    }
+                    pendingDebridRelay = relay;
+                    open.run();
+                });
+            }, "debrid-range-probe").start();
+        } else {
+            mainHandler.post(open);
+        }
     }
 
     /**
@@ -5041,10 +5115,35 @@ public class ExoPlayerPlugin extends Plugin {
             Log.w(TAG, "Could not set cookie manager", e);
         }
 
+        // Attach after both internal closePlayer() calls (they keep a live
+        // relay for reuse). Keep currentUrl as the remote URL for Cast/retries.
+        String playbackUrl = url;
+        if (pendingDebridRelay == null && debridRelay != null
+                && url.equals(debridRelay.getSourceUrl()) && debridRelay.isRunning()) {
+            playbackUrl = debridRelay.getLocalUrl();
+            Log.i(TAG, "Debrid Range relay reutilizado — mismo upstream");
+        } else if (pendingDebridRelay != null) {
+            try {
+                playbackUrl = pendingDebridRelay.start();
+                debridRelay = pendingDebridRelay;
+                pendingDebridRelay = null;
+                Log.i(TAG, "Debrid Range relay active, exit="
+                        + (com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr() != null
+                                ? "VPS" : "WARP"));
+            } catch (Exception e) {
+                Log.w(TAG, "Debrid relay bind failed; using direct source");
+                pendingDebridRelay.close();
+                pendingDebridRelay = null;
+            }
+        }
         // URLs loopback (relay local de embeds, servidores LAN): nunca por WARP —
         // el proxy intentaría resolver 127.0.0.1 en su extremo remoto.
         lastSourceUsedWarp = shouldUseWarpProxy(url, direct, false);
-        DataSource.Factory dataSourceFactory = buildStreamDataSourceFactory(url, headers, direct, false);
+        // El relay sobrevive a closePlayer(): solo aplica si ESTA reproducción
+        // sale realmente por él (cabeceras ya van en el relay, URL loopback).
+        final boolean viaRelay = debridRelay != null && playbackUrl.equals(debridRelay.getLocalUrl());
+        DataSource.Factory dataSourceFactory = buildStreamDataSourceFactory(
+                playbackUrl, viaRelay ? new HashMap<>() : headers, viaRelay || direct, false);
 
         // Build DRM session manager if license URL is provided
         DrmSessionManager drmSessionManager = null;
@@ -5094,7 +5193,7 @@ public class ExoPlayerPlugin extends Plugin {
         lastStreamType = streamType;
         lastDrmSessionManager = drmSessionManager;
         lastLicenseUrl = licenseUrl;
-        MediaSource mediaSource = buildMediaSource(url, streamType, dataSourceFactory, drmSessionManager, licenseUrl);
+        MediaSource mediaSource = buildMediaSource(playbackUrl, streamType, dataSourceFactory, drmSessionManager, licenseUrl);
 
         // Create ExoPlayer with proper configuration (matching TDT Spain APK)
         // Buffer aumentado para conexiones lentas:
@@ -5118,6 +5217,8 @@ public class ExoPlayerPlugin extends Plugin {
         wasPlayingReady = false;
         rebufferCount = 0;
         rebufferWindowStart = 0;
+        bufferEnteredAtMs = 0;
+        bufferedAccumMs = 0;
         warpBypassedAfterRebuffer = false;
         qualityCapped = false;
         trackSelector = new DefaultTrackSelector(context);
@@ -5205,6 +5306,12 @@ public class ExoPlayerPlugin extends Plugin {
                         behindLiveRetries = 0;
                         sourceErrorRetries = 0;
                         wasPlayingReady = true;
+                        // Cerrar el stall: sumar su duración a la ventana de
+                        // rebuffer crónico (ver onRebuffer).
+                        if (bufferEnteredAtMs > 0) {
+                            bufferedAccumMs += android.os.SystemClock.uptimeMillis() - bufferEnteredAtMs;
+                            bufferEnteredAtMs = 0;
+                        }
                         dismissStreamLoading();
                         event.put("state", "ready");
                         if (pendingSeekMs > 0 && player != null) {
@@ -5221,7 +5328,10 @@ public class ExoPlayerPlugin extends Plugin {
                         // cada pausa es breve y el watchdog de 20s no llega a
                         // saltar, pero la película "se para cada pocos
                         // segundos". Mitigar por tasa de rebuffers.
-                        if (wasPlayingReady) onRebuffer();
+                        if (wasPlayingReady) {
+                            bufferEnteredAtMs = android.os.SystemClock.uptimeMillis();
+                            onRebuffer();
+                        }
                         // En torrents un stall = espera de piezas. Mostrar el
                         // overlay de carga (JS lo mantiene con el progreso de
                         // descarga en vivo vía setLoadingText).
@@ -5546,8 +5656,9 @@ public class ExoPlayerPlugin extends Plugin {
     }
 
     /**
-     * TV Box antigua / SoC débil: sin ABI de 64 bits (ARMv7 puro) o RAM baja
-     * según el sistema. Ajusta buffers y la política de mitigación.
+     * TV Box antigua / SoC débil: sin ABI de 64 bits (ARMv7 puro), RAM baja
+     * según el sistema, o sin decoder por hardware para AVC. Ajusta buffers
+     * y la política de mitigación.
      */
     private boolean isLowEndDevice(Context context) {
         try {
@@ -5555,7 +5666,47 @@ public class ExoPlayerPlugin extends Plugin {
                     context.getSystemService(Context.ACTIVITY_SERVICE);
             if (am != null && am.isLowRamDevice()) return true;
         } catch (Exception ignored) {}
-        return android.os.Build.SUPPORTED_64_BIT_ABIS.length == 0;
+        if (android.os.Build.SUPPORTED_64_BIT_ABIS.length == 0) return true;
+        // Un 1080p H.264 decodificado por software satura el CPU aunque haya
+        // RAM de sobra: la Raspberry Pi 5 no tiene decoder H.264 por hardware
+        // (solo HEVC, y LineageOS para RPi no lo expone por Codec2) — con
+        // 4-8 GB y arm64 pasaba por dispositivo "potente" y no se aplicaba
+        // ni el offload de audio (el AC3/DTS lo decodía ffmpeg en software,
+        // otro core entero) ni el tunneling. Misma mitigación que una TV Box.
+        if (!hasHardwareVideoDecoder("video/avc")) {
+            Log.i(TAG, "Sin decoder HW para AVC — aplicando ajustes de dispositivo débil");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * ¿Hay algún decoder por hardware para el mime dado? En API ≥29 manda
+     * MediaCodecInfo.isHardwareAccelerated(); en versiones menores se filtra
+     * por nombre (omx.google./c2.android./ffmpeg son codecs AOSP software).
+     * Si la enumeración falla se asume hardware: preferible no penalizar un
+     * dispositivo por un fallo ajeno de la API.
+     */
+    private boolean hasHardwareVideoDecoder(String mimeType) {
+        try {
+            android.media.MediaCodecInfo[] infos = new android.media.MediaCodecList(
+                    android.media.MediaCodecList.REGULAR_CODECS).getCodecInfos();
+            for (android.media.MediaCodecInfo info : infos) {
+                if (info.isEncoder()) continue;
+                String name = info.getName().toLowerCase(java.util.Locale.ROOT);
+                if (name.startsWith("omx.google.") || name.startsWith("c2.android.")
+                        || name.contains("ffmpeg")) continue;
+                if (android.os.Build.VERSION.SDK_INT >= 29 && !info.isHardwareAccelerated()) continue;
+                try {
+                    for (String type : info.getSupportedTypes()) {
+                        if (type.equalsIgnoreCase(mimeType)) return true;
+                    }
+                } catch (Exception ignored) {}
+            }
+            return false;
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     /**
@@ -5574,11 +5725,22 @@ public class ExoPlayerPlugin extends Plugin {
         if (now - rebufferWindowStart > 60000) {
             rebufferWindowStart = now;
             rebufferCount = 0;
+            bufferedAccumMs = 0;
         }
-        if (++rebufferCount < 3 || player == null) return;
+        // Umbral doble: ≥3 stalls en la ventana O >20s acumulados parados en
+        // ella. El contador solo dejaba escapar el patrón real de red lenta
+        // ("se para cada ~40s"): dos pausas no llegaban a 3 y el tercer
+        // stall reseteaba la ventana — stutter eterno sin mitigación.
+        boolean chronic = ++rebufferCount >= 3 || bufferedAccumMs > 20000;
+        if (!chronic || player == null) return;
         rebufferCount = 0;
+        bufferedAccumMs = 0;
         rebufferWindowStart = now;
         if (lastSourceUsedWarp && !warpBypassedAfterRebuffer
+                // URL ligada a la IP de salida del túnel (warpBound o debrid
+                // al VPS): salir en directo solo puede dar 403 — pasar
+                // directo a la mitigación de calidad sin el rodeo.
+                && !Boolean.TRUE.equals(boundToWarp) && !currentVps
                 && currentUrl != null && !currentUrl.isEmpty()) {
             warpBypassedAfterRebuffer = true;
             Log.w(TAG, "Rebuffer crónico vía WARP — reconstruyendo fuente en directo");
@@ -7209,6 +7371,8 @@ public class ExoPlayerPlugin extends Plugin {
                 wasPlayingReady = false;
                 rebufferCount = 0;
                 rebufferWindowStart = 0;
+                bufferEnteredAtMs = 0;
+                bufferedAccumMs = 0;
                 warpBypassedAfterRebuffer = false;
                 qualityCapped = false;
                 // El selector se reutiliza entre zaps — levantar el cap de
@@ -7347,6 +7511,9 @@ public class ExoPlayerPlugin extends Plugin {
     private boolean shouldUseWarpProxy(String url, boolean direct, boolean forceBypassProxy) {
         if (forceBypassProxy || direct) return false;
         if (isTdtSpainDomain(url) || isYouTubeDomain(url) || isLoopbackUrl(url) || isLanUrl(url)) return false;
+        // El debrid del VPS no depende del estado de WARP: su forward tiene
+        // otra salida y otra sonda. Evita una prueba TLS a WARP en cada open.
+        if (currentVps && com.octostream.cloudproxy.CloudProxyPlugin.isDebridVpsConfigured()) return true;
         // La única salida física permitida para streams externos es la marcada
         // explícitamente como TDT/direct arriba. Si WARP cae, conservar la ruta
         // del proxy hace que el stream falle y active la reconexión, en vez de
@@ -7368,33 +7535,8 @@ public class ExoPlayerPlugin extends Plugin {
         boolean useWarpProxy = shouldUseWarpProxy(url, direct, forceBypassProxy);
         if (useWarpProxy || direct || forceBypassProxy || isTdtSpainDomain(url) || isYouTubeDomain(url)) {
             try {
-                OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                        .connectTimeout(15, TimeUnit.SECONDS)
-                        .readTimeout(30, TimeUnit.SECONDS)
-                        .followRedirects(true)
-                        .followSslRedirects(true);
-                if (useWarpProxy) {
-                    // Debrid (vps): forward SSH dedicado al VPS (2820) — la
-                    // URL quedó IP-bound a esa salida. Sin VPS vivo cae al
-                    // proxy WARP normal: nunca en claro.
-                    String proxyAddr = com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr();
-                    if (currentVps) {
-                        String vpsAddr = com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr();
-                        if (vpsAddr != null) {
-                            proxyAddr = vpsAddr;
-                            Log.i(TAG, "Using VPS SSH proxy for debrid stream (remote DNS)");
-                        }
-                    }
-                    String[] parts = proxyAddr.split(":", 2);
-                    clientBuilder.proxy(new java.net.Proxy(
-                            java.net.Proxy.Type.HTTP,
-                            new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
-                    if (!currentVps) Log.i(TAG, "Using WARP/VPS HTTP proxy for movie/stream URL (remote DNS)");
-                } else {
-                    // Direct/TDT links must ignore the JVM-wide proxy setting.
-                    clientBuilder.proxy(java.net.Proxy.NO_PROXY);
-                }
-                OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(clientBuilder.build())
+                OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(
+                        createStreamHttpClient(url, direct, forceBypassProxy, currentVps))
                         .setUserAgent(ua);
                 if (!headers.isEmpty()) okHttpFactory.setDefaultRequestProperties(headers);
                 return new DefaultDataSource.Factory(getContext(), okHttpFactory);
@@ -7413,6 +7555,49 @@ public class ExoPlayerPlugin extends Plugin {
         if (!headers.isEmpty()) httpFactory.setDefaultRequestProperties(headers);
         if (forceBypassProxy) Log.i(TAG, "Using DefaultHttpDataSource — bypass de WARP tras fallo del proxy local");
         return new DefaultDataSource.Factory(getContext(), httpFactory);
+    }
+
+    private OkHttpClient createStreamHttpClient(String url, boolean direct,
+            boolean forceBypassProxy, boolean vps) {
+        boolean vpsConfigured = vps && com.octostream.cloudproxy.CloudProxyPlugin.isDebridVpsConfigured();
+        boolean useProxy = vpsConfigured
+                ? !direct && !forceBypassProxy && !isLoopbackUrl(url) && !isLanUrl(url)
+                : shouldUseWarpProxy(url, direct, forceBypassProxy);
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true);
+        if (useProxy) {
+            // openssh nativo (-D 2831): direct-tcpip con cripto en C. Si no
+            // esta vivo, el HTTP forward JSch/VPS; null = debrid directo
+            // (pref debrid_direct): IP de casa, sin tunel.
+            String socksAddr = vps
+                    ? com.octostream.cloudproxy.CloudProxyPlugin.getVpsSocksAddr() : null;
+            String proxyAddr = socksAddr == null ? (vps
+                    ? com.octostream.cloudproxy.CloudProxyPlugin.getDebridHttpProxyAddr()
+                    : com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr()) : null;
+            if (socksAddr != null) {
+                String[] parts = socksAddr.split(":", 2);
+                builder.proxy(new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                        new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+            } else if (proxyAddr != null) {
+                String[] parts = proxyAddr.split(":", 2);
+                builder.proxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
+                        new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
+                // SshDirectProxy (:2830) exige auth; el forward aether nunca
+                // reta, así que el authenticator solo se dispara cuando toca.
+                builder.proxyAuthenticator((route, response) -> response.request().newBuilder()
+                        .header("Proxy-Authorization",
+                                com.octostream.cloudproxy.CloudProxyPlugin.getProxyAuthHeader())
+                        .build());
+            } else {
+                builder.proxy(java.net.Proxy.NO_PROXY);
+            }
+        } else {
+            builder.proxy(java.net.Proxy.NO_PROXY);
+        }
+        return builder.build();
     }
 
     // Detecta si un PlaybackException viene de que el proxy HTTP local de WARP
@@ -10103,6 +10288,9 @@ public class ExoPlayerPlugin extends Plugin {
 
     @PluginMethod
     public void stop(PluginCall call) {
+        // Cancel an outstanding debrid Range probe even if playback has not
+        // created a player yet (closePlayer runs with suppressed events here).
+        playRequestId.incrementAndGet();
         mainHandler.post(() -> {
             // stop() se usa para limpiar el player desde React (cleanup,
             // fallback HLS o cambio de stream), no para una pulsación explícita
@@ -10775,6 +10963,11 @@ public class ExoPlayerPlugin extends Plugin {
             player.release();
             player = null;
         }
+        // El relay sobrevive al cierre del player: un playStream posterior de
+        // la misma URL lo reutiliza con la caché intacta (sin re-descarga).
+        // Se libera solo si la siguiente fuente es otra URL (en playStream)
+        // o por el watchdog de ocio de 90 s dentro del propio relay.
+        if (!suppressClosedEvent) playRequestId.incrementAndGet();
         lastMediaSource = null;
         bufferingRetries = 0;
         behindLiveRetries = 0;
@@ -10832,6 +11025,8 @@ public class ExoPlayerPlugin extends Plugin {
         cleanupHeadless();
         stopPipInternal();
         closePlayer();
+        if (debridRelay != null) { debridRelay.close(); debridRelay = null; }
+        if (pendingDebridRelay != null) { pendingDebridRelay.close(); pendingDebridRelay = null; }
         logoCache.clear();
         super.handleOnDestroy();
     }

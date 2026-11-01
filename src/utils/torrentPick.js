@@ -12,7 +12,6 @@ const SAMPLE_JUNK = /\b(?:sample|trailer|extra|bonus|deleted\.scene|behind\.the\
 function episodePatterns(season, episode) {
   const s = Number(season), e = Number(episode)
   if (!s || !e) return []
-  const pad = String(e).padStart(2, '0')
   return [
     new RegExp(`s0*${s}[ ._-]*e0*${e}(?!\\d)`, 'i'),
     new RegExp(`\\b${s}x0*${e}(?!\\d)`, 'i'),

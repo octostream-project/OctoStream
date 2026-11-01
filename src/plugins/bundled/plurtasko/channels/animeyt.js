@@ -183,7 +183,7 @@ export const animeyt = {
       if (dwn) {
         try {
           for (const u of JSON.parse(decodeEntities(dwn))) push(u, 'download')
-        } catch {}
+        } catch { /* ignorado */ }
       }
     }
     return streams

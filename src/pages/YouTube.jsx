@@ -66,7 +66,6 @@ export default function YouTube() {
 
   const addToHistory = useStore(s => s.addToHistory)
   const watchHistory = useStore(s => s.watchHistory)
-  const updateProgress = useStore(s => s.updateProgress)
   const favorites = useStore(s => s.favorites)
   const toggleFavorite = useStore(s => s.toggleFavorite)
   const youtubeSearchHistory = useStore(s => s.youtubeSearchHistory)

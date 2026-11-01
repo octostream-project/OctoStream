@@ -13,7 +13,7 @@ import {
 } from './proto.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 import { httpGetBlob, httpGetBlobWithHeaders, httpGetText, shortSignal } from '../../../utils/httpClient.js'
-import { teamsMatch, canonTeam } from '../../../utils/teamMatch.js'
+import { canonTeam } from '../../../utils/teamMatch.js'
 import { parseMasterQuality } from '../../../utils/streamProbe.js'
 import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 import { isMatchInLiveWindow } from '../../../utils/sportsMatch.js'

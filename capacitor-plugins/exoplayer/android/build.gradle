@@ -65,3 +65,23 @@ dependencies {
     // modelo vision de duck.ai para esto).
     implementation 'com.google.mlkit:text-recognition:16.0.1'
 }
+
+// JVM smoke test against a local fake CDN, without an emulator or new dependencies.
+def relayClasses = layout.buildDirectory.dir('relayTest/classes')
+def relayDeps = configurations.detachedConfiguration(
+        dependencies.create('com.squareup.okhttp3:okhttp:4.12.0'),
+        dependencies.create('org.jetbrains.kotlin:kotlin-stdlib:2.0.21'))
+def compileRelayHarness = tasks.register('compileDebridRangeHarness', JavaCompile) {
+    dependsOn 'compileDebugJavaWithJavac'
+    source = fileTree('src/relayTest/java') { include '**/*.java' }
+    destinationDirectory = relayClasses
+    classpath = files(tasks.named('compileDebugJavaWithJavac').get().destinationDirectory,
+            relayDeps, android.bootClasspath)
+    options.release = 17
+}
+tasks.register('verifyDebridRangeRelay', JavaExec) {
+    dependsOn compileRelayHarness
+    classpath = files(relayClasses, tasks.named('compileDebugJavaWithJavac').get().destinationDirectory,
+            relayDeps, android.bootClasspath)
+    mainClass = 'com.octostream.exoplayer.DebridRangeRelayCheck'
+}

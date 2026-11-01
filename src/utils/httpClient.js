@@ -15,13 +15,25 @@ async function requireWarpForNativeTraffic() {
   error.code = 'WARP_NOT_CONNECTED'
   throw error
 }
+async function requireDebridRoute() {
+  if (!isAndroidNative()) return
+  const status = await CloudProxy.getDebridRoute()
+  // Debrid unlocks and playback must keep the same exit IP. A live SSH
+  // forward is independent of the general WARP plane. debrid_direct:
+  // el dispositivo sale por su IP física sin túnel (unlock+playback).
+  if (status?.direct) return
+  if (status?.ssh) {
+    if (status.vps) return
+    const error = new Error('El túnel SSH al VPS no está conectado; reintenta cuando vuelva.')
+    error.code = 'VPS_NOT_CONNECTED'
+    throw error
+  }
+  await requireWarpForNativeTraffic()
+}
 async function nativeRequest(opts) {
   if (opts.vps) {
-    // Tráfico debrid: sale por el forward SSH al VPS (o por el proxy WARP
-    // normal si no hay VPS configurado). Nunca por la red física. El gate
-    // WARP se mantiene: si el usuario "saltó" el proxy, los requests debrid
-    // no quedan colgados esperando el túnel.
-    await requireWarpForNativeTraffic()
+    // Si hay SSH configurado nunca sustituir su IP por la de WARP.
+    await requireDebridRoute()
     const response = await CloudProxy.directFetch({ ...opts, vps: true })
     if (response && typeof response.status === 'number') return response
     throw new Error('La solicitud VPS no devolvió respuesta')
@@ -59,7 +71,7 @@ function httpError(response) {
   const status = response?.status || 0
   let detail = response?.data
   if (typeof detail === 'string') {
-    try { detail = JSON.parse(detail) } catch {}
+    try { detail = JSON.parse(detail) } catch { /* ignorado */ }
   }
   if (detail && typeof detail === 'object') {
     detail = detail.detail || detail.message || detail.error || detail.code
@@ -112,7 +124,8 @@ export async function httpGetJson(url, headers = {}, signal, bypassVpn = false, 
         throw httpError(response)
       }
     } catch (e) {
-      if (bypassVpn || strictNative || e?.code === 'WARP_NOT_CONNECTED') throw e
+      if (bypassVpn || strictNative || e?.code === 'WARP_NOT_CONNECTED'
+          || e?.code === 'VPS_NOT_CONNECTED' || vps) throw e
       if (e?.name === 'AbortError' || e?.httpStatus) throw e
       const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
       if (!res.ok) {
@@ -208,26 +221,6 @@ export async function httpGetText(url, headers = {}, signal, bypassVpn = false) 
  * GET text and return both body text and response headers.
  * Used for login flows that need to capture Set-Cookie headers.
  */
-/**
- * HEAD request — returns {status, headers} without downloading the body.
- * Used to validate debrid/CDN links before handing them to the player.
- */
-export async function httpHead(url, headers = {}, signal, bypassVpn = false) {
-  signal = effectiveSignal(signal)
-  if (isAndroidNative()) {
-    const response = await nativeRequest({
-      ...NATIVE_TIMEOUTS,
-      method: 'HEAD',
-      url,
-      headers: { 'User-Agent': DEFAULT_UA, ...headers },
-      bypassVpn,
-    })
-    return { status: response.status, headers: response.headers || {} }
-  }
-  const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': DEFAULT_UA, ...headers }, signal })
-  return { status: res.status, headers: res.headers }
-}
-
 export async function httpGetWithHeaders(url, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
@@ -275,23 +268,19 @@ function parseBodyForCapacitor(body, headers = {}) {
 export async function httpPostText(url, body, headers = {}, signal, bypassVpn = false) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
-    try {
-      const response = await nativeRequest({
-        ...NATIVE_TIMEOUTS,
-        method: 'POST',
-        url,
-        headers: { 'User-Agent': DEFAULT_UA, ...headers },
-        data: parseBodyForCapacitor(body, headers),
-        responseType: 'text',
-        bypassVpn,
-      })
-      if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
-      return response.data
-    } catch (e) {
-      // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
-      // submit). Abort/errores nativos se propagan al caller.
-      throw e
-    }
+    // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
+    // submit). Abort/errores nativos se propagan al caller.
+    const response = await nativeRequest({
+      ...NATIVE_TIMEOUTS,
+      method: 'POST',
+      url,
+      headers: { 'User-Agent': DEFAULT_UA, ...headers },
+      data: parseBodyForCapacitor(body, headers),
+      responseType: 'text',
+      bypassVpn,
+    })
+    if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
+    return response.data
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -310,22 +299,18 @@ export async function httpPostText(url, body, headers = {}, signal, bypassVpn = 
 export async function httpPostWithHeaders(url, body, headers = {}, signal) {
   signal = effectiveSignal(signal)
   if (isAndroidNative()) {
-    try {
-      const response = await nativeRequest({
-        ...NATIVE_TIMEOUTS,
-        method: 'POST',
-        url,
-        headers: { 'User-Agent': DEFAULT_UA, ...headers },
-        data: parseBodyForCapacitor(body, headers),
-        responseType: 'text',
-      })
-      if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
-      return { data: response.data || '', headers: response.headers || {} }
-    } catch (e) {
-      // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
-      // submit). Errores nativos se propagan al caller.
-      throw e
-    }
+    // Sin fallback fetch en POSTs: reintentar reenviaría el body (doble
+    // submit). Errores nativos se propagan al caller.
+    const response = await nativeRequest({
+      ...NATIVE_TIMEOUTS,
+      method: 'POST',
+      url,
+      headers: { 'User-Agent': DEFAULT_UA, ...headers },
+      data: parseBodyForCapacitor(body, headers),
+      responseType: 'text',
+    })
+    if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
+    return { data: response.data || '', headers: response.headers || {} }
   }
   const res = await fetch(url, {
     method: 'POST',

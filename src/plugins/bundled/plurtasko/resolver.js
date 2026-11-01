@@ -520,7 +520,7 @@ addResolver('voe', [
         try {
           const decoded = b64decode(s)
           if (decoded && /^https?:\/\//.test(decoded)) return decoded
-        } catch {}
+        } catch { /* ignorado */ }
       }
     }
   }
@@ -547,7 +547,7 @@ addResolver('voe', [
       const jsonData = JSON.parse(reversed)
       if (jsonData.file) return absUrl(jsonData.file, webUrl)
       if (jsonData.source) return absUrl(jsonData.source, webUrl)
-    } catch {}
+    } catch { /* ignorado */ }
   }
 
   // Method 3b: packed player JS — los mirrors actuales de VOE/vidhide
@@ -729,7 +729,7 @@ export function extractVoeSourceFromHtml(html) {
       const decoded = decodeVoeString(encoded)
       const src = decoded?.source || decoded?.file || decoded?.direct_access_url
       if (src && /^https?:/i.test(src)) return src
-    } catch {}
+    } catch { /* ignorado */ }
   }
 
   // Variant 2: var a168c='<encoded>'
@@ -738,7 +738,7 @@ export function extractVoeSourceFromHtml(html) {
     try {
       const decoded = decodeVoeString(a168c)
       if (decoded?.source) return decoded.source
-    } catch {}
+    } catch { /* ignorado */ }
   }
 
   // Variant 3: plain 'hls': '<url>'
@@ -976,7 +976,7 @@ addResolver('filelions', [
       for (const k of keys) {
         if (links[k] && /\.m3u8|\.mp4/i.test(links[k])) return absUrl(links[k], url)
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   const sources = scrapeSources(html)
   if (sources.length) return pickSource(sources)
@@ -1329,7 +1329,7 @@ addResolver('okru', ['ok.ru', 'odnoklassniki.ru', 'okru.link'], async (url) => {
           if (videoUrl) return videoUrl.replace(/\\\//g, '/').replace(/\\u0026/g, '&')
         }
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   // Method 2: GET details.php for okru.link/embed URLs
   if (/okru\.link\/embed/.test(url)) {
@@ -1341,10 +1341,10 @@ addResolver('okru', ['ok.ru', 'odnoklassniki.ru', 'okru.link'], async (url) => {
           try {
             const data = JSON.parse(detailsHtml)
             if (data.file) return data.file.replace(/\\\//g, '/').replace(/\\u0026/g, '&')
-          } catch {}
+          } catch { /* ignorado */ }
         }
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   // Method 3: Standard OK.ru embed parsing
   const html = await fetchPage(url)
@@ -1360,7 +1360,7 @@ addResolver('okru', ['ok.ru', 'odnoklassniki.ru', 'okru.link'], async (url) => {
         const sorted = videos.sort((a, b) => (b.height || 0) - (a.height || 0))
         return sorted[0].url
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   // Fallback: direct URL patterns
   const mp4 = re1(html, /"url":"([^"]+\.mp4[^"]*)"/)
@@ -1606,7 +1606,7 @@ addResolver('vidoza', ['vidoza.net', 'vidoza.co', 'videoza.net'], async (url) =>
         const src = sorted[0].src || sorted[0].file
         if (src) return absUrl(src, url)
       }
-    } catch {}
+    } catch { /* ignorado */ }
   }
   // Pattern 2: <source src="..." (like Plurtasko)
   const sourceTag = re1(html, /<source\s+src="([^"]+)"/)
@@ -1878,7 +1878,7 @@ addResolver('streamable', ['streamable.com'], async (url) => {
       const data = JSON.parse(html)
       const mp4 = data?.files?.mp4?.url || data?.files?.mp4_mobile?.url
       if (mp4) return mp4
-    } catch {}
+    } catch { /* ignorado */ }
   }
   return ''
 })

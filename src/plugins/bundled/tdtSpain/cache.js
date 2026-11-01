@@ -1,6 +1,6 @@
 // Cache helpers for TDT Spain.
 
-import { CACHE_KEY, CACHE_TTL_MS, normKey } from './constants.js'
+import { CACHE_KEY, normKey } from './constants.js'
 import { getItemSync, setItemSync } from '../../../utils/storage.js'
 
 // Single shared in-memory cache object. Avoids re-reading localStorage
@@ -14,7 +14,7 @@ export function getSharedCache() {
   return sharedCache
 }
 
-export function loadCache() {
+function loadCache() {
   try {
     const raw = getItemSync(CACHE_KEY)
     if (!raw) return { channels: null, streamTypes: {}, epg: {}, u7d: null, rtveHls: null, ts: 0 }
@@ -76,6 +76,4 @@ export function saveCache(cache) {
   }
 }
 
-export function isCacheFresh(cache, key = 'channels') {
-  return cache[key] && Date.now() - cache.ts < CACHE_TTL_MS
-}
+

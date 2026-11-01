@@ -74,13 +74,12 @@ export default function DownloadsList() {
     let alive = true
     const unsubscribeQueue = subscribeDownloadQueue(setQueue)
     const t = setTimeout(() => { refresh() }, 0)
-    const sub = (async () => {
+    ;(async () => {
       const engine = await getTorrentEngine()
       if (!engine?.addListener || !alive) return
       listenerRef.current = await engine.addListener('torrentProgress', ev => {
         if (ev?.state === 'finished' || ev?.progress >= 1) {
           setActive(null)
-          if (ev?.fileName) toast.success(`Descarga completada: ${ev.fileName}`)
           refresh()
         } else if (ev?.fileName || ev?.state === 'downloading') {
           setActive({ name: ev?.fileName || 'Descargando', progress: ev?.progress || 0 })

@@ -10,7 +10,7 @@ export function getUiScale() {
   try {
     const v = parseInt(getItemSync(KEY) || '', 10)
     if (v >= 80 && v <= 200) return v
-  } catch {}
+  } catch { /* ignorado */ }
   return 0 // auto
 }
 

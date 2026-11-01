@@ -203,7 +203,9 @@ export default function Details() {
         toast.error('Descargas no disponibles en esta plataforma')
         return
       }
-      if (stream.streamType === 'debrid' && !isAlldebridEnabled()) {
+      const needsDebridUnlock = stream.streamType === 'debrid' || !!stream.originalDebridUrl
+      const useVpsRoute = !!stream.viaDebrid || stream.streamType === 'debrid'
+      if (needsDebridUnlock && !isAlldebridEnabled()) {
         toast.error('Requiere AllDebrid (Ajustes → Debrid)')
         return
       }
@@ -215,15 +217,19 @@ export default function Details() {
         // Solo debrid es persistible (se guarda el enlace original del host,
         // nunca la URL desbloqueada ni las cabeceras). Un http directo puede
         // llevar firma temporal → no se guarda.
-        persist: stream.streamType === 'debrid' ? { kind: 'debrid', url: stream.url } : undefined,
+        persist: needsDebridUnlock
+          ? { kind: 'debrid', url: stream.originalDebridUrl || stream.url }
+          : undefined,
         start: async downloadEngine => {
           let url = stream.url
-          if (stream.streamType === 'debrid') {
-            const result = await unlockDebrid(stream.url)
+          if (needsDebridUnlock) {
+            const result = await unlockDebrid(stream.originalDebridUrl || stream.url)
             if (!result?.link) throw new Error(debridErrorMessage(result?.error))
             url = result.link
           }
-          return downloadEngine.downloadHttp({ url, name: displayName, headers: stream.headers })
+          return downloadEngine.downloadHttp({
+            url, name: displayName, headers: stream.headers, vps: useVpsRoute,
+          })
         },
       })
       dlJobIdRef.current = id
@@ -2055,7 +2061,6 @@ export default function Details() {
                   data-tv-card
                   tabIndex={0}
                   onClick={() => {
-                    const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
                     const savedServer = historyItem?.server || ''
                     const savedStream = savedServer ? streams.find(s => (s.server || s.pluginName) === savedServer) : null
                     const chosen = savedStream || sortByLangPriority(streams)[0]

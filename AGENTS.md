@@ -126,6 +126,54 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
   - Cache compartido en memoria para TDT Spain (`getSharedCache`) en vez de leer `localStorage`
     en cada operación; poda de EPG >2 días al guardar.
   - Límite de 500 favoritos en `useStore` (antes ilimitado).
+- `isLowEndDevice` también detecta "sin decoder HW para AVC" (MediaCodecList):
+  la Raspberry Pi 5 no tiene decoder H.264 por hardware (y LineageOS-RPi no
+  expone ni el HEVC por Codec2) — con 4-8 GB/arm64 pasaba por "potente" y un
+  1080p por software se paraba. Ahora recibe offload de audio + tunneling +
+  buffers menores igual que una TV Box vieja.
+- Rebuffer crónico con umbral doble: ≥3 stalls en 60s **o** >20s parados
+  acumulados en la ventana (el contador solo dejaba escapar "se para cada
+  ~40s" para siempre). El bypass a directo de `onRebuffer` se salta cuando la
+  URL está ligada al túnel (`boundToWarp`/`currentVps`) — solo podía dar 403.
+- Archivos debrid progresivos Android (`vps:true`, VOD, mp4/mkv): `DebridRangeRelay`
+  comprueba fuera del hilo UI que el CDN devuelve `206` y tamaño conocido; si
+  no, mantiene la reproducción normal. Si admite Range, sirve solo en loopback
+  con token por sesión y descarga chunks de 1 MiB (hasta 3 por adelantado,
+  caché LRU de 12 MiB) por el mismo proxy VPS/WARP y headers del enlace.
+  El relay muere con `closePlayer()`, sin URLs firmadas en logs. Verificar sin
+  emulador con `cd android && ./gradlew :octostream-exo-player:verifyDebridRangeRelay`.
+- AllDebrid usa el forward SSH aunque WARP general esté caído; no esperar
+  `waitForWarp` antes del gate del cliente HTTP (duplicaba hasta 20s). Si
+  hay VPS SSH configurado pero el forward cae, peticiones debrid y player
+  mantienen 127.0.0.1:2820 y fallan en vez de salir por otra IP (403 por
+  IP-binding); sin SSH configurado continúan por WARP. El gate usa
+  `getDebridRoute` (estado SSH barato sin sonda TLS de WARP), y el player
+  tampoco sondea WARP durante la apertura de un stream que sale por SSH.
+  Ante 403 el re-unlock de AllDebrid fuerza una URL nueva (ignora caché
+  de 2 min).
+- Ruta debrid preferida: `SshDirectProxy` (`SshDirectProxy.java`,
+  127.0.0.1:2830) — mini proxy HTTP CONNECT que tunela cada conexión por un
+  canal SSH `direct-tcpip`; la salida es la IP pública del VPS **sin** el
+  aether remoto (antes el forward 2820 aterrizaba en VPS:1820, un segundo
+  túnel WARP). Si el sshd no permite direct-tcpip (`PermitOpen`/
+  `AllowTcpForwarding`), `getVpsHttpProxyAddr` cae al forward 2820 legacy.
+  Relay: 8 descargas Range paralelas (AllDebrid capa ~5 Mbit/s por
+  conexión; el agregado escala con los canales).
+- OpenSSH nativo para la ruta debrid (cripto en C, ~3× throughput de JSch):
+  el binario `ssh` de Termux se empaqueta como `libssh.so` en
+  `capacitor-plugins/cloud-proxy/android/src/main/jniLibs/<abi>/` (Android
+  solo permite `execve` desde `nativeLibraryDir`) junto a `libldns.so` y
+  `libandroid-support.so`; las libs versionadas (OpenSSL/krb5/zlib…) van en
+  `assets/ssh/<abi>/` y el plugin las copia a `filesDir` con sello de
+  `versionCode`. Corre `ssh -N -D 127.0.0.1:2831` (SOCKS direct-tcpip por la
+  IP del VPS) con `StrictHostKeyChecking=yes` + `known_hosts` sembrado desde
+  la clave fijada por el usuario. El media solo usa :2831 cuando el proceso
+  nativo **y** el `SshDirectProxy` (:2830) están vivos — si no, unlock y
+  playback saldrían por IPs distintas y daría 403. Cubierto arm64-v8a,
+  armeabi-v7a y x86_64; si el binario falta o no enlaza, cae al path JSch.
+- ESLint usa baseline (`lint-baseline.json` + `scripts/lint-check.mjs`):
+  errores legacy permitidos, cero nuevos. Tras corregir errores viejos,
+  regenerar con `node scripts/lint-check.mjs --update`.
 
 ## Dependencias de Electron
 

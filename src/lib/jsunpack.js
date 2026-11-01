@@ -109,4 +109,4 @@ function _replaceStrings(source) {
   return source;
 }
 
-export { detect, unpack, Unbaser, UnpackingError };
+export { detect, unpack, UnpackingError };

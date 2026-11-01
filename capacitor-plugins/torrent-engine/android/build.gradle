@@ -34,6 +34,7 @@ repositories {
 
 dependencies {
     implementation project(':capacitor-android')
+    implementation project(':octostream-cloud-proxy')
     // AppCompat+Activity: getActivity() y el ActivityResult del picker SAF
     // (misma dependencia que usa el plugin exoplayer).
     implementation 'androidx.appcompat:appcompat:1.6.1'

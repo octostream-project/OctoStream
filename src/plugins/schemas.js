@@ -1,15 +1,15 @@
 import { z } from 'zod'
 
-export const contentTypeSchema = z.enum(['movie', 'series', 'channel', 'live', 'language', 'other'])
+const contentTypeSchema = z.enum(['movie', 'series', 'channel', 'live', 'language', 'other'])
 
-export const catalogSchema = z.object({
+const catalogSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   type: contentTypeSchema,
   i18nKey: z.string().optional(),
 })
 
-export const apiSchema = z.object({
+const apiSchema = z.object({
   baseUrl: z.string().url(),
   catalog: z.string().optional(),
   meta: z.string().optional(),
@@ -17,7 +17,7 @@ export const apiSchema = z.object({
   search: z.string().optional(),
 })
 
-export const pluginManifestSchema = z.object({
+const pluginManifestSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
   version: z.string().min(1),
@@ -30,7 +30,7 @@ export const pluginManifestSchema = z.object({
 
 // Stremio-compatible addon manifest. Extra keys are allowed because Stremio
 // manifests contain optional fields we do not need to validate strictly.
-export const stremioManifestSchema = z.object({
+const stremioManifestSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   version: z.string().min(1),
@@ -50,7 +50,7 @@ export const stremioManifestSchema = z.object({
   })).optional(),
 }).passthrough()
 
-export const externalPluginConfigSchema = z.union([
+const externalPluginConfigSchema = z.union([
   pluginManifestSchema,
   stremioManifestSchema,
 ])

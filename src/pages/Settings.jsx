@@ -30,7 +30,7 @@ function getDefaultLangPriority() {
   try {
     const saved = JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')
     if (Array.isArray(saved) && saved.length === 4) return saved
-  } catch {}
+  } catch { /* ignorado */ }
   return ['ESP', 'LAT', 'SUB', 'ENG']
 }
 
@@ -58,7 +58,7 @@ function parseRemoteHostInput(value) {
         }
       }
     }
-  } catch {}
+  } catch { /* ignorado */ }
   if (!(port >= 1 && port <= 65535)) port = null
   return { host, port }
 }
@@ -511,7 +511,7 @@ export default function Settings() {
             port: creds?.port || parseInt(localStorage.getItem('octostream_warp_ssh_port') || '22', 10),
           })
         }
-      } catch {}
+      } catch { /* ignorado */ }
       localStorage.removeItem('octostream_warp_ssh_pass')
     })()
     return () => { dead = true }
@@ -576,10 +576,10 @@ export default function Settings() {
     setWarpRemote(h)
     localStorage.setItem('octostream_warp_remote', h)
     if (embeddedPort) await applyWarpRemoteSsh(warpSshUser, warpSshPass, embeddedPort)
-    try { await CloudProxy.setRemoteHost(h) } catch {}
+    try { await CloudProxy.setRemoteHost(h) } catch { /* ignorado */ }
     // Con el túnel vivo el cambio de origen solo aplica reconectando.
     if (vpnStatus === 'connected') {
-      try { await CloudProxy.disconnect() } catch {}
+      try { await CloudProxy.disconnect() } catch { /* ignorado */ }
       setVpnStatus('disconnected')
       setVpnError(h ? 'Reconecta para usar el WARP remoto' : 'Reconecta para usar el WARP local')
     }
@@ -597,9 +597,9 @@ export default function Settings() {
     // no duplicarla en claro en localStorage.
     localStorage.removeItem('octostream_warp_ssh_pass')
     localStorage.setItem('octostream_warp_ssh_port', String(prt))
-    try { await CloudProxy.setRemoteSsh({ user, pass, port: prt }) } catch {}
+    try { await CloudProxy.setRemoteSsh({ user, pass, port: prt }) } catch { /* ignorado */ }
     if (vpnStatus === 'connected') {
-      try { await CloudProxy.disconnect() } catch {}
+      try { await CloudProxy.disconnect() } catch { /* ignorado */ }
       setVpnStatus('disconnected')
       setVpnError('Reconecta para aplicar el modo remoto')
     }

@@ -84,6 +84,8 @@ export interface HttpDownloadOptions {
   name?: string
   /** Cabeceras extra (User-Agent/Referer) para CDNs que las exigen */
   headers?: Record<string, string>
+  /** Mantener la salida VPS/WARP del enlace AllDebrid al descargarlo. */
+  vps?: boolean
 }
 
 export interface HttpDownloadResult {

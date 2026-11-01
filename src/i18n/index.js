@@ -34,7 +34,7 @@ function notifyLanguageChange() {
 
 export const getLanguagePacks = () => Object.values(languagePacks)
 
-export const registerLanguagePack = (pack) => {
+const registerLanguagePack = (pack) => {
   if (!pack?.id || !pack?.translations) return false
   languagePacks[pack.id] = pack
   builtInTranslations[pack.id] = { ...builtInTranslations[pack.id], ...pack.translations }

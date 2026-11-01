@@ -28,7 +28,7 @@ import { getItemSync } from '../../../../utils/storage.js'
 const DEFAULT_INSTANCE = 'https://aiostreams.elfhosted.com'
 const TIMEOUT_MS = 25000
 
-export const AIO_KEYS = {
+const AIO_KEYS = {
   instance: 'octostream_aiostreams_instance',
   uuid: 'octostream_aiostreams_uuid',
   password: 'octostream_aiostreams_password',
@@ -38,7 +38,7 @@ export const AIO_KEYS = {
 // Acepta la URL de manifest (…/manifest.json), la de configuración
 // (…/configure) o la base (…/stremio/<uuid>/<config>) — devuelve la base
 // de streams. Rechaza URLs que no llevan el segmento /stremio/.
-export function manifestStreamBase(url) {
+function manifestStreamBase(url) {
   const u = String(url || '').trim().replace(/\/+$/, '')
   if (!u) return ''
   const base = u.replace(/\/(manifest\.json|configure|stream)(\?.*)?$/i, '')
@@ -330,7 +330,7 @@ function langFromFlags(text) {
 // nombre pero era difícil de distinguir en la lista; el emoji se lee de un
 // vistazo. Se antepone al nombre del release en TODAS las entradas
 // AIOStreams (listas para reproducir y "descargando").
-export const LANG_FLAG = {
+const LANG_FLAG = {
   Esp: '🇪🇸', Lat: '🌎', VOSE: '🇬🇧+💬', Eng: '🇬🇧', Dual: '🌐',
   Fra: '🇫🇷', Ale: '🇩🇪', Ita: '🇮🇹', Por: '🇵🇹', Jap: '🇯🇵', Cor: '🇰🇷',
   Cat: '🇪🇸', Chi: '🇨🇳', Rus: '🇷🇺', Hin: '🇮🇳', Tur: '🇹🇷', Pol: '🇵🇱',

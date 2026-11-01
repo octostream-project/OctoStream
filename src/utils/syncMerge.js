@@ -34,7 +34,7 @@ const SYNC_EXCLUDED_KEYS = new Set([
 
 const VALID_CATEGORIES = new Set(ALL_CATEGORIES)
 
-export function normalizeSyncCategories(categories) {
+function normalizeSyncCategories(categories) {
   if (!Array.isArray(categories)) return [...DEFAULT_SYNC_CATEGORIES]
   const out = [...new Set(categories.filter(c => VALID_CATEGORIES.has(c)))]
   return out.length ? out : [...DEFAULT_SYNC_CATEGORIES]

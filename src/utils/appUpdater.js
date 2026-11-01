@@ -9,7 +9,7 @@ import AppUpdater from '@optopus/app-updater'
 import { isAndroidNative } from './platform.js'
 import { httpGetJson } from './httpClient.js'
 
-export const UPDATE_MANIFEST_URL =
+const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/octostream-project/OctoStream/main/version.json'
 
 let lastCheck = null

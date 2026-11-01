@@ -47,6 +47,37 @@ describe('alldebrid unlockLink', () => {
     expect(global.fetch.mock.calls.filter(c => String(c[0]).includes('/link/unlock'))).toHaveLength(1)
   })
 
+  it('forces a fresh unlock after a signed debrid link fails', async () => {
+    let next = 0
+    global.fetch = mockApi({
+      '/link/unlock': () => ({ link: `https://cdn.example.com/refresh-${++next}.mp4` }),
+    })
+    const original = 'https://1fichier.com/?forced-refresh'
+    const first = await unlockLink(original)
+    const fresh = await unlockLink(original, { refresh: true })
+    expect(first.link).not.toBe(fresh.link)
+    expect((await unlockLink(original)).link).toBe(fresh.link)
+    expect(global.fetch.mock.calls.filter(c => String(c[0]).includes('/link/unlock'))).toHaveLength(2)
+  })
+
+  it('does not let an older unlock overwrite a refreshed link', async () => {
+    let finishOld
+    let calls = 0
+    global.fetch = vi.fn(() => {
+      calls++
+      if (calls === 1) return new Promise(resolve => { finishOld = resolve })
+      return Promise.resolve(okJson({ link: 'https://cdn.example.com/fresh.mp4' }))
+    })
+    const url = 'https://1fichier.com/?refresh-race'
+    const old = unlockLink(url)
+    await vi.waitFor(() => expect(finishOld).toBeTypeOf('function'))
+    await unlockLink(url, { refresh: true })
+    finishOld(okJson({ link: 'https://cdn.example.com/stale.mp4' }))
+    await old
+    expect((await unlockLink(url)).link).toBe('https://cdn.example.com/fresh.mp4')
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('does not cache failures', async () => {
     let n = 0
     global.fetch = mockApi({

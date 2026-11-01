@@ -14,7 +14,7 @@ import { withCancelTimeout, safeFetchJson } from '../../utils.js'
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
 import { getTmdbApiKey } from '../../builtIn/tmdb.js'
-import { resolveEmbed, resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
+import { resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
 import { isAlldebridEnabled, isAlldebridSupported, unlockLink as adUnlockLink } from '../alldebrid.js'
@@ -77,7 +77,7 @@ const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyse
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
 // de torrents ni se emiten streams .torrent/magnet.
 const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror', 'pelispanda'])
-export const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
+const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
 const activeChannels = () => {
   const alive = CHANNELS.filter(ch => !DEAD_CHANNEL_IDS.has(ch.id))
   return torrentSearchEnabled()
@@ -160,7 +160,7 @@ function normalizeStream(s, defaultLang) {
     try {
       const path = decodeURIComponent(new URL(s.url).pathname.split('/').pop() || '')
       lang = detectLangFromText(path)
-    } catch {}
+    } catch { /* ignorado */ }
   }
   if (!lang) lang = normalizeLang(defaultLang)
   const server = s.server || 'Unknown'

@@ -660,7 +660,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       // enlace de host original (1fichier…) para obtener una URL fresca.
       if (stream.originalDebridUrl) {
         try {
-          const r = await adUnlockLink(stream.originalDebridUrl)
+          const r = await adUnlockLink(stream.originalDebridUrl, { refresh: true })
           const u = r?.link
           if (u && u !== stream.url) return sanitizeUrl(u)
         } catch { /* noop */ }
@@ -873,7 +873,7 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
         // forward SSH al VPS — la URL quedó IP-bound al desbloquear y el VPS
         // tiene cuota limitada, así que solo este tráfico lo usa.
         vps: !!stream.viaDebrid,
-        longBuffering: isTorrent,
+        longBuffering: isTorrent || !!stream.viaDebrid,
         // CDNs rápidos y adaptativos (YouTube/googlevideo): menos buffer
         // inicial → primer frame antes. El ABR de ExoPlayer cubre el resto.
         fastStart: stream.fastStart === true,
@@ -1009,7 +1009,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
           // única salida real es otra fuente/calidad — avisar por OSD.
           const msg = state.adaptive
             ? 'Calidad limitada a 720p: el dispositivo no llega a esta fuente'
-            : 'Este dispositivo no llega a decodificar esta fuente — prueba otra calidad u otro servidor'
+            : /rebuffer/i.test(state.reason || '')
+              ? 'Esta fuente no descarga lo bastante rápido — prueba otro servidor o un archivo más ligero'
+              : 'Este dispositivo no llega a decodificar esta fuente — prueba otra calidad u otro servidor'
           ExoPlayer.osdMessage({ text: msg }).catch(() => {})
         }
         if (state.state === 'error') {
@@ -1210,6 +1212,27 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
       // relay local los descifra a hosts espejo firmados como hace la app
       // oficial; si el relay no arranca se intenta el nativo normal.
       const launchPlayback = async () => {
+        // streamType 'debrid' = página del host (1fichier…), no un vídeo:
+        // ExoPlayer la intentaría como HLS y falla al instante. Desbloquear
+        // ANTES de lanzar el player, igual que el re-resolve tras un error.
+        if (android && playArgs.streamType === 'debrid') {
+          let fresh = await resolveFreshStreamUrl()
+          if (!fresh) {
+            const r = await adUnlockLink(stream.originalDebridUrl || stream.url, { refresh: true })
+                .catch(() => null)
+            fresh = r?.link
+          }
+          if (cancelled || closedRef.current) return
+          if (!fresh) {
+            restoreAppDom()
+            setPlayerOpen(false)
+            tryAlternativeOrFail('No se pudo desbloquear el enlace debrid — prueba con otro')
+            return
+          }
+          playArgs.url = fresh
+          playArgs.streamType = inferStreamType(fresh, 'mp4')
+          playArgs.vps = true
+        }
         if (android && stream._viaRelay) {
           setPlaybackStateListener(onPlaybackState)
           const rr = await playRelay(

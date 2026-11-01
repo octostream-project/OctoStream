@@ -40,4 +40,16 @@ dist-releases/
 _logcat_live.txt
 _logcat.txt
 
+# Scratch / artefactos locales (nunca commitear: pueden contener claves)
+_*.mjs
+_*.rs
+_*.tmp
+_*.deb
+_*.xml
+_*.json
+_aether-win/
+_ssh_x/
+dist-apk-*/
+id_rsa
+
 .tmpcache/

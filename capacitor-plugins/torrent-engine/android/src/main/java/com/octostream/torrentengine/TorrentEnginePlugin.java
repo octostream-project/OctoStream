@@ -32,6 +32,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.octostream.cloudproxy.CloudProxyPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
@@ -1114,13 +1115,32 @@ public class TorrentEnginePlugin extends Plugin {
         final String url = call.getString("url");
         final String nameArg = call.getString("name");
         final JSObject headers = call.getObject("headers");
+        final boolean debrid = call.getBoolean("vps", false);
         if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
             call.reject("url http(s) requerida");
             return;
         }
 
         new Thread(() -> {
+            File part = null;
+            Uri partDoc = null;
+            boolean finished = false;
             try {
+                java.net.Proxy downloadProxy = null;
+                // Misma salida que unlock + reproductor: ssh nativo (SOCKS, cripto
+                // en C) → forward JSch → nunca otra IP. debrid_direct = IP de casa.
+                if (debrid && !CloudProxyPlugin.isDebridDirect()
+                        && CloudProxyPlugin.isDebridVpsConfigured()) {
+                    String socks = CloudProxyPlugin.getVpsSocksAddr();
+                    String addr = socks != null ? socks : CloudProxyPlugin.getVpsHttpProxyAddr();
+                    if (addr == null) {
+                        throw new Exception("VPS SSH no conectado; reintenta cuando vuelva");
+                    }
+                    String[] parts = addr.split(":", 2);
+                    downloadProxy = new java.net.Proxy(
+                            socks != null ? java.net.Proxy.Type.SOCKS : java.net.Proxy.Type.HTTP,
+                            new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1])));
+                }
                 // Mismo slot único que download(): una cosa bajando a la vez.
                 stopTorrentInternal();
                 httpDlCancel = false;
@@ -1138,8 +1158,6 @@ public class TorrentEnginePlugin extends Plugin {
 
                 final Uri tree = downloadTree();
                 File out = null;
-                File part = null;
-                Uri partDoc = null;
                 if (tree != null) {
                     // Modo SAF: .part para no listar descargas a medias, y
                     // renameDocument al final (mismo patrón que el archivo).
@@ -1163,17 +1181,25 @@ public class TorrentEnginePlugin extends Plugin {
                 // Conexión (respeta el proxy de sistema — WARP — vía propiedades Java).
                 HttpURLConnection conn = null;
                 String current = url;
+                final String originHost = new URL(url).getHost();
                 for (int hop = 0; hop <= 5; hop++) {
                     URL u = new URL(current);
-                    conn = (HttpURLConnection) u.openConnection();
-                    conn.setInstanceFollowRedirects(true);
+                    conn = (HttpURLConnection) (downloadProxy != null
+                            ? u.openConnection(downloadProxy) : u.openConnection());
+                    // Redirects manuales: así se controlan las cabeceras de auth.
+                    conn.setInstanceFollowRedirects(false);
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(30000);
                     conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+                    final boolean sameHost = originHost.equalsIgnoreCase(u.getHost());
                     if (headers != null) {
                         java.util.Iterator<String> keys = headers.keys();
                         while (keys.hasNext()) {
                             String k = keys.next();
+                            // Nunca reenviar credenciales a otro host tras un redirect.
+                            if (!sameHost && (k.equalsIgnoreCase("Authorization")
+                                    || k.equalsIgnoreCase("Cookie")
+                                    || k.equalsIgnoreCase("Proxy-Authorization"))) continue;
                             try {
                                 String v = headers.getString(k);
                                 if (v != null) conn.setRequestProperty(k, v);
@@ -1207,6 +1233,12 @@ public class TorrentEnginePlugin extends Plugin {
                 }
                 if (out != null && out.exists()) out.delete();
                 if (part != null && part.exists()) part.delete();
+                // Fallar pronto y con mensaje claro mejor que a mitad de 40 GB.
+                if (part != null && total > 0
+                        && part.getParentFile().getUsableSpace() < total + (100L << 20)) {
+                    conn.disconnect();
+                    throw new Exception("espacio insuficiente en el dispositivo");
+                }
 
                 emitHttpProgress("downloading", 0, 0, Math.max(total, 0), 0, fname);
                 call.resolve(new JSObject()
@@ -1256,11 +1288,21 @@ public class TorrentEnginePlugin extends Plugin {
                     }
                     part.delete();
                 }
+                finished = true;
                 emitHttpProgress("finished", 1.0, doneBytes, Math.max(total, doneBytes), 0, fname);
             } catch (Exception e) {
-                Log.e(TAG, "downloadHttp failed", e);
+                Log.e(TAG, "downloadHttp failed: " + e.getMessage());
                 emitHttpProgress("error", 0, 0, 0, 0, "");
                 call.reject("Descarga: " + e.getMessage());
+            } finally {
+                // Un .part a medias (fallo/cancelación) no debe quedarse ocupando disco.
+                if (!finished) {
+                    try { if (part != null && part.exists()) part.delete(); } catch (Throwable ignored) {}
+                    try {
+                        if (partDoc != null) DocumentsContract.deleteDocument(
+                                getContext().getContentResolver(), partDoc);
+                    } catch (Throwable ignored) {}
+                }
             }
         }, "http-download").start();
     }

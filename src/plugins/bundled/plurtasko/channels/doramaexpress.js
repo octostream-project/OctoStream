@@ -148,14 +148,7 @@ export const doramaexpress = {
     const seen = new Set()
     // Extraer nombre del servidor del texto cercano
     for (const m of [...serverCards, ...serverCards2]) {
-      let serverType, streamUrl
-      if (m.length === 4) {
-        serverType = m[1]
-        streamUrl = m[2]
-      } else {
-        streamUrl = m[1]
-        serverType = m[2]
-      }
+      const streamUrl = m.length === 4 ? m[2] : m[1]
       if (!streamUrl || seen.has(streamUrl)) continue
       seen.add(streamUrl)
       
@@ -223,7 +216,7 @@ export const doramaexpress = {
       try {
         const decoded = atob(link)
         if (decoded.startsWith('http')) link = decoded
-      } catch {}
+      } catch { /* ignorado */ }
 
       const server = this._detectServer(link)
       if (server) {

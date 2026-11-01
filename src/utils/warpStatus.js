@@ -29,7 +29,7 @@ async function applyStrictSetting() {
   const want = warpStrictEnabled()
   if (_strictApplied === want) return
   _strictApplied = want
-  try { await CloudProxy.setStrictMode(want) } catch {}
+  try { await CloudProxy.setStrictMode(want) } catch { /* ignorado */ }
 }
 
 // On non-Android (Electron/desktop), the Electron main process routes
@@ -65,7 +65,7 @@ function setConnected(connected) {
   notifyWaiters(connected)
   if (!changed) return
   for (const listener of _listeners) {
-    try { listener(connected) } catch {}
+    try { listener(connected) } catch { /* ignorado */ }
   }
 }
 
@@ -177,7 +177,7 @@ export function resetWarpReady() {
 
 export function subscribeWarpStatus(listener) {
   if (!_listeners.includes(listener)) _listeners.push(listener)
-  try { listener(_connected) } catch {}
+  try { listener(_connected) } catch { /* ignorado */ }
   schedulePoll(0)
   return () => {
     _listeners = _listeners.filter(item => item !== listener)
@@ -246,10 +246,6 @@ export function startNetWatchdog() {
     _wasConnected = st.connected
   }, 45000)
 }
-export function stopNetWatchdog() {
-  if (_watchTimer) { clearInterval(_watchTimer); _watchTimer = null }
-}
-
 // ─── Test de fuga de IP ─────────────────────────────────────────────────
 // Compara la IP que sale por la ruta normal de la app (proxy WARP) con la
 // de la red física. Es la prueba honesta de "sin fugas": si ambas
@@ -266,7 +262,7 @@ export async function checkIpLeak() {
       }
     }
     const body = String(data || '').trim()
-    try { return parseTrace(JSON.parse(body)) } catch {}
+    try { return parseTrace(JSON.parse(body)) } catch { /* ignorado */ }
     return {
       ip: (body.match(/(?:^|\n)ip=([^\n]+)/) || [])[1] || body,
       loc: (body.match(/(?:^|\n)loc=([^\n]+)/) || [])[1] || '',

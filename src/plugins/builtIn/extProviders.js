@@ -105,7 +105,7 @@ async function tmdbMetaFor(type, tmdbId, signal) {
 // MDBList — https://api.mdblist.com (key gratuita en mdblist.com → preferences)
 // ============================================================================
 
-export function getMdblistKey() {
+function getMdblistKey() {
   try { return (getItemSync('octostream_mdblist_key') || '').trim() } catch { return '' }
 }
 
@@ -234,7 +234,7 @@ Object.defineProperty(mdblistManifest, 'catalogs', {
 // Trakt — https://api.trakt.tv (Client ID gratis en trakt.tv/oauth/applications)
 // ============================================================================
 
-export function getTraktKey() {
+function getTraktKey() {
   try { return (getItemSync('octostream_trakt_key') || '').trim() } catch { return '' }
 }
 
@@ -283,7 +283,7 @@ export function getTraktUserLists() {
 
 const TRAKT_API = 'https://api.trakt.tv'
 
-export function getTraktSecret() {
+function getTraktSecret() {
   try { return (getItemSync('octostream_trakt_secret') || '').trim() } catch { return '' }
 }
 export function getTraktToken() {
@@ -344,7 +344,7 @@ export async function traktDeviceToken(deviceCode, clientId, clientSecret) {
 
 // Headers con Bearer; refresca el token si quedan <7 días (duran ~3 meses).
 let traktRefreshing = null
-export async function getTraktAuthHeaders() {
+async function getTraktAuthHeaders() {
   const key = getTraktKey()
   let token = getTraktToken()
   if (!key || !token) return null
@@ -408,7 +408,7 @@ export function getTraktMyLists() {
 }
 
 let myListsFetchedAt = 0
-export async function refreshTraktMyLists() {
+async function refreshTraktMyLists() {
   if (!getTraktToken() || Date.now() - myListsFetchedAt < CACHE_TTL_MS) return
   myListsFetchedAt = Date.now()
   try {
