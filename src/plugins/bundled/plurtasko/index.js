@@ -80,7 +80,13 @@ const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelispl
 const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd', 'grantorrent',
   // sololatino: ficha/búsqueda/episodios OK pero sus players son embed69 por
   // episodio (tt{id}-SxE) y el token api/player-url exige CSRF — 0 streams.
-  'sololatino'])
+  'sololatino',
+  // Auditoría nov/2026 (3 fichas por canal):
+  // - pelispedia: catálogo y búsqueda timeout >25s — sitio caído/colgado.
+  // - bloghorror: mismo timeout en catálogo y búsqueda — sitio caído.
+  // - repelishd: cinehdplus.work responde (catálogo/búsqueda OK) pero devuelve
+  //   0 streams en las 3 fichas — entradas vacías.
+  'pelispedia', 'bloghorror', 'repelishd'])
 
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios

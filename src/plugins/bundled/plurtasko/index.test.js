@@ -285,10 +285,10 @@ describe('titleSeasonMarker (marcador de temporada en el título)', () => {
     // Regresión: "Llamada perdida" existe como película japonesa (2003) y
     // remake americano (2008) — el sitio devuelve ambas y el match debe
     // preferir la del año pedido por la ficha.
-    const movieChannel = CHANNELS.find(ch => ch.id === 'pelispedia')
+    const movieChannel = CHANNELS.find(ch => ch.id === 'poseidonhd2')
     const origGetStreams = movieChannel.getStreams
     const searchStub = stubAllSearches({
-      pelispedia: [
+      poseidonhd2: [
         { id: 'r:old', url: 'https://x/llamada-perdida-2003', name: 'Llamada perdida', year: 2003 },
         { id: 'r:new', url: 'https://x/llamada-perdida-2008', name: 'Llamada perdida', year: 2008 },
       ],
@@ -313,10 +313,10 @@ describe('titleSeasonMarker (marcador de temporada en el título)', () => {
   })
 
   it('sin año pedido, conserva el mejor match por título aunque haya varios', async () => {
-    const movieChannel = CHANNELS.find(ch => ch.id === 'pelispedia')
+    const movieChannel = CHANNELS.find(ch => ch.id === 'poseidonhd2')
     const origGetStreams = movieChannel.getStreams
     const searchStub = stubAllSearches({
-      pelispedia: [
+      poseidonhd2: [
         { id: 'r:old', url: 'https://x/llamada-perdida-2003', name: 'Llamada perdida', year: 2003 },
         { id: 'r:new', url: 'https://x/llamada-perdida-2008', name: 'Llamada perdida', year: 2008 },
       ],
@@ -391,10 +391,10 @@ describe('verificación por año de la página del resultado', () => {
   it('rechaza el match cuando la página declara otro año (peli homónima)', async () => {
     // Regresión: buscar "Hansel y Gretel" (2007, coreana) devolvía
     // "Hansel y Gretel: Cazadores de brujas" (2013) y la reproducía.
-    const movieChannel = CHANNELS.find(ch => ch.id === 'pelispedia')
+    const movieChannel = CHANNELS.find(ch => ch.id === 'poseidonhd2')
     const origGetStreams = movieChannel.getStreams
     const searchStub = stubAllSearches({
-      pelispedia: [
+      poseidonhd2: [
         { id: 'r:hg2013', url: 'https://t.example/peli/hansel-cazadores', name: 'Hansel y Gretel: Cazadores de brujas' },
       ],
     })
@@ -422,10 +422,10 @@ describe('verificación por año de la página del resultado', () => {
   it('prefiere al rival cuyo año coincide cuando el favorito declara otro', async () => {
     // Dos candidatos homónimos: el de mejor título declara 2013 pero el
     // segundo declara 2007 → debe ganar el segundo.
-    const movieChannel = CHANNELS.find(ch => ch.id === 'pelispedia')
+    const movieChannel = CHANNELS.find(ch => ch.id === 'poseidonhd2')
     const origGetStreams = movieChannel.getStreams
     const searchStub = stubAllSearches({
-      pelispedia: [
+      poseidonhd2: [
         { id: 'r:hg2013', url: 'https://t2.example/peli/hg-2013', name: 'Hansel y Gretel: Cazadores de brujas' },
         { id: 'r:hg2007', url: 'https://t2.example/peli/hg-2007', name: 'Hansel y Gretel: El cuento' },
       ],
@@ -455,10 +455,10 @@ describe('verificación por año de la página del resultado', () => {
   })
 
   it('conserva el match cuando la página no declara año (beneficio de la duda)', async () => {
-    const movieChannel = CHANNELS.find(ch => ch.id === 'pelispedia')
+    const movieChannel = CHANNELS.find(ch => ch.id === 'poseidonhd2')
     const origGetStreams = movieChannel.getStreams
     const searchStub = stubAllSearches({
-      pelispedia: [
+      poseidonhd2: [
         { id: 'r:hg', url: 'https://t3.example/peli/hg', name: 'La Peli Sin Año' },
       ],
     })
