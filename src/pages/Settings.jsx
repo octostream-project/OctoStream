@@ -1673,6 +1673,15 @@ export default function Settings() {
       {/* Tab: Debrid */}
       {activeTab === 'debrid' && (
         <div className="space-y-6">
+          {isAndroidNative() && warpDetails && !warpDetails.vps && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
+              <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <p className="text-amber-200/90 text-sm">
+                Todo el tráfico debrid sale por el VPS. Sin el túnel SSH al VPS conectado,
+                AllDebrid no está disponible — configúralo en Ajustes → WARP → Servidor remoto.
+              </p>
+            </div>
+          )}
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <div className="flex items-start justify-between mb-3">
               <div>

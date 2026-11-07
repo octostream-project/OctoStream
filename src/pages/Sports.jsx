@@ -366,7 +366,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
       data-tv-card
       data-match-id={item.id}
       {...(initial ? { 'data-tv-initial': true } : {})}
-      onClick={() => onPlay(item)}
+      onClick={() => { if (!finished) onPlay(item) }}
       disabled={resolving}
       className="card group p-4 flex flex-col items-center gap-3 text-center w-full disabled:opacity-60"
     >
@@ -409,7 +409,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
             </span>
           ) : null}
           <span className="flex items-center gap-1.5">
-            {(item._fctvItem || item._dliveItem || item.type !== 'marca') && (
+            {!finished && (item._fctvItem || item._dliveItem || item.type !== 'marca') && (
               <Play size={14} className="text-primary-400" aria-label="Streams disponibles" />
             )}
           </span>

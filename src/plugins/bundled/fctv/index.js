@@ -503,7 +503,11 @@ export function fctvLookupItem(item) {
     if (!best || Math.abs(e.dateMs - (qd || Date.now())) < Math.abs(best.dateMs - (qd || Date.now()))) best = e
   }
   if (!best) { lookupCache.set(cacheKey, null); return null }
-  const matchDate = best.dateMs || qd || 0
+  // dateMs del sitemap es el <lastmod> de la página (lotes de partidos
+  // comparten el mismo instante de regeneración — NO es el saque). La
+  // fecha real de la tarjeta (Marca/Sofascore, qd) es la única válida;
+  // sin fecha real no se fabrica una — el lastmod solo filtra arriba.
+  const matchDate = qd || 0
   const m = { matchId: best.matchId, sportType: best.sportType, leagueSlug: best.leagueSlug, slug: best.slug, matchDate }
   const webDomain = cache?.webDomain || OFFLINE_CFG.webDomain
   const name = `${home} vs ${away}`

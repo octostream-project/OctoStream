@@ -17,10 +17,12 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
-import { isAlldebridEnabled, isAlldebridSupported, unlockLink as adUnlockLink } from '../alldebrid.js'
+import { isAlldebridSupported, debridAvailable, unlockLink as adUnlockLink } from '../alldebrid.js'
 
-// AllDebrid es el único servicio debrid configurado.
-const anyDebridEnabled = () => isAlldebridEnabled()
+// AllDebrid es el único servicio debrid configurado. Debrid solo existe
+// con ruta VPS (todo debrid por VPS): sin él no se producen ni se
+// desbloquean fuentes debrid.
+const anyDebridEnabled = () => debridAvailable()
 import { inferStreamType } from '../../../utils/streamType.js'
 import { animeflvone } from './channels/animeflvone.js'
 import { animeyt } from './channels/animeyt.js'
@@ -178,7 +180,7 @@ async function debridUnlock(url) {
   if (/mega\.nz\/embed\//i.test(url)) {
     debridUrl = url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')
   }
-  if (!isAlldebridEnabled() || !isAlldebridSupported(debridUrl)) return null
+  if (!(await debridAvailable()) || !isAlldebridSupported(debridUrl)) return null
   try {
     const result = await adUnlockLink(debridUrl)
     return result?.link ? { link: result.link, via: 'AllDebrid' } : null
@@ -659,7 +661,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
   if (!streams || !streams.length) return []
 
   // Filter out blocked servers that crash the app
-  const debridActive = anyDebridEnabled()
+  const debridActive = await anyDebridEnabled()
   const normalizedStreams = streams.map(normalizeStreamForPlayback)
   const isBlockedStream = (url, server, name) => {
     const urlLower = (url || '').toLowerCase()
@@ -990,7 +992,7 @@ export const plurtaskoFactory = (config) => {
     },
 
     async getStreams({ type, id, name, genres, season, episode, originalName, originCountry, originalLanguage, seasonsList, englishName, year, onBatch }) {
-      const debridEnabled = anyDebridEnabled()
+      const debridEnabled = await anyDebridEnabled()
       try {
         if (isEpisodicType(type) && (season == null || episode == null)) return []
 

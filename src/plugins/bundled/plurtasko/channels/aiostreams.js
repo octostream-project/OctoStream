@@ -232,10 +232,11 @@ const isPlaceholderUrl = (u) => /^https?:\/\/(?:www\.)?github\.com\//i.test(Stri
 // subir nada; los no-instantáneos pasan a entrada "descargando".
 // Si la API falla devuelve la lista intacta (mejor no ocultar fuentes).
 export async function applyDebridAvailability(streams, signal) {
-  const { isAlldebridEnabled, instantAvailability } = await import('../../alldebrid.js')
+  const { debridAvailable, instantAvailability } = await import('../../alldebrid.js')
   const diag = (m) => console.warn(m)
-  if (!isAlldebridEnabled() || signal?.aborted) {
-    diag(`[aio] instant check skip: ad=${isAlldebridEnabled()}`)
+  const adReady = await debridAvailable()
+  if (!adReady || signal?.aborted) {
+    diag(`[aio] instant check skip: ad=${adReady}`)
     return streams
   }
   const hashes = streams.map(s => s._infoHash).filter(Boolean)

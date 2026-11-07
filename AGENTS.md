@@ -381,7 +381,9 @@ OctoStream: media center multiplataforma (web, Electron, Android) con sistema de
 
 ## Posibles próximos pasos
 
-- Configurar CI para compilar APK de Android (requiere aceptar licencias SDK y Java).
+- CI compila Android en un proyecto Capacitor generado; `scripts/prepare-android.mjs`
+  aplica versión, ABI filters, flags del manifest, pantalla activa y release no-debuggable.
+  Los scripts `android:build*` llaman a este preparador tras `cap sync`.
 - Añadir tests unitarios para los módulos de `tdtSpain/` (mockear HTTP).
 - Añadir tests para `storage.js` y `useStore.js`.
 - Considerar `AbortController` para cancelar peticiones de plugins y HTTP.

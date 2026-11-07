@@ -1,6 +1,6 @@
 {
   "name": "octostream",
-  "version": "2.09.27",
+  "version": "2.09.28",
   "description": "Media center para Android y Android TV con sistema de plugins",
   "author": "OctoStream",
   "homepage": "https://github.com/octostream-project/OctoStream",
@@ -18,10 +18,10 @@
     "electron:build:arch": "vite build && electron-builder --linux pacman",
     "android:init": "cap init",
     "android:add": "cap add android",
-    "android:sync": "npm run build && cap sync",
-    "android:run": "npm run build && cap sync && cap run android",
-    "android:build": "npm run build && cap sync && cd android && ./gradlew :app:assembleDebug",
-    "android:build:release": "npm run build && cap sync && cd android && ./gradlew :app:assembleRelease",
+    "android:sync": "npm run build && cap sync && node scripts/prepare-android.mjs",
+    "android:run": "npm run build && cap sync && node scripts/prepare-android.mjs && cap run android",
+    "android:build": "npm run build && cap sync && node scripts/prepare-android.mjs && node scripts/android-gradle.mjs :app:assembleDebug",
+    "android:build:release": "npm run build && cap sync && node scripts/prepare-android.mjs && node scripts/android-gradle.mjs :app:assembleRelease",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"

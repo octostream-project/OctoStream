@@ -11,7 +11,7 @@
 // La UI se suscribe con subscribeDebridJobs() para repintar el %.
 
 import {
-  isAlldebridEnabled,
+  debridAvailable,
   getMagnetStatus,
   listMagnets,
   unlockLink as adUnlockLink,
@@ -71,13 +71,15 @@ export function isDebridTriggered(infoHash) {
 // cola de AllDebrid (subidos por la instancia AIOStreams, no por la app).
 let _adoptInflight = null
 export async function adoptDebridMagnets(streams) {
-  if (!isAlldebridEnabled()) return
+  if (!(await debridAvailable())) return
   const pending = (streams || []).filter(
     s => s?.processing && s._infoHash && !byHash.has(s._infoHash)
   )
   if (!pending.length) return
   if (!_adoptInflight) {
-    _adoptInflight = listMagnets().finally(() => { _adoptInflight = null })
+    _adoptInflight = listMagnets()
+      .catch(() => [])
+      .finally(() => { _adoptInflight = null })
   }
   const list = await _adoptInflight
   for (const s of pending) {

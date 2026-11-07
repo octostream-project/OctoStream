@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  isAlldebridEnabled,
   listMagnets,
   deleteMagnet,
 } from '../plugins/bundled/alldebrid.js'
+import { useDebridAvailable } from '../hooks/useDebridAvailable.js'
 import { resolveDebridJob, subscribeDebridJobs } from '../utils/debridJobs.js'
 import { playStream } from '../utils/exoPlayer.js'
 import { toast } from './ui/Toast.jsx'
@@ -36,12 +36,13 @@ const fmtSize = (bytes) =>
 export default function DebridJobsList() {
   const [magnets, setMagnets] = useState(null)
   const [busy, setBusy] = useState(null)
+  const debridOk = useDebridAvailable()
 
   const refresh = useCallback(async () => {
-    if (!isAlldebridEnabled()) return
+    if (!debridOk) { setMagnets([]); return }
     const list = await listMagnets()
     setMagnets(list)
-  }, [])
+  }, [debridOk])
 
   useEffect(() => {
     let alive = true
@@ -80,7 +81,7 @@ export default function DebridJobsList() {
     }
   }
 
-  if (!isAlldebridEnabled()) return null
+  if (!debridOk) return null
 
   return (
     <div>

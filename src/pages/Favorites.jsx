@@ -6,7 +6,7 @@ import DebridJobsList from '../components/DebridJobsList.jsx'
 import MediaGrid from '../components/ui/MediaGrid.jsx'
 import EmptyState from '../components/ui/EmptyState.jsx'
 import { isAndroidNative, isElectron } from '../utils/platform.js'
-import { isAlldebridEnabled } from '../plugins/bundled/alldebrid.js'
+import { useDebridAvailable } from '../hooks/useDebridAvailable.js'
 import { Bookmark, CheckCircle2, Clock, Heart, Download, CloudDownload, Search, X } from 'lucide-react'
 
 // Mi lista solo recoge contenido con principio y fin — la TV en directo y
@@ -73,7 +73,7 @@ export default function Favorites() {
       : 'Los títulos aparecerán aquí cuando termines de verlos.'
 
   const canDownload = isAndroidNative() || isElectron()
-  const hasDebrid = isAlldebridEnabled()
+  const hasDebrid = useDebridAvailable()
   const tabs = [
     { key: 'pending', label: 'Pendientes', icon: Clock, count: pending.length, active: 'border-primary-500 bg-primary-600/20' },
     { key: 'favorites', label: 'Favoritos', icon: Heart, count: favorites.length, active: 'border-red-500 bg-red-600/15' },

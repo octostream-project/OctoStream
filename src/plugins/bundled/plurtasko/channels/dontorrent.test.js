@@ -70,7 +70,9 @@ describe('dontorrent channel', () => {
   it('getStreams picks the requested episode row on serie pages', async () => {
     fetchHtml.mockResolvedValue(SERIE_HTML)
     postJson.mockImplementation(async (url, body) => {
-      if (body.action === 'generate') return { success: true, challenge: 'x', content_id: body.content_id }
+      // nonce 0 for this challenge already satisfies the PoW; this test is
+      // about selecting the episode row, not hashing thousands of candidates.
+      if (body.action === 'generate') return { success: true, challenge: 'test3590', content_id: body.content_id }
       if (body.action === 'validate') return { success: true, download_url: `/t/e${body.nonce === 'x' ? '' : ''}.torrent` }
       return null
     })

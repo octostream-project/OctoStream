@@ -1128,9 +1128,13 @@ public class TorrentEnginePlugin extends Plugin {
             try {
                 java.net.Proxy downloadProxy = null;
                 // Misma salida que unlock + reproductor: ssh nativo (SOCKS, cripto
-                // en C) → forward JSch → nunca otra IP. debrid_direct = IP de casa.
-                if (debrid && !CloudProxyPlugin.isDebridDirect()
-                        && CloudProxyPlugin.isDebridVpsConfigured()) {
+                // en C) → forward JSch → nunca otra IP. Regla: todo debrid por
+                // VPS — sin VPS configurado o túnel caído se rechaza, nunca
+                // red física ni WARP. debrid_direct = IP de casa (override).
+                if (debrid && !CloudProxyPlugin.isDebridDirect()) {
+                    if (!CloudProxyPlugin.isDebridVpsConfigured()) {
+                        throw new Exception("Debrid requiere el VPS configurado");
+                    }
                     String socks = CloudProxyPlugin.getVpsSocksAddr();
                     String addr = socks != null ? socks : CloudProxyPlugin.getVpsHttpProxyAddr();
                     if (addr == null) {

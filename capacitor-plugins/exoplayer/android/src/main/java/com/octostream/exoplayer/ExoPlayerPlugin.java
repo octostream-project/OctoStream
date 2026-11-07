@@ -4268,8 +4268,25 @@ public class ExoPlayerPlugin extends Plugin {
             new Thread(() -> {
                 DebridRangeRelay ready = null;
                 try {
-                    OkHttpClient client = createStreamHttpClient(url, false, false, requestedVps);
-                    ready = DebridRangeRelay.probe(url, client, probeHeaders,
+                    // Varios ssh -D paralelos = varios flujos TCP al VPS: un
+                    // solo transporte no da abasto para un remux 1080p.
+                    OkHttpClient[] clients;
+                    if (requestedVps) {
+                        String[] socks = com.octostream.cloudproxy.CloudProxyPlugin.getVpsSocksAddrs();
+                        if (socks.length > 1) {
+                            clients = new OkHttpClient[socks.length];
+                            for (int i = 0; i < socks.length; i++) {
+                                clients[i] = createStreamHttpClient(url, false, false, true, socks[i]);
+                            }
+                        } else {
+                            clients = new OkHttpClient[] {
+                                    createStreamHttpClient(url, false, false, true) };
+                        }
+                    } else {
+                        clients = new OkHttpClient[] {
+                                createStreamHttpClient(url, false, false, false) };
+                    }
+                    ready = DebridRangeRelay.probe(url, clients, probeHeaders,
                         lowEndDevice ? 48 : 128);
                 } catch (Exception e) {
                     Log.i(TAG, "Debrid Range unsupported/unavailable; using direct source: "
@@ -5131,7 +5148,8 @@ public class ExoPlayerPlugin extends Plugin {
                 Log.i(TAG, "Debrid Range relay active, exit="
                         + (com.octostream.cloudproxy.CloudProxyPlugin.isDebridDirect()
                                 ? "direct"
-                                : com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr() != null
+                                : (com.octostream.cloudproxy.CloudProxyPlugin.getVpsHttpProxyAddr() != null
+                                        || com.octostream.cloudproxy.CloudProxyPlugin.getVpsSocksAddrs().length > 0)
                                 ? "VPS" : "WARP"));
             } catch (Exception e) {
                 Log.w(TAG, "Debrid relay bind failed; using direct source");
@@ -7562,8 +7580,19 @@ public class ExoPlayerPlugin extends Plugin {
 
     private OkHttpClient createStreamHttpClient(String url, boolean direct,
             boolean forceBypassProxy, boolean vps) {
-        boolean vpsConfigured = vps && com.octostream.cloudproxy.CloudProxyPlugin.isDebridVpsConfigured();
-        boolean useProxy = vpsConfigured
+        return createStreamHttpClient(url, direct, forceBypassProxy, vps, null);
+    }
+
+    // socksOverride: fuerza un transporte concreto (relay multi-SSH reparte
+    // chunks entre varios ssh -D paralelos); null = autodetectar.
+    private OkHttpClient createStreamHttpClient(String url, boolean direct,
+            boolean forceBypassProxy, boolean vps, String socksOverride) {
+        // vps && !debrid_direct => la única salida permitida es el VPS;
+        // sin él el stream no se reproduce (nunca WARP ni IP de casa).
+        boolean vpsRequired = vps && !com.octostream.cloudproxy.CloudProxyPlugin.isDebridDirect();
+        boolean vpsConfigured = vpsRequired
+                && com.octostream.cloudproxy.CloudProxyPlugin.isDebridVpsConfigured();
+        boolean useProxy = vpsRequired
                 ? !direct && !forceBypassProxy && !isLoopbackUrl(url) && !isLanUrl(url)
                 : shouldUseWarpProxy(url, direct, forceBypassProxy);
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
@@ -7572,11 +7601,12 @@ public class ExoPlayerPlugin extends Plugin {
                 .followRedirects(true)
                 .followSslRedirects(true);
         if (useProxy) {
-            // openssh nativo (-D 2831): direct-tcpip con cripto en C. Si no
+            // openssh nativo (-D): direct-tcpip con cripto en C. Si no
             // esta vivo, el HTTP forward JSch/VPS; null = debrid directo
             // (pref debrid_direct): IP de casa, sin tunel.
             String socksAddr = vps
-                    ? com.octostream.cloudproxy.CloudProxyPlugin.getVpsSocksAddr() : null;
+                    ? (socksOverride != null ? socksOverride
+                            : com.octostream.cloudproxy.CloudProxyPlugin.getVpsSocksAddr()) : null;
             String proxyAddr = socksAddr == null ? (vps
                     ? com.octostream.cloudproxy.CloudProxyPlugin.getDebridHttpProxyAddr()
                     : com.octostream.cloudproxy.CloudProxyPlugin.getHttpProxyAddr()) : null;
@@ -7590,10 +7620,22 @@ public class ExoPlayerPlugin extends Plugin {
                         new java.net.InetSocketAddress(parts[0], Integer.parseInt(parts[1]))));
                 // SshDirectProxy (:2830) exige auth; el forward aether nunca
                 // reta, así que el authenticator solo se dispara cuando toca.
-                builder.proxyAuthenticator((route, response) -> response.request().newBuilder()
-                        .header("Proxy-Authorization",
-                                com.octostream.cloudproxy.CloudProxyPlugin.getProxyAuthHeader())
-                        .build());
+                if ("2830".equals(parts[1])
+                        && com.octostream.cloudproxy.CloudProxyPlugin.isDirectVpsProxyActive()) {
+                    builder.proxyAuthenticator((route, response) -> {
+                        if (response.request().header("Proxy-Authorization") != null) return null;
+                        return response.request().newBuilder()
+                                .header("Proxy-Authorization",
+                                        com.octostream.cloudproxy.CloudProxyPlugin.getProxyAuthHeader())
+                                .build();
+                    });
+                }
+            } else if (vpsRequired) {
+                // Ruta VPS pedida pero sin proxy vivo (sin configurar o
+                // túnel caído): proxy muerto en loopback para fallar
+                // rápido — nunca NO_PROXY (fuga por IP de casa).
+                builder.proxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
+                        new java.net.InetSocketAddress("127.0.0.1", 9)));
             } else {
                 builder.proxy(java.net.Proxy.NO_PROXY);
             }

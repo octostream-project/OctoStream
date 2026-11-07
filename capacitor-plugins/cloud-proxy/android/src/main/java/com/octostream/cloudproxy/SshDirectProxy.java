@@ -117,6 +117,14 @@ final class SshDirectProxy implements AutoCloseable {
             String text = head.toString(StandardCharsets.ISO_8859_1.name());
             String[] lines = text.split("\r\n");
             String first = lines[0];
+            if (!hasProxyAuth(lines)) {
+                out.write(("HTTP/1.1 407 Proxy Authentication Required\r\n"
+                        + "Proxy-Authenticate: Basic realm=\"octostream\"\r\n"
+                        + "Content-Length: 0\r\nConnection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1));
+                out.flush();
+                return;
+            }
             boolean isConnect = first.regionMatches(true, 0, "CONNECT ", 0, 8);
             String host;
             int targetPort;

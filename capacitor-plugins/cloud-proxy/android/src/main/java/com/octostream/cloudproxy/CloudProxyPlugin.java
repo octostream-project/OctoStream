@@ -55,30 +55,26 @@ public class CloudProxyPlugin extends Plugin {
     // separados porque el aether local ocupa 1819/1820 â€” ambos transportes
     // conviven y el VPS (cuota limitada) solo ve trÃ¡fico debrid; fÃºtbol,
     // YouTube y servidores gratuitos salen por WARP local.
-    // Puertos locales de los forwards -L: efÃ­meros (0 = aÃºn sin bind). AsÃ­ no
-    // quedan proxies sin auth en puertos documentados alcanzables por otras
-    // apps; las puertas estables (:2830/:2831) son las que exigen credencial.
+    // Puertos locales de los forwards -L y del SOCKS nativo: efÃ­meros
+    // (0 = aÃºn sin bind). AsÃ­ no quedan proxies en puertos documentados
+    // alcanzables por otras apps; :2830 (CONNECT directo) exige credencial.
     private static volatile int vpsSocksPort = 0;
     private static volatile int vpsHttpPort = 0;
     // Proxy directo por canales SSH "direct-tcpip": la conexion sale del VPS
     // con su IP publica SIN pasar por el aether remoto (un tunel menos).
     // Si el sshd no permite direct-tcpip se usa el forward 2820 de siempre.
     private static final int VPS_DIRECT_PORT = 2830;
-    // El doble salto puede gastar hasta 180s en gool + otros 180s en mim;
-    // con edge pegajoso hay ademÃ¡s un reintento de gool sin pin. Este lÃ­mite
-    // debe ser mayor que el handshake completo o getStatus()/connect waiter
-    // lo declaran "stale" y cancelan justamente la conexiÃ³n que estÃ¡ avanzando.
-    private static final long EXIT_CONNECT_MAX_MS = 600_000L;
+    // Upper bound for connect waiters and stale-connection cleanup.
+    private static final long EXIT_CONNECT_MAX_MS = 180_000L;
 
     private static volatile Process aetherProcess = null;
     private static volatile boolean connected = false;
     private static volatile boolean connecting = false;
     private static volatile long connectingSince = 0;
     private static volatile int statusMisses = 0;
-    // Protocolo que funcionÃ³ la Ãºltima vez â€” se prueba primero en la
-    // siguiente conexiÃ³n. Siempre doble salto (gool â†’ mim); si gool no
-    // sostiene el tÃºnel se escala a mim automÃ¡ticamente.
-    private static volatile String preferredProtocol = "gool";
+    // Persist and retry the last protocol that passed a data-plane probe.
+    private static volatile String preferredProtocol = "masque";
+    private static final long CONNECT_PROTOCOL_BUDGET_MS = 150_000L;
     // Protocolo que corre el proceso aether actual â€” MASQUE a veces no
     // sostiene el tÃºnel bajo carga ("tunnel ended: Operation not
     // permitted" en bucle cada ~2s) mientras sus puertos locales siguen
@@ -117,12 +113,34 @@ public class CloudProxyPlugin extends Plugin {
                     .putString("exit_loc", exitLoc).apply();
         } catch (Throwable ignored) {}
     }
-    // Siempre doble salto (gool â†’ mim = Cloudflareâ†’Cloudflare): la IP sale
-    // enmascarada detrÃ¡s de un segundo hop WARP en todo arranque de aether,
-    // no solo cuando el usuario fija ubicaciÃ³n. warpExitLoc sigue decidiendo
-    // el spec de paÃ­s (AETHER_EXIT_LOC) cuando hay uno fijado.
-    private boolean exitMode() { return true; }
     private String exitSpec() { return "random".equals(warpExitLoc()) ? "" : warpExitLoc(); }
+
+    private String preferredWarpProtocol() {
+        if (preferredProtocol == null || preferredProtocol.isEmpty()) {
+            preferredProtocol = "masque";
+        }
+        try {
+            String stored = getContext().getSharedPreferences(PREFS_WARP, 0)
+                    .getString("preferred_protocol", preferredProtocol);
+            if ("masque".equals(stored) || "mim".equals(stored) || "gool".equals(stored)) {
+                preferredProtocol = stored;
+            }
+        } catch (Exception ignored) {
+            // Keep the in-memory/default protocol if preferences are unavailable.
+        }
+        return preferredProtocol;
+    }
+
+    private void rememberWarpProtocol(String protocol) {
+        if (!"masque".equals(protocol) && !"mim".equals(protocol) && !"gool".equals(protocol)) return;
+        preferredProtocol = protocol;
+        try {
+            getContext().getSharedPreferences(PREFS_WARP, 0).edit()
+                    .putString("preferred_protocol", protocol).apply();
+        } catch (Exception ignored) {
+            // The active session can still use the in-memory preference.
+        }
+    }
 
     // WARP remoto: usar un proxy externo accesible en :1819/:1820 o, con
     // usuario SSH, el proxy del VPS alcanzado por port-forward. "" = local.
@@ -136,32 +154,59 @@ public class CloudProxyPlugin extends Plugin {
     private static volatile Integer remoteSshPort = null;
     private static volatile Session sshSession = null;
     private static volatile SshDirectProxy directProxy = null;
-    // Cliente openssh nativo (binario Termux en assets): cripto en C con
-    // aceleracion ARMv8 en vez de JSch (Java puro). SOCKS -D en 2831 = canales
-    // direct-tcpip saliendo con la IP del VPS; el path JSch queda de respaldo.
-    private static final int NATIVE_SSH_PORT = 2831;
-    private static volatile Process nativeSsh = null;
-    private static volatile int nativeSshPort = 0;
+    // Native OpenSSH uses C crypto; each -D listener stays on an ephemeral
+    // loopback port. java.net/OkHttp SOCKS on Android cannot do RFC1929 auth,
+    // so an authenticated front would break every debrid client — the random
+    // ports themselves are the mitigation (not documented fixed ports).
+    // NATIVE_SSH_PROCS transports in parallel: the debrid relay's range
+    // requests would otherwise share ONE TCP flow to the VPS, which collapses
+    // under latency/loss on a 1080p remux.
+    private static final int NATIVE_SSH_PROCS = 3;
+    private static final class NativeSshProc {
+        final Process proc;
+        final int port;
+        NativeSshProc(Process p, int port) { proc = p; this.port = port; }
+    }
+    private static final java.util.List<NativeSshProc> nativeSshProcs =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
     private static volatile boolean nativeSshUp = false;
     private static final java.util.concurrent.atomic.AtomicBoolean nativeSshStarting =
             new java.util.concurrent.atomic.AtomicBoolean(false);
     private static volatile int nativeSshRestarts = 0;
 
     public static boolean isNativeSshUp() {
-        Process p = nativeSsh;
-        return nativeSshUp && p != null && processAlive(p) && nativeSshPort > 0;
+        if (!nativeSshUp) return false;
+        synchronized (nativeSshProcs) {
+            for (NativeSshProc n : nativeSshProcs) {
+                if (processAlive(n.proc)) return true;
+            }
+        }
+        return false;
     }
     // Solo se anuncia si el proxy directo JSch tambiÃ©n vive: unlock/descarga
-    // (2830) y reproducciÃ³n (2831) comparten asÃ­ la misma salida â€” la IP
+    // (2830) y reproducciÃ³n (SOCKS efÃ­mero) comparten asÃ­ la misma salida â€” la IP
     // pÃºblica del VPS. Sin Ã©l, el forward 2820 sale por el aether remoto y
     // una URL desbloqueada ahÃ­ darÃ­a 403 al reproducirla por 2831.
     public static String getVpsSocksAddr() {
+        String[] all = getVpsSocksAddrs();
+        return all.length > 0 ? all[0] : null;
+    }
+    /** All live native-SSH SOCKS endpoints ("127.0.0.1:port"): parallel TCP
+     *  transports so bulk debrid downloads are not bound to one SSH flow. */
+    public static String[] getVpsSocksAddrs() {
         // debrid_direct: el media también sale por la IP de casa — si solo el
         // unlock fuera directo, el mismatch IP-bound daría 403 al reproducir.
-        if (debridDirect) return null;
-        SshDirectProxy dp = directProxy;
-        return isNativeSshUp() && dp != null && dp.isRunning()
-                ? "127.0.0.1:" + nativeSshPort : null;
+        if (debridDirect) return new String[0];
+        // Los ssh -D nativos salen por la IP pública del VPS igual que el
+        // proxy :2830 — no hace falta que la sesión JSch siga viva.
+        if (!isNativeSshUp()) return new String[0];
+        java.util.List<String> out = new java.util.ArrayList<>();
+        synchronized (nativeSshProcs) {
+            for (NativeSshProc n : nativeSshProcs) {
+                if (processAlive(n.proc)) out.add("127.0.0.1:" + n.port);
+            }
+        }
+        return out.toArray(new String[0]);
     }
     // true mientras el modo remoto activo es SSH (proxyHostâ†’127.0.0.1).
     private static volatile boolean sshMode = false;
@@ -406,6 +451,11 @@ public class CloudProxyPlugin extends Plugin {
         return ProxyAuth.basicHeader();
     }
 
+    public static boolean isDirectVpsProxyActive() {
+        SshDirectProxy proxy = directProxy;
+        return proxy != null && proxy.isRunning();
+    }
+
     // GuardiÃ¡n FGS solo en segundo plano: el phantom process killer mata a
     // los hijos que queman CPU cuando la app estÃ¡ cacheada â€” en foreground
     // la app ya tiene prioridad y el servicio solo gastaba baterÃ­a y dejaba
@@ -503,7 +553,7 @@ public class CloudProxyPlugin extends Plugin {
                 // of a spurious "already in progress" error.
                 new Thread(() -> {
                     int waited = 0;
-                    long maxWait = exitMode() ? EXIT_CONNECT_MAX_MS : 70000L;
+                    long maxWait = EXIT_CONNECT_MAX_MS;
                     while (connecting && waited < maxWait) {
                         try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
                         waited += 500;
@@ -630,30 +680,35 @@ public class CloudProxyPlugin extends Plugin {
                         try { stopSshTunnel(generation); } catch (Exception ignored) {}
                     }
                 }
-                // Cadena siempre de doble salto Cloudflareâ†’Cloudflare:
-                // gool (WireGuard dentro de WARP â€” la salida la da el salto
-                // interior) â†’ mim (MASQUE dentro de MASQUE). El Ãºltimo que
-                // funcione queda como preferido para la sesiÃ³n.
-                // masque-h2 primero: MASQUE sobre HTTP/2 en TCP 443 con peer
-                // fijado — el doble salto UDP (gool/mim) daba timeouts de
-                // dataplane constantes en redes flojas. Fallback a la cadena
-                // doble si el peer h2 no responde.
-                String[] chain = { "masque-h2", "masque", "mim", "gool" };
-                preferredProtocol = "masque-h2";
+                // Try the remembered working protocol first, then bounded fallbacks.
+                String requestedExit = exitSpec();
+                boolean fixedExit = requestedExit != null && !requestedExit.isEmpty()
+                        && !"auto".equalsIgnoreCase(requestedExit);
+                String[] chain = fixedExit
+                        ? new String[] { "mim", "gool" }
+                        : new String[] { "masque", "mim", "gool" };
+                String preferred = preferredWarpProtocol();
+                if (fixedExit && "masque".equals(preferred)) preferred = "mim";
                 int startIdx = 0;
                 for (int i = 0; i < chain.length; i++) {
-                    if (chain[i].equals(preferredProtocol)) { startIdx = i; break; }
+                    if (chain[i].equals(preferred)) { startIdx = i; break; }
                 }
+                long connectionDeadline = android.os.SystemClock.elapsedRealtime()
+                        + CONNECT_PROTOCOL_BUDGET_MS;
                 Exception lastErr = null;
                 boolean started = false;
+                protocolAttempts:
                 for (int i = 0; i < chain.length && !started; i++) {
                     String proto = chain[(startIdx + i) % chain.length];
                     boolean unpinnedRetry = false;
                     while (true) {
+                        long protocolBudgetMs = "masque".equals(proto) ? 40_000L : 55_000L;
+                        long protocolDeadline = Math.min(connectionDeadline,
+                                android.os.SystemClock.elapsedRealtime() + protocolBudgetMs);
                         try {
-                            startAether(proto, generation);
+                            startAether(proto, generation, protocolDeadline);
                             started = true;
-                            preferredProtocol = proto;
+                            rememberWarpProtocol(proto);
                             break;
                 } catch (Exception err) {
                     lastErr = err;
@@ -661,6 +716,11 @@ public class CloudProxyPlugin extends Plugin {
                     if (!stopAether(generation)) {
                         throw new InterruptedException("connect cancelled");
                     }
+                            if (android.os.SystemClock.elapsedRealtime() >= connectionDeadline) {
+                                lastErr = new java.net.SocketTimeoutException(
+                                        "WARP protocol fallback budget exceeded");
+                                break protocolAttempts;
+                            }
                             // Sticky exit: si el edge interior fijado muriÃ³,
                             // una segunda oportunidad sin Ã©l antes de caer
                             // al siguiente protocolo de la cadena.
@@ -832,11 +892,8 @@ public class CloudProxyPlugin extends Plugin {
      */
     @PluginMethod
     public void getStatus(PluginCall call) {
-        // connecting tiene un lÃ­mite interno de ~60s (startAether; ~180s en
-        // modo doble salto gool/mim); un true mÃ¡s viejo que eso es estado
-        // corrupto (un connect cancelado o un hilo muerto) â€” se limpia
-        // solo para que los reintentos funcionen.
-        long connectStale = exitMode() ? EXIT_CONNECT_MAX_MS : 75000;
+        // A protocol fallback is bounded globally; stale worker cleanup uses the same ceiling.
+        long connectStale = EXIT_CONNECT_MAX_MS;
         if (connecting && System.currentTimeMillis() - connectingSince > connectStale) {
             synchronized (PROCESS_LOCK) { connecting = false; }
         }
@@ -943,9 +1000,10 @@ public class CloudProxyPlugin extends Plugin {
     public static boolean isDebridDirect() { return debridDirect; }
 
     public static String getDebridHttpProxyAddr() {
-        if (debridDirect) return null;
-        return isDebridVpsConfigured()
-                ? getVpsHttpProxyAddr() : getHttpProxyAddr();
+        // Todo debrid por VPS: sin VPS configurado no hay ruta debrid —
+        // null hace que el caller falle cerrado en vez de caer a WARP.
+        if (debridDirect || !isDebridVpsConfigured()) return null;
+        return getVpsHttpProxyAddr();
     }
 
     /** Cheap routing check for debrid API calls; getStatus probes WARP TLS. */
@@ -953,18 +1011,20 @@ public class CloudProxyPlugin extends Plugin {
     public void getDebridRoute(PluginCall call) {
         boolean ssh = sshRemote();
         call.resolve(new JSObject().put("ssh", ssh)
-                .put("vps", ssh && getVpsHttpProxyAddr() != null)
+                .put("vps", !debridDirect && ssh
+                        && (getVpsHttpProxyAddr() != null || getVpsSocksAddrs().length > 0))
                 .put("direct", debridDirect));
     }
 
     /** Binario openssh nativo (assets/ssh/<abi>): toda la cripto SSH pasa a
      *  C con aceleracion ARMv8 â€” JSch sigue gestionando sesion/hostkey y
-     *  los forwards ligeros; el media debrid sale por su -D (SOCKS 2831). */
+     *  los forwards ligeros; el media debrid sale por su -D (SOCKS efÃ­mero). */
     private void ensureNativeSsh(Session s) {
-        if (nativeSshUp || nativeSsh != null) return;
+        if (nativeSshUp || !nativeSshProcs.isEmpty()) return;
         if (!nativeSshStarting.compareAndSet(false, true)) return;
         new Thread(() -> {
-            Process spawned = null;
+            java.util.List<Process> spawned = new java.util.ArrayList<>();
+            java.util.List<Integer> spawnedPorts = new java.util.ArrayList<>();
             try {
                 // SELinux solo permite exec() desde nativeLibraryDir: el
                 // binario viaja como libssh.so en jniLibs (igual que aether).
@@ -1006,68 +1066,83 @@ public class CloudProxyPlugin extends Plugin {
                     Log.w(TAG, "native ssh skipped: host key not pinned yet");
                     return;
                 }
-                // El -D escucha en un puerto efímero y sin auth; el único
-                // punto de entrada es SocksAuthProxy (:2831), que exige la
-                // credencial por-arranque (RFC 1929) y encamina aquí.
-                int dPort;
-                try (java.net.ServerSocket free = new java.net.ServerSocket(
-                        0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
-                    dPort = free.getLocalPort();
-                }
-                ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath(),
-                        "-i", key.getAbsolutePath(), "-N",
-                        "-o", "BatchMode=yes",
-                        "-o", "IdentitiesOnly=yes",
-                        "-o", "StrictHostKeyChecking=yes",
-                        "-o", "HostKeyAlgorithms=" + hostKeyAlg,
-                        "-o", "UserKnownHostsFile=" + new File(dir, "known_hosts").getAbsolutePath(),
-                        "-o", "ExitOnForwardFailure=yes",
-                        "-o", "ConnectTimeout=10",
-                        "-o", "Compression=no",
-                        "-o", "ServerAliveInterval=30",
-                        "-D", "127.0.0.1:" + dPort,
-                        "-p", String.valueOf(sshPort()), sshUser() + "@" + warpRemote());
-                pb.environment().put("LD_LIBRARY_PATH", dir.getAbsolutePath()
-                        + ":" + getContext().getApplicationInfo().nativeLibraryDir);
-                pb.environment().put("HOME", dir.getAbsolutePath());
-                pb.redirectErrorStream(true);
-                spawned = pb.start();
-                nativeSsh = spawned;
-                final Process proc = spawned;
-                // Drenar la salida (un pipe lleno bloquearÃ­a al ssh) sin
-                // volcarla a logcat: puede nombrar host/usuario.
-                Thread drain = new Thread(() -> {
-                    try (InputStream in = proc.getInputStream()) {
-                        byte[] sink = new byte[1024];
-                        while (in.read(sink) >= 0) { /* descartar */ }
-                    } catch (Exception ignored) {}
-                }, "native-ssh-drain");
-                drain.setDaemon(true);
-                drain.start();
-                for (int i = 0; i < 40; i++) {
-                    if (!processAlive(proc)) {
-                        Log.w(TAG, "native ssh exited early (code " + proc.exitValue() + "), JSch path kept");
-                        if (nativeSsh == proc) nativeSsh = null;
-                        return;
+                // Clients use the ephemeral SOCKS ports directly: Android's
+                // java.net/OkHttp SOCKS stack cannot answer RFC1929 auth, so
+                // a front would reject every legitimate connection. Several
+                // parallel -D transports: one ssh flow is a single TCP
+                // connection and cannot feed a 1080p remux through ~140 ms.
+                for (int n = 0; n < NATIVE_SSH_PROCS; n++) {
+                    int dPort;
+                    try (java.net.ServerSocket free = new java.net.ServerSocket(
+                            0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+                        dPort = free.getLocalPort();
                     }
-                    try (java.net.Socket test = new java.net.Socket()) {
-                        test.connect(new java.net.InetSocketAddress("127.0.0.1", dPort), 200);
-                        nativeSshPort = dPort;
-                        nativeSshUp = true;
-                        Log.i(TAG, "native openssh -D up (ephemeral :" + dPort
-                                + "): debrid exits VPS IP (C crypto)");
-                        spawned = null;
-                        watchNativeSsh(proc, s);
-                        return;
-                    } catch (Exception e) { Thread.sleep(300); }
+                    ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath(),
+                            "-i", key.getAbsolutePath(), "-N",
+                            "-o", "BatchMode=yes",
+                            "-o", "IdentitiesOnly=yes",
+                            "-o", "StrictHostKeyChecking=yes",
+                            "-o", "HostKeyAlgorithms=" + hostKeyAlg,
+                            "-o", "UserKnownHostsFile=" + new File(dir, "known_hosts").getAbsolutePath(),
+                            "-o", "ExitOnForwardFailure=yes",
+                            "-o", "ConnectTimeout=10",
+                            "-o", "Compression=no",
+                            "-o", "ServerAliveInterval=30",
+                            "-D", "127.0.0.1:" + dPort,
+                            "-p", String.valueOf(sshPort()), sshUser() + "@" + warpRemote());
+                    pb.environment().put("LD_LIBRARY_PATH", dir.getAbsolutePath()
+                            + ":" + getContext().getApplicationInfo().nativeLibraryDir);
+                    pb.environment().put("HOME", dir.getAbsolutePath());
+                    pb.redirectErrorStream(true);
+                    Process proc = pb.start();
+                    spawned.add(proc);
+                    spawnedPorts.add(dPort);
+                    // Drenar la salida (un pipe lleno bloquearÃ­a al ssh) sin
+                    // volcarla a logcat: puede nombrar host/usuario.
+                    Thread drain = new Thread(() -> {
+                        try (InputStream in = proc.getInputStream()) {
+                            byte[] sink = new byte[1024];
+                            while (in.read(sink) >= 0) { /* descartar */ }
+                        } catch (Exception ignored) {}
+                    }, "native-ssh-drain");
+                    drain.setDaemon(true);
+                    drain.start();
                 }
-                Log.w(TAG, "native ssh did not open its SOCKS port in time, JSch path kept");
+                // Esperar a que TODOS los listeners estÃ©n listos (o hasta
+                // ~12 s); los que no abran se descartan y se usa el resto.
+                long deadline = System.currentTimeMillis() + 12000;
+                for (int i = 0; i < spawned.size(); i++) {
+                    Process proc = spawned.get(i);
+                    int dPort = spawnedPorts.get(i);
+                    boolean up = false;
+                    while (System.currentTimeMillis() < deadline && !up) {
+                        if (!processAlive(proc)) {
+                            Log.w(TAG, "native ssh #" + i + " exited early (code "
+                                    + proc.exitValue() + "), JSch path kept for it");
+                            break;
+                        }
+                        try (java.net.Socket test = new java.net.Socket()) {
+                            test.connect(new java.net.InetSocketAddress("127.0.0.1", dPort), 200);
+                            up = true;
+                        } catch (Exception e) { Thread.sleep(300); }
+                    }
+                    if (up) {
+                        nativeSshProcs.add(new NativeSshProc(proc, dPort));
+                        spawned.set(i, null);
+                        spawnedPorts.set(i, -1);
+                        Log.i(TAG, "native openssh -D up on ephemeral :" + dPort + " (C crypto)");
+                        watchNativeSsh(proc, s);
+                    } else {
+                        Log.w(TAG, "native ssh #" + i + " SOCKS port never opened");
+                        proc.destroyForcibly();
+                    }
+                }
+                if (!nativeSshProcs.isEmpty()) nativeSshUp = true;
             } catch (Exception e) {
                 Log.w(TAG, "native ssh unavailable, JSch path kept: " + e.getMessage());
             } finally {
-                if (spawned != null) {
-                    spawned.destroyForcibly();
-                    if (nativeSsh == spawned) { nativeSsh = null; nativeSshUp = false; }
+                for (Process p : spawned) {
+                    if (p != null) p.destroyForcibly();
                 }
                 nativeSshStarting.set(false);
             }
@@ -1080,14 +1155,18 @@ public class CloudProxyPlugin extends Plugin {
     private void watchNativeSsh(Process proc, Session s) {
         Thread t = new Thread(() -> {
             try { proc.waitFor(); } catch (InterruptedException ie) { return; }
-            if (nativeSsh != proc) return;
-            nativeSsh = null;
-            nativeSshUp = false;
-            nativeSshPort = 0;
+            boolean wasLast;
+            synchronized (nativeSshProcs) {
+                nativeSshProcs.removeIf(n -> n.proc == proc);
+                wasLast = nativeSshProcs.isEmpty();
+            }
+            if (wasLast) nativeSshUp = false;
             Log.w(TAG, "native ssh exited (code " + proc.exitValue() + ")");
             if (sshSession == s && s.isConnected() && nativeSshRestarts++ < 5) {
                 try { Thread.sleep(3000); } catch (InterruptedException ie) { return; }
-                if (sshSession == s && s.isConnected()) ensureNativeSsh(s);
+                if (sshSession == s && s.isConnected() && nativeSshProcs.isEmpty()) {
+                    ensureNativeSsh(s);
+                }
             }
         }, "native-ssh-watch");
         t.setDaemon(true);
@@ -1135,11 +1214,13 @@ public class CloudProxyPlugin extends Plugin {
     }
 
     private static void stopNativeSsh() {
-        Process p = nativeSsh;
-        nativeSsh = null;
         nativeSshUp = false;
-        nativeSshPort = 0;
-        if (p != null) p.destroyForcibly();
+        java.util.List<NativeSshProc> procs;
+        synchronized (nativeSshProcs) {
+            procs = new java.util.ArrayList<>(nativeSshProcs);
+            nativeSshProcs.clear();
+        }
+        for (NativeSshProc n : procs) n.proc.destroyForcibly();
     }
 
     private void copyAsset(String name, File dst) throws java.io.IOException {
@@ -1713,7 +1794,7 @@ public class CloudProxyPlugin extends Plugin {
      * Starts the Aether binary as a background process.
      * The binary is bundled as libaether.so in jniLibs.
      */
-    private void startAether(String protocol, long generation) throws Exception {
+    private void startAether(String protocol, long generation, long deadlineElapsed) throws Exception {
         synchronized (PROCESS_LOCK) {
             if (!connecting || generation != connectionGeneration) {
                 throw new InterruptedException("connect cancelled");
@@ -1841,16 +1922,11 @@ public class CloudProxyPlugin extends Plugin {
             }
         }, "aether-exit-watch").start();
 
-        // Wait for the SOCKS5 proxy to come up. MASQUE va rÃ¡pido cuando su
-        // peer fijado valida (~5-10s); si en ~35s no hay proxies el protocolo
-        // estÃ¡ filtrado y no merece quemar los 120s del scan â€” se corta y el
-        // caller cae al otro protocolo. WG recibe mÃ¡s margen porque escanea
-        // endpoints propios (~10s tÃ­pico, hasta ~60s). gool/mim = dos
-        // provisiones + scan exterior + dial interior (~2-3min la primera
-        // vez; el quick-reconnect reutiliza peers conocidos las siguientes).
+        // Wait only within the remaining total WARP connection budget.
         int attempts = 0;
-        int maxAttempts = isExitChain ? 360 : (isMasque ? 70 : 120); // 180s exit / 35s masque / 60s wg
-        while (!isSocksProxyUp() && attempts < maxAttempts) {
+        int maxAttempts = isExitChain ? 360 : (isMasque ? 70 : 120); // protocol-specific cap
+        while (!isSocksProxyUp() && attempts < maxAttempts
+                && android.os.SystemClock.elapsedRealtime() < deadlineElapsed) {
             synchronized (PROCESS_LOCK) {
                 if (!connecting || generation != connectionGeneration) {
                     throw new InterruptedException("connect cancelled");
@@ -1863,12 +1939,16 @@ public class CloudProxyPlugin extends Plugin {
         }
 
         if (!isSocksProxyUp()) {
+            if (android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+                throw new java.net.SocketTimeoutException("WARP connection budget exceeded");
+            }
             throw new RuntimeException("Aether proxy not responding (SOCKS " + socksAddr() + " or HTTP " + httpProxyAddr() + ") after " + (attempts * 0.5) + "s");
         }
         // Puerto arriba no basta: algunos arranques exponen los listeners
         // antes de que el data-plane responda. Esperar un handshake SOCKS
         // e2e evita marcar "connected" sobre un tÃºnel zombi.
-        for (int i = 0; i < 30 && !isTunnelAlive(); i++) {
+        for (int i = 0; i < 30 && !isTunnelAlive()
+                && android.os.SystemClock.elapsedRealtime() < deadlineElapsed; i++) {
             synchronized (PROCESS_LOCK) {
                 if (!connecting || generation != connectionGeneration) {
                     throw new InterruptedException("connect cancelled");
@@ -1879,6 +1959,9 @@ public class CloudProxyPlugin extends Plugin {
             Thread.sleep(500);
         }
         if (!isTunnelAlive()) {
+            if (android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+                throw new java.net.SocketTimeoutException("WARP data-plane validation budget exceeded");
+            }
             throw new RuntimeException("Aether tunnel not passing traffic through SOCKS " + socksAddr());
         }
         Log.i(TAG, "Aether proxies up: SOCKS " + socksAddr() + ", HTTP " + httpProxyAddr());
@@ -2266,9 +2349,9 @@ public class CloudProxyPlugin extends Plugin {
         tunnelFailStreak++;
         // ~5 muertes (~10s de tÃºnel invÃ¡lido) bastan para rendirse.
         if (tunnelFailStreak < 5 || protocolSwitching) return;
-        // Siguiente escalÃ³n de la cadena doble-salto: gool â†’ mim.
-        // En mim no hay mÃ¡s adonde escalar.
-        final String next = "gool".equals(currentProtocol) ? "mim" : null;
+        // Escalate through the same order as initial connection: masque -> mim -> gool.
+        final String next = "masque".equals(currentProtocol) ? "mim"
+                : "mim".equals(currentProtocol) ? "gool" : null;
         if (next == null) return;
         protocolSwitching = true;
         preferredProtocol = next;
@@ -2285,7 +2368,9 @@ public class CloudProxyPlugin extends Plugin {
                     connectingSince = System.currentTimeMillis();
                 }
                 if (!stopAether(generation)) return;
-                startAether(next, generation);
+                startAether(next, generation,
+                        android.os.SystemClock.elapsedRealtime() + CONNECT_PROTOCOL_BUDGET_MS);
+                rememberWarpProtocol(next);
                 synchronized (PROCESS_LOCK) {
                     connected = aetherProcess != null && aetherProcess.isAlive();
                     connecting = false;
@@ -2386,9 +2471,11 @@ public class CloudProxyPlugin extends Plugin {
         new Thread(() -> {
             java.net.HttpURLConnection c = null;
             try {
-                // No silent exit-IP change when SSH drops: a URL unlocked via
-                // the VPS cannot be fetched via WARP without an IP mismatch.
-                if (vps && !debridDirect && sshRemote() && getVpsHttpProxyAddr() == null) {
+                // No silent exit-IP change for debrid: todo debrid sale por
+                // el VPS — sin SSH configurado o con el túnel caído se
+                // rechaza en vez de caer a WARP/red física (IP-binding).
+                if (vps && !debridDirect && (!sshRemote()
+                        || (getVpsHttpProxyAddr() == null && getVpsSocksAddr() == null))) {
                     call.reject("VPS SSH no conectado; reintenta cuando vuelva");
                     return;
                 }
@@ -2404,8 +2491,18 @@ public class CloudProxyPlugin extends Plugin {
                 // Proxy del VPS para vps=true: solo con sesiÃ³n SSH viva;
                 // si no, u.openConnection() usa el proxy del sistema
                 // (aether). La red fÃ­sica queda reservada al bypass geo.
+                // Prefer authenticated SOCKS for native SSH; it avoids HTTP
+                // CONNECT auth retries in HttpURLConnection on Android.
+                String vpsSocksAddr = vps && !debridDirect ? getVpsSocksAddr() : null;
                 String vpsProxyAddr = vps && !debridDirect ? getVpsHttpProxyAddr() : null;
+                java.net.Proxy vpsSocksProxy = null;
                 java.net.Proxy vpsProxy = null;
+                if (vpsSocksAddr != null) {
+                    String[] proxyParts = vpsSocksAddr.split(":", 2);
+                    vpsSocksProxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                            new java.net.InetSocketAddress(proxyParts[0],
+                                    Integer.parseInt(proxyParts[1])));
+                }
                 boolean authProxy = false;
                 if (vpsProxyAddr != null) {
                     String[] proxyParts = vpsProxyAddr.split(":", 2);
@@ -2418,19 +2515,21 @@ public class CloudProxyPlugin extends Plugin {
                     // primera sin depender del reintento 407 → Authenticator.
                     // SOLO a :2830: en el forward aether la cabecera saldría
                     // del túnel hacia el origen (fuga del token).
-                    authProxy = "2830".equals(proxyParts[1]);
+                    authProxy = vpsSocksProxy == null && isDirectVpsProxyActive();
                 }
                 for (;;) {
                     java.net.URL u = new java.net.URL(current);
                     if (c != null) c.disconnect();
-                    c = (java.net.HttpURLConnection) (vps && !debridDirect
-                            ? (vpsProxy != null ? u.openConnection(vpsProxy) : u.openConnection())
-                            : (net != null ? net.openConnection(u) : u.openConnection()));
+                    if (vpsSocksProxy != null) {
+                        c = (java.net.HttpURLConnection) u.openConnection(vpsSocksProxy);
+                    } else {
+                        c = (java.net.HttpURLConnection) (vps && !debridDirect
+                                ? (vpsProxy != null ? u.openConnection(vpsProxy) : u.openConnection())
+                                : (net != null ? net.openConnection(u) : u.openConnection()));
+                    }
                     c.setConnectTimeout(ct); c.setReadTimeout(rt);
                     c.setInstanceFollowRedirects(false);
                     c.setRequestMethod(method);
-                    if (authProxy) c.setRequestProperty(
-                            "Proxy-Authorization", getProxyAuthHeader());
                     if (headers != null) {
                         java.util.Iterator<String> it = headers.keys();
                         while (it.hasNext()) {
@@ -2438,6 +2537,8 @@ public class CloudProxyPlugin extends Plugin {
                             try { c.setRequestProperty(k, headers.getString(k)); } catch (Exception ignored) {}
                         }
                     }
+                    if (authProxy) c.setRequestProperty(
+                            "Proxy-Authorization", getProxyAuthHeader());
                     if (data != null && !"GET".equalsIgnoreCase(method)) {
                         byte[] bytes = String.valueOf(data).getBytes("UTF-8");
                         c.setDoOutput(true);
@@ -2504,4 +2605,3 @@ public class CloudProxyPlugin extends Plugin {
         return true;
     }
 }
-

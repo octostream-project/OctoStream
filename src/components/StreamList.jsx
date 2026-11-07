@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, getLangPrioritySaved, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
-import { isAlldebridEnabled, hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
+import { hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
+import { useDebridAvailable } from '../hooks/useDebridAvailable.js'
 import { compareStreamsByReliability, subscribeStreamReliability } from '../utils/streamReliability.js'
 
 // Re-render cuando cambia el progreso de los magnets en cola de AllDebrid.
@@ -22,6 +23,7 @@ function useStreamReliabilityTick() {
 export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
   useDebridJobsTick()
   useStreamReliabilityTick()
+  const debridOk = useDebridAvailable()
   // Filtros de la lista (persisten entre fichas): idioma preferido,
   // solo listos en debrid, y solo fuentes con seeders.
   const FILTERS_KEY = 'octostream_stream_filters'
@@ -71,8 +73,8 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   // Sin debrid configurado ni AIOStreams, nada de su mundo aparece:
   // entradas "procesándose" (no se pueden descargar) y enlaces
   // streamType 'debrid' (no se pueden desbloquear sin clave AllDebrid).
-  const canDebrid = hasAnyDebrid()
-  const canUnlock = isAlldebridEnabled()
+  const canDebrid = hasAnyDebrid() && debridOk
+  const canUnlock = debridOk
   const playable = applyFilters(streams
     .filter(s => !s.processing && (canUnlock || s.streamType !== 'debrid'))
     .sort(comparators[sortMode]))

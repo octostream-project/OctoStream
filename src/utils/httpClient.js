@@ -18,17 +18,15 @@ async function requireWarpForNativeTraffic() {
 async function requireDebridRoute() {
   if (!isAndroidNative()) return
   const status = await CloudProxy.getDebridRoute()
-  // Debrid unlocks and playback must keep the same exit IP. A live SSH
-  // forward is independent of the general WARP plane. debrid_direct:
-  // el dispositivo sale por su IP física sin túnel (unlock+playback).
+  // Regla de producto: TODO el tráfico debrid sale por el VPS — unlock y
+  // playback comparten la IP del VPS. Sin VPS configurado/conectado no hay
+  // ruta debrid: nunca WARP ni la IP de casa (fuga + 403 por IP-binding).
+  // Excepción explícita: debrid_direct (pref de pruebas por dispositivo).
   if (status?.direct) return
-  if (status?.ssh) {
-    if (status.vps) return
-    const error = new Error('El túnel SSH al VPS no está conectado; reintenta cuando vuelva.')
-    error.code = 'VPS_NOT_CONNECTED'
-    throw error
-  }
-  await requireWarpForNativeTraffic()
+  if (status?.vps) return
+  const error = new Error('Debrid requiere el VPS conectado; configúralo en Ajustes → WARP.')
+  error.code = 'VPS_NOT_CONNECTED'
+  throw error
 }
 async function nativeRequest(opts) {
   if (opts.vps) {

@@ -75,6 +75,7 @@ describe('httpGetJson', () => {
 
   it('routes debrid API calls through the VPS forward when vps is set', async () => {
     isAndroidNative.mockReturnValue(true)
+    CloudProxy.getDebridRoute.mockResolvedValue({ ssh: true, vps: true })
     CloudProxy.directFetch.mockResolvedValue({ status: 200, data: '{"ok":true}' })
 
     const data = await httpGetJson('https://alldebrid.example/api', {}, undefined, false, true, true)
@@ -109,6 +110,29 @@ describe('httpGetJson', () => {
     expect(CloudProxy.directFetch).not.toHaveBeenCalled()
     expect(CapacitorHttp.request).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects debrid calls when no VPS is configured at all (no WARP fallback)', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.getDebridRoute.mockResolvedValue({ ssh: false, vps: false })
+    globalThis.fetch = vi.fn()
+
+    await expect(httpGetJson('https://api.alldebrid.com/v4/user', {}, undefined, false, false, true))
+      .rejects.toMatchObject({ code: 'VPS_NOT_CONNECTED' })
+    expect(waitForWarp).not.toHaveBeenCalled()
+    expect(CloudProxy.directFetch).not.toHaveBeenCalled()
+    expect(CapacitorHttp.request).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('allows debrid calls in explicit direct mode (debrid_direct pref)', async () => {
+    isAndroidNative.mockReturnValue(true)
+    CloudProxy.getDebridRoute.mockResolvedValue({ ssh: true, vps: false, direct: true })
+    CloudProxy.directFetch.mockResolvedValue({ status: 200, data: '{"ok":true}' })
+
+    const data = await httpGetJson('https://api.alldebrid.com/v4/user', {}, undefined, false, false, true)
+    expect(data).toEqual({ ok: true })
+    expect(CloudProxy.directFetch).toHaveBeenCalledWith(expect.objectContaining({ vps: true }))
   })
 
   it('does not bypass WARP by host for non-TDT traffic to broadcaster domains', async () => {

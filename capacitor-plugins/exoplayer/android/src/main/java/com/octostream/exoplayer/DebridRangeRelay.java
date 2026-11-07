@@ -37,7 +37,9 @@ final class DebridRangeRelay implements AutoCloseable {
     private static final Pattern CONTENT_RANGE = Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)");
 
     private final String url;
-    private final OkHttpClient client;
+    // Uno por transporte SSH paralelo: reparte los chunks Range entre varios
+    // flujos TCP al VPS en vez de saturar uno solo.
+    private final OkHttpClient[] clients;
     private final Headers headers;
     private final long length;
     private final int cacheChunks;
@@ -55,9 +57,9 @@ final class DebridRangeRelay implements AutoCloseable {
     private ServerSocket server;
     private Thread acceptThread;
 
-    private DebridRangeRelay(String url, OkHttpClient client, Headers headers, long length, int cacheChunks) {
+    private DebridRangeRelay(String url, OkHttpClient[] clients, Headers headers, long length, int cacheChunks) {
         this.url = url;
-        this.client = client;
+        this.clients = clients;
         this.headers = headers;
         this.length = length;
         this.cacheChunks = cacheChunks;
@@ -66,6 +68,11 @@ final class DebridRangeRelay implements AutoCloseable {
     // Called off the Android UI thread. A 206 for byte zero is required;
     // no Range or unknown length means the existing direct player is safer.
     static DebridRangeRelay probe(String url, OkHttpClient client, Map<String, String> requestHeaders,
+            int cacheChunks) throws IOException {
+        return probe(url, new OkHttpClient[] { client }, requestHeaders, cacheChunks);
+    }
+
+    static DebridRangeRelay probe(String url, OkHttpClient[] clients, Map<String, String> requestHeaders,
             int cacheChunks) throws IOException {
         Headers.Builder safe = new Headers.Builder();
         for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
@@ -78,14 +85,14 @@ final class DebridRangeRelay implements AutoCloseable {
         safe.set("Accept-Encoding", "identity");
         Headers headers = safe.build();
         Request request = new Request.Builder().url(url).headers(headers).header("Range", "bytes=0-0").build();
-        try (Response response = client.newCall(request).execute()) {
+        try (Response response = clients[0].newCall(request).execute()) {
             String encoding = response.header("Content-Encoding", "identity");
             if (!encoding.equalsIgnoreCase("identity")) throw new IOException("Encoded Range unsupported");
             long size = rangeLength(response, 0, 0);
             if (size <= 1 || response.body() == null || response.body().byteStream().read() < 0) {
                 throw new IOException("Range probe failed");
             }
-            return new DebridRangeRelay(url, client, headers, size, cacheChunks);
+            return new DebridRangeRelay(url, clients, headers, size, cacheChunks);
         }
     }
 
@@ -138,7 +145,7 @@ final class DebridRangeRelay implements AutoCloseable {
     private Response request(long start, long end) throws IOException {
         Request req = new Request.Builder().url(url).headers(headers)
                 .header("Range", "bytes=" + start + "-" + end).build();
-        Call call = client.newCall(req);
+        Call call = clients[(int) ((start / CHUNK) % clients.length)].newCall(req);
         calls.add(call);
         try {
             return call.execute();
@@ -315,7 +322,7 @@ final class DebridRangeRelay implements AutoCloseable {
         try { if (server != null) server.close(); } catch (IOException ignored) {}
         for (Socket socket : sockets) try { socket.close(); } catch (IOException ignored) {}
         for (Call call : calls) call.cancel();
-        client.dispatcher().cancelAll();
+        for (OkHttpClient c : clients) c.dispatcher().cancelAll();
         for (Future<byte[]> task : pending.values()) task.cancel(true);
         downloads.shutdownNow();
         connections.shutdownNow();

@@ -14,7 +14,7 @@ import BookmarkChips from '../components/BookmarkChips.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
-import { isAlldebridEnabled, hasAnyDebrid, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
+import { hasAnyDebrid, debridAvailable, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
 import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob, markDebridTriggered, isDebridTriggered } from '../utils/debridJobs.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
@@ -35,7 +35,7 @@ const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown'
 // Unlock a file-host link (1fichier, etc.) through the configured debrid
 // service. Returns a direct URL or null.
 async function unlockDebrid(url) {
-  if (!isAlldebridEnabled()) return { link: null, error: 'Configura AllDebrid en Ajustes → Debrid.' }
+  if (!(await debridAvailable())) return { link: null, error: 'Debrid no disponible: configura AllDebrid y el VPS en Ajustes.' }
   try {
     const result = await adUnlockLink(url)
     return result?.link
@@ -205,8 +205,8 @@ export default function Details() {
       }
       const needsDebridUnlock = stream.streamType === 'debrid' || !!stream.originalDebridUrl
       const useVpsRoute = !!stream.viaDebrid || stream.streamType === 'debrid'
-      if (needsDebridUnlock && !isAlldebridEnabled()) {
-        toast.error('Requiere AllDebrid (Ajustes → Debrid)')
+      if (needsDebridUnlock && !(await debridAvailable())) {
+        toast.error('Debrid no disponible: configura AllDebrid y el VPS (Ajustes)')
         return
       }
       const displayName = [meta?.name, parseStreamQuality(stream)].filter(Boolean).join(' ')
@@ -660,7 +660,7 @@ export default function Details() {
         toast('Esta fuente ya está en cola del debrid — aparecerá al estar lista')
         return
       }
-      if (stream._magnet && isAlldebridEnabled()) {
+      if (stream._magnet && (await debridAvailable())) {
         toast('Enviando el magnet a AllDebrid…')
         if (hash) markDebridTriggered(hash)
         const id = await adUploadMagnet(stream._magnet)
@@ -776,8 +776,8 @@ export default function Details() {
     // Debrid streams (Palantir 1fichier, etc.): unlock lazily at play time so
     // browsing never burns debrid API calls.
     if (stream.streamType === 'debrid') {
-      if (!isAlldebridEnabled()) {
-        setEpisodeError('Este enlace requiere AllDebrid. Configúralo en Ajustes → Debrid.')
+      if (!(await debridAvailable())) {
+        setEpisodeError('Este enlace requiere debrid por VPS. Configura AllDebrid y el VPS en Ajustes.')
         return
       }
       setEpisodeError(null)

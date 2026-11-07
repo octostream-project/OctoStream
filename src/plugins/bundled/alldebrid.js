@@ -15,7 +15,7 @@
 import { getItemSync, removeItemSync } from '../../utils/storage.js'
 import { pickTorrentEntries } from '../../utils/torrentPick.js'
 import { httpGetJson, httpPostJson } from '../../utils/httpClient.js'
-import { waitForWarp } from '../../utils/warpStatus.js'
+import { CloudProxy } from '../../utils/cloudProxy.js'
 import { isAndroidNative } from '../../utils/platform.js'
 
 const API_BASE = 'https://api.alldebrid.com/v4'
@@ -38,18 +38,10 @@ async function apiGetJson(url) {
 }
 
 // PIN flow: handshake de autenticación — a diferencia de /link/unlock no
-// genera URLs ligadas a la IP de salida. Espera al túnel, pero NO bloquea
-// el PIN si WARP está caído:
-// vincular la cuenta no puede exigir tener la VPN ya configurada.
+// genera URLs ligadas a la IP de salida, pero sigue siendo API debrid:
+// misma regla, todo por el VPS (sin él no hay debrid).
 async function apiGetJsonPin(url) {
-  try { if (isAndroidNative()) await waitForWarp(15000) } catch { /* ignorado */ }
-  try {
-    return await httpGetJson(url, {}, undefined, false, false)
-  } catch (e) {
-    if (e?.code !== 'WARP_NOT_CONNECTED') throw e
-    // Túnel caído o mal configurado: el PIN usa conexión directa.
-    return httpGetJson(url, {}, undefined, true, false)
-  }
+  return apiGetJson(url)
 }
 
 // RealDebrid fue eliminado del proyecto: limpia el token persistido de
@@ -77,6 +69,23 @@ function getAlldebridApiKey() {
 
 export function isAlldebridEnabled() {
   return !!getAlldebridApiKey()
+}
+
+// Disponibilidad real para la UI: clave configurada Y ruta de salida
+// válida. Regla de producto — TODO el tráfico debrid sale por el VPS
+// (unlock y playback comparten su IP); en Android sin VPS conectado el
+// debrid no aparece ni se ofrece. `direct` es el override de pruebas
+// por dispositivo. En web/escritorio no hay VPS: la ruta WARP de sesión
+// ya comparte IP entre unlock y playback, así que solo manda la clave.
+export async function debridAvailable() {
+  if (!isAlldebridEnabled()) return false
+  if (!isAndroidNative()) return true
+  try {
+    const r = await CloudProxy.getDebridRoute()
+    return !!(r?.vps || r?.direct)
+  } catch {
+    return false
+  }
 }
 
 // ¿Hay algún servicio debrid usable? La clave local de AllDebrid o una
@@ -264,7 +273,8 @@ export async function instantAvailability(hashes) {
     let data = null
     for (const base of [API_BASE_41, API_BASE]) {
       const url = apiUrl('/magnet/instant', {}, base)
-      const res = await httpPostJson(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' }, true)
+      const res = await httpPostJson(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' },
+        true, undefined, false, true)
       if (res?.status === 'success') { data = res; break }
     }
     if (!Array.isArray(data?.data?.magnets)) return null

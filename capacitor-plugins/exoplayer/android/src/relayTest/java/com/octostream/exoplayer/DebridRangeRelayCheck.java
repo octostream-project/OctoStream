@@ -89,12 +89,12 @@ public final class DebridRangeRelayCheck {
         String base = "http://127.0.0.1:" + upstream.getAddress().getPort();
         try {
             try {
-                DebridRangeRelay.probe(base + "/no-range", client, Map.of("Cookie", "session=secret"));
+                DebridRangeRelay.probe(base + "/no-range", client, Map.of("Cookie", "session=secret"), 48);
                 throw new AssertionError("Server without Range should fall back");
             } catch (java.io.IOException expected) { /* direct player fallback */ }
 
             try (DebridRangeRelay relay = DebridRangeRelay.probe(
-                    base + "/range", client, Map.of("Cookie", "session=secret"))) {
+                    base + "/range", client, Map.of("Cookie", "session=secret"), 48)) {
                 String local = relay.start();
                 HttpURLConnection seek = connect(local, "bytes=" + (3 * CHUNK + 13) + "-"
                         + (3 * CHUNK + 90));
