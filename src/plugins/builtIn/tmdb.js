@@ -310,6 +310,175 @@ const CATALOG_ENDPOINTS = {
   'movie-hobbit': { endpoint: '/collection/121938', isMovie: true, collection: true },
 }
 
+// Ficha completa de TMDB para un id ya resuelto (misma forma que devuelve
+// el getMeta del plugin). La reutilizan otros plugins — p.ej. el catálogo
+// de anime (Kitsu) enriquece su meta con la ficha TMDB del mismo título.
+export async function getTmdbMeta(kind, tmdbId, signal) {
+  const apiKey = getApiKey()
+  const isMovie = kind === 'movie'
+  const endpoint = isMovie ? `/movie/${tmdbId}` : `/tv/${tmdbId}`
+  const data = await tmdbFetch(endpoint, apiKey, {
+    append_to_response: 'videos,similar,recommendations,credits,alternative_titles,external_ids',
+  }, signal)
+  const base = isMovie ? mapMovie(data, { includeRaw: false }) : mapSeries(data, { includeRaw: false })
+  if (!base) return null
+
+  if (data.genres) {
+    base.genres = data.genres.map(g => g.name)
+  }
+
+  // IMDB id para búsqueda de subtítulos en addons estilo Stremio
+  // (opensubtitles-v3.strem.io solo indexa por tt*)
+  if (data.external_ids && data.external_ids.imdb_id) {
+    base.imdbId = data.external_ids.imdb_id
+  }
+
+  // Origin country + language for anime/dorama detection
+  // (TMDB returns ISO codes: JP, KR, CN, etc.)
+  if (data.origin_country) base.originCountry = data.origin_country
+  if (data.original_language) base.originalLanguage = data.original_language
+  // For movies, production_countries is also available
+  if (!isMovie && data.production_countries) {
+    base.originCountry = base.originCountry || data.production_countries.map(c => c.iso_3166_1)
+  }
+
+  // English title for fallback searches: many dorama/anime providers
+  // index by the English title (e.g. "Bloodhounds") while TMDB es-ES has
+  // the Spanish title ("Perros de caza") and original_name is Korean
+  // ("사냥개들"). Without the English title, providers can't be found.
+  if (data.original_language === 'en') {
+    base.englishName = data.original_title || data.original_name || ''
+  } else if (data.alternative_titles?.results) {
+    const en = data.alternative_titles.results.find(t => t.iso_3166_1 === 'US' || t.iso_3166_1 === 'GB')
+    if (en) base.englishName = en.title
+  }
+
+  if (data.videos && data.videos.results) {
+    const videos = data.videos.results.filter(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
+    // Prefer Spanish trailers (es-ES or es), then any, then English
+    const trailer =
+      videos.find(v => v.iso_639_1 === 'es' && v.iso_3166_1 === 'ES') ||
+      videos.find(v => v.iso_639_1 === 'es' || v.iso_639_1 === 'es-ES') ||
+      videos.find(v => v.iso_639_1 === 'es-419') ||
+      videos[0]
+    if (trailer) {
+      base.trailer = `https://www.youtube.com/embed/${trailer.key}`
+      base.trailerKey = trailer.key
+    }
+  }
+
+  if (data.runtime) {
+    const h = Math.floor(data.runtime / 60)
+    const m = data.runtime % 60
+    base.runtime = h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+
+  if (data.episode_run_time && data.episode_run_time.length > 0) {
+    const ep = data.episode_run_time[0]
+    base.runtime = `${ep}m por episodio`
+  }
+
+  if (data.similar && data.similar.results) {
+    base.similar = data.similar.results.slice(0, 6).map(item =>
+      (isMovie ? mapMovie : mapSeries)(item, { includeRaw: false })
+    )
+  }
+
+  if (data.recommendations && data.recommendations.results) {
+    base.recommendations = data.recommendations.results.slice(0, 6).map(item =>
+      (isMovie ? mapMovie : mapSeries)(item, { includeRaw: false })
+    )
+  }
+
+  // Extract cast from credits (included via append_to_response)
+  if (data.credits && data.credits.cast) {
+    base.cast = data.credits.cast.slice(0, 10).map(c => ({
+      id: c.id,
+      name: c.name,
+      character: c.character,
+      photo: c.profile_path ? getImageUrl(c.profile_path, 'profile', 'w185') : null,
+    }))
+  }
+
+  if (!isMovie && data.seasons) {
+    base.seasonsList = data.seasons
+      .filter(s => s.season_number > 0)
+      .map(s => ({
+        id: `s${s.season_number}`,
+        name: s.name || `Temporada ${s.season_number}`,
+        seasonNumber: s.season_number,
+        episodeCount: s.episode_count,
+        poster: s.poster_path ? getImageUrl(s.poster_path, 'poster', 'w342') : null,
+      }))
+  }
+
+  return base
+}
+
+// Busca la entrada de TMDB que mejor casa con un título externo (Kitsu,
+// etc.). `prefer` sesga movie|tv; `year` desempata cuando el anime se
+// emitió el mismo año que otro título homónimo. Devuelve {kind, tmdbId}
+// o null si ninguna coincidencia supera el umbral.
+const normTitle = s => (s || '')
+  .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9ñ]+/g, ' ').trim()
+
+export async function findTmdbMatch(query, { prefer = 'tv', year = null, signal } = {}) {
+  const apiKey = getApiKey()
+  if (!apiKey || !query) return null
+  const q = normTitle(query)
+  if (q.length < 3) return null
+  const data = await tmdbFetch('/search/multi', apiKey, { query, page: 1 }, signal)
+  const hits = (data.results || []).filter(r => r.media_type === 'tv' || r.media_type === 'movie')
+  if (!hits.length) return null
+
+  const qTokens = new Set(q.split(' ').filter(t => t.length > 2))
+  const hitYear = r => {
+    const d = r.first_air_date || r.release_date || ''
+    return d ? Number(d.slice(0, 4)) : null
+  }
+  const titleScore = (r, qt) => {
+    let best = 0
+    for (const t of [r.name, r.title, r.original_name, r.original_title]) {
+      const nt = normTitle(t)
+      if (!nt) continue
+      if (nt === qt) best = Math.max(best, 100)
+      else if (nt.startsWith(qt) || qt.startsWith(nt)) best = Math.max(best, 70)
+      else if (nt.includes(qt) || qt.includes(nt)) best = Math.max(best, 55)
+      else {
+        const tt = new Set(nt.split(' ').filter(x => x.length > 2))
+        const inter = [...qTokens].filter(x => tt.has(x)).length
+        if (qTokens.size && inter / Math.min(qTokens.size, tt.size) >= 0.8) {
+          best = Math.max(best, 45 + inter)
+        }
+      }
+    }
+    return best
+  }
+
+  let bestHit = null
+  let bestScore = 0
+  for (const r of hits) {
+    const qt = normTitle(query)
+    // Puntúa contra el título pedido y también contra sus variantes
+    // (original/título en otro idioma ya vienen en el propio hit).
+    let score = titleScore(r, qt)
+    if (!score && r.original_name) score = titleScore(r, normTitle(r.original_name)) * 0.9
+    if (!score) continue
+    if (r.media_type === prefer) score += 10
+    const hy = hitYear(r)
+    if (year && hy) {
+      const diff = Math.abs(hy - year)
+      if (diff === 0) score += 15
+      else if (diff === 1) score += 8
+      else if (diff > 3) score -= 20
+    }
+    if (score > bestScore) { bestScore = score; bestHit = r }
+  }
+  if (!bestHit || bestScore < 55) return null
+  return { kind: bestHit.media_type === 'movie' ? 'movie' : 'series', tmdbId: bestHit.id, score: bestScore }
+}
+
 export const tmdbPlugin = createPlugin(
   new PluginManifest({
     id: 'tmdb',
@@ -415,107 +584,10 @@ export const tmdbPlugin = createPlugin(
     getMeta: async ({ type, id, signal }) => {
       const apiKey = getApiKey()
       const match = id.match(/^tmdb-(movie|series)-(\d+)$/)
-      if (!match) return null
+      if (!match || !apiKey) return null
 
       const [, kind, tmdbId] = match
-      const isMovie = kind === 'movie'
-      const endpoint = isMovie ? `/movie/${tmdbId}` : `/tv/${tmdbId}`
-      const data = await tmdbFetch(endpoint, apiKey, {
-        append_to_response: 'videos,similar,recommendations,credits,alternative_titles,external_ids',
-      }, signal)
-      const base = isMovie ? mapMovie(data, { includeRaw: false }) : mapSeries(data, { includeRaw: false })
-      if (!base) return null
-
-      if (data.genres) {
-        base.genres = data.genres.map(g => g.name)
-      }
-
-      // IMDB id para búsqueda de subtítulos en addons estilo Stremio
-      // (opensubtitles-v3.strem.io solo indexa por tt*)
-      if (data.external_ids && data.external_ids.imdb_id) {
-        base.imdbId = data.external_ids.imdb_id
-      }
-
-      // Origin country + language for anime/dorama detection
-      // (TMDB returns ISO codes: JP, KR, CN, etc.)
-      if (data.origin_country) base.originCountry = data.origin_country
-      if (data.original_language) base.originalLanguage = data.original_language
-      // For movies, production_countries is also available
-      if (!isMovie && data.production_countries) {
-        base.originCountry = base.originCountry || data.production_countries.map(c => c.iso_3166_1)
-      }
-
-      // English title for fallback searches: many dorama/anime providers
-      // index by the English title (e.g. "Bloodhounds") while TMDB es-ES has
-      // the Spanish title ("Perros de caza") and original_name is Korean
-      // ("사냥개들"). Without the English title, providers can't be found.
-      if (data.original_language === 'en') {
-        base.englishName = data.original_title || data.original_name || ''
-      } else if (data.alternative_titles?.results) {
-        const en = data.alternative_titles.results.find(t => t.iso_3166_1 === 'US' || t.iso_3166_1 === 'GB')
-        if (en) base.englishName = en.title
-      }
-
-      if (data.videos && data.videos.results) {
-        const videos = data.videos.results.filter(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
-        // Prefer Spanish trailers (es-ES or es), then any, then English
-        const trailer =
-          videos.find(v => v.iso_639_1 === 'es' && v.iso_3166_1 === 'ES') ||
-          videos.find(v => v.iso_639_1 === 'es' || v.iso_639_1 === 'es-ES') ||
-          videos.find(v => v.iso_639_1 === 'es-419') ||
-          videos[0]
-        if (trailer) {
-          base.trailer = `https://www.youtube.com/embed/${trailer.key}`
-          base.trailerKey = trailer.key
-        }
-      }
-
-      if (data.runtime) {
-        const h = Math.floor(data.runtime / 60)
-        const m = data.runtime % 60
-        base.runtime = h > 0 ? `${h}h ${m}m` : `${m}m`
-      }
-
-      if (data.episode_run_time && data.episode_run_time.length > 0) {
-        const ep = data.episode_run_time[0]
-        base.runtime = `${ep}m por episodio`
-      }
-
-      if (data.similar && data.similar.results) {
-        base.similar = data.similar.results.slice(0, 6).map(item =>
-          (isMovie ? mapMovie : mapSeries)(item, { includeRaw: false })
-        )
-      }
-
-      if (data.recommendations && data.recommendations.results) {
-        base.recommendations = data.recommendations.results.slice(0, 6).map(item =>
-          (isMovie ? mapMovie : mapSeries)(item, { includeRaw: false })
-        )
-      }
-
-      // Extract cast from credits (included via append_to_response)
-      if (data.credits && data.credits.cast) {
-        base.cast = data.credits.cast.slice(0, 10).map(c => ({
-          id: c.id,
-          name: c.name,
-          character: c.character,
-          photo: c.profile_path ? getImageUrl(c.profile_path, 'profile', 'w185') : null,
-        }))
-      }
-
-      if (!isMovie && data.seasons) {
-        base.seasonsList = data.seasons
-          .filter(s => s.season_number > 0)
-          .map(s => ({
-            id: `s${s.season_number}`,
-            name: s.name || `Temporada ${s.season_number}`,
-            seasonNumber: s.season_number,
-            episodeCount: s.episode_count,
-            poster: s.poster_path ? getImageUrl(s.poster_path, 'poster', 'w342') : null,
-          }))
-      }
-
-      return base
+      return getTmdbMeta(kind, tmdbId, signal)
     },
 
     getStreams: async ({ type, id, name }) => {
@@ -525,19 +597,22 @@ export const tmdbPlugin = createPlugin(
     search: async ({ query, signal }) => searchMulti(query, signal),
 
     // Load episodes for a specific season from TMDB
-    getSeasonEpisodes: async ({ id, seasonNumber, signal }) => {
+    getSeasonEpisodes: async ({ id, seasonNumber, tmdbId, tmdbKind, signal }) => {
       const apiKey = getApiKey()
+      // Los items de catálogos externos (anime Kitsu) llevan su propia id;
+      // si la ficha se enriqueció con TMDB, tmdbId/tmdbKind apuntan a la
+      // entrada real y sus temporadas son las que muestra la ficha.
       const match = id.match(/^tmdb-(movie|series)-(\d+)$/)
-      if (!match) return []
-      const [, kind, tmdbId] = match
-      if (kind !== 'series') return []
+      const kind = match ? match[1] : tmdbKind
+      const resolvedId = match ? match[2] : tmdbId
+      if (!kind || !resolvedId || kind === 'movie') return []
 
       try {
-        const data = await tmdbFetch(`/tv/${tmdbId}/season/${seasonNumber}`, apiKey, {}, signal)
+        const data = await tmdbFetch(`/tv/${resolvedId}/season/${seasonNumber}`, apiKey, {}, signal)
         if (!data || !data.episodes) return []
 
         return data.episodes.map(ep => ({
-          id: `tmdb-series-${tmdbId}-s${seasonNumber}e${ep.episode_number}`,
+          id: `tmdb-series-${resolvedId}-s${seasonNumber}e${ep.episode_number}`,
           name: ep.name || `Episodio ${ep.episode_number}`,
           season: seasonNumber,
           episode: ep.episode_number,

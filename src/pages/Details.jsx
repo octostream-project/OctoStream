@@ -974,7 +974,7 @@ export default function Details() {
     let eps = episodesCacheRef.current[cacheKey]
     if (!eps) {
       try {
-        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: seasonNum })
+        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: seasonNum, tmdbId: meta.tmdbId, tmdbKind: meta.tmdbKind })
       } catch { eps = null }
       if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
     }
@@ -1052,7 +1052,7 @@ export default function Details() {
     }
     let episodes = null
     try {
-      episodes = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber })
+      episodes = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber, tmdbId: meta.tmdbId, tmdbKind: meta.tmdbKind })
     } catch (e) {
       console.warn('[Details] Failed to load season episodes:', e?.message)
     }
@@ -1116,6 +1116,8 @@ export default function Details() {
       const episodes = await tmdbPlugin.getSeasonEpisodes({
         id: meta.id,
         seasonNumber: season.seasonNumber,
+        tmdbId: meta.tmdbId,
+        tmdbKind: meta.tmdbKind,
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return

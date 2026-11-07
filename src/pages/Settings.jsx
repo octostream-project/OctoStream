@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp, Users } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
 import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
@@ -63,21 +63,34 @@ function parseRemoteHostInput(value) {
   return { host, port }
 }
 
+// Pestañas reorganizadas: ids antiguos redirigidos para no romper enlaces
+// guardados (p.ej. el Sidebar que abre 'profiles').
+const LEGACY_TAB_IDS = {
+  autoplay: 'playback',
+  apis: 'accounts',
+  subs: 'playback',
+  sync: 'devices',
+  profiles: 'devices',
+  misc: 'system',
+}
+
 const TABS = [
-  { id: 'autoplay', name: 'Autoplay', icon: Play },
-  { id: 'apis', name: 'APIs', icon: Key },
-  { id: 'subs', name: 'Subtítulos', icon: Captions },
+  { id: 'general', name: 'General', icon: Monitor },
+  { id: 'playback', name: 'Reproducción', icon: Play },
+  { id: 'accounts', name: 'Cuentas', icon: Key },
   { id: 'debrid', name: 'Debrid', icon: Download },
   { id: 'red', name: 'Red', icon: Globe },
-  { id: 'sync', name: 'Sincronizar', icon: RefreshCw },
-  { id: 'profiles', name: 'Perfiles', icon: Users },
-  { id: 'misc', name: 'Miscelánea', icon: Monitor },
+  { id: 'devices', name: 'Dispositivos', icon: RefreshCw },
+  { id: 'system', name: 'Sistema', icon: SettingsIcon },
 ]
 
 export default function Settings() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [activeTab, setActiveTab] = useState(() => location.state?.settingsTab || 'autoplay')
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = location.state?.settingsTab
+    return LEGACY_TAB_IDS[requested] || requested || 'general'
+  })
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
   const [backupMsg, setBackupMsg] = useState('')
@@ -870,8 +883,9 @@ export default function Settings() {
       )}
 
       <div className="settings-content">
-      {/* Tab: Autoplay */}
-      {activeTab === 'autoplay' && (
+      {/* Tab: Reproducción — autoplay e idioma (los ajustes de
+          subtítulos de la pestaña 'subs' se renderizan también aquí) */}
+      {activeTab === 'playback' && (
         <div className="space-y-6">
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
@@ -976,8 +990,8 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab: APIs */}
-      {activeTab === 'apis' && (
+      {/* Tab: Cuentas — todas las API keys y credenciales de catálogo */}
+      {activeTab === 'accounts' && (
         <div className="space-y-6">
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
@@ -1387,6 +1401,76 @@ export default function Settings() {
             </div>
           </div>
 
+          {/* OpenSubtitles API key */}
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Captions className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">OpenSubtitles API Key</h3>
+                <p className="text-dark-400 text-sm">
+                  Necesaria para buscar y cargar subtítulos en el reproductor
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
+                  <Key size={14} />
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={osApiKey}
+                  onChange={e => setOsApiKey(e.target.value)}
+                  placeholder="Introduce tu OpenSubtitles API key"
+                  className="input w-full"
+                  onKeyDown={e => e.key === 'Enter' && handleOsSave()}
+                />
+              </div>
+
+              {osError && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
+                  <AlertCircle size={16} />
+                  {osError}
+                </div>
+              )}
+
+              {osSaved && (
+                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
+                  <Check size={16} />
+                  Configuración guardada correctamente
+                </div>
+              )}
+
+              <button onClick={handleOsSave} className="btn-primary">
+                <Check size={18} />
+                Guardar
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-dark-700">
+              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key gratuita?</p>
+              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
+                <li>Regístrate en opensubtitles.com</li>
+                <li>Ve a API consumers → Register</li>
+                <li>Copia tu API key</li>
+                <li>Pégala arriba</li>
+              </ol>
+              <a
+                href="https://www.opensubtitles.com/consumers"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
+              >
+                Ir a opensubtitles.com
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
           <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
             <h3 className="text-white font-bold mb-2">Estado de la configuración</h3>
             <div className="space-y-2 text-sm">
@@ -1467,8 +1551,8 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab: Subtítulos */}
-      {activeTab === 'subs' && (
+      {/* Subtítulos — forma parte de Reproducción */}
+      {activeTab === 'playback' && (
         <div className="space-y-6">
           {/* Subtítulos automáticos en español */}
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
@@ -1501,76 +1585,6 @@ export default function Settings() {
                 color="green"
               />
             </label>
-          </div>
-
-          {/* OpenSubtitles API key */}
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Captions className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">OpenSubtitles API Key</h3>
-                <p className="text-dark-400 text-sm">
-                  Necesaria para buscar y cargar subtítulos en el reproductor
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="flex items-center gap-2 text-sm text-dark-300 mb-2">
-                  <Key size={14} />
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={osApiKey}
-                  onChange={e => setOsApiKey(e.target.value)}
-                  placeholder="Introduce tu OpenSubtitles API key"
-                  className="input w-full"
-                  onKeyDown={e => e.key === 'Enter' && handleOsSave()}
-                />
-              </div>
-
-              {osError && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
-                  <AlertCircle size={16} />
-                  {osError}
-                </div>
-              )}
-
-              {osSaved && (
-                <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 rounded-lg p-3">
-                  <Check size={16} />
-                  Configuración guardada correctamente
-                </div>
-              )}
-
-              <button onClick={handleOsSave} className="btn-primary">
-                <Check size={18} />
-                Guardar
-              </button>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-dark-700">
-              <p className="text-dark-400 text-sm mb-2">¿Cómo obtener una API key gratuita?</p>
-              <ol className="text-dark-500 text-sm space-y-1 list-decimal list-inside">
-                <li>Regístrate en opensubtitles.com</li>
-                <li>Ve a API consumers → Register</li>
-                <li>Copia tu API key</li>
-                <li>Pégala arriba</li>
-              </ol>
-              <a
-                href="https://www.opensubtitles.com/consumers"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary-400 text-sm mt-2 hover:text-primary-300"
-              >
-                Ir a opensubtitles.com
-                <ExternalLink size={14} />
-              </a>
-            </div>
           </div>
 
           {/* Estilo de subtítulos: se aplica en caliente al SubtitleView
@@ -2198,9 +2212,8 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab: Sincronizar — los OctoStream de la red se descubren solos
-          (estilo LocalSend); pulsar uno da a elegir Descargar o Enviar. */}
-      {activeTab === 'sync' && (
+      {/* Tab: Dispositivos — sincronización LAN + perfiles de usuario */}
+      {activeTab === 'devices' && (
         <div className="space-y-6">
           {(isAndroidNative() || isElectron()) ? (
             <SyncDevices />
@@ -2217,49 +2230,13 @@ export default function Settings() {
               </div>
             </div>
           )}
+          <ProfileSettings />
         </div>
       )}
 
-      {/* Tab: Miscelánea */}
-      {activeTab === 'profiles' && <ProfileSettings />}
-
-      {activeTab === 'misc' && (
+      {/* Tab: Sistema — plugins, actualizaciones, copia de seguridad y torrents */}
+      {activeTab === 'system' && (
         <div className="space-y-6">
-          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                <Monitor className="text-primary-400" size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold">Tamaño de interfaz</h3>
-                <p className="text-dark-400 text-sm">
-                  Agrandar o reducir toda la UI — útil en TVs/boxes donde se ve pequeña
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                data-tv-card
-                tabIndex={0}
-                onClick={() => setUiScalePct(setUiScale(Math.max(80, uiScale - 10)))}
-                className="btn-secondary px-4 py-2 font-bold"
-              >−</button>
-              <span className="text-white font-mono text-lg w-16 text-center">{uiScale}%</span>
-              <button
-                data-tv-card
-                tabIndex={0}
-                onClick={() => setUiScalePct(setUiScale(Math.min(200, uiScale + 10)))}
-                className="btn-secondary px-4 py-2 font-bold"
-              >+</button>
-              <button
-                data-tv-card
-                tabIndex={0}
-                onClick={() => setUiScalePct(setUiScale(0))}
-                className="btn-ghost px-3 py-2 text-sm"
-              >Auto</button>
-            </div>
-          </div>
-
           <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
@@ -2424,6 +2401,46 @@ export default function Settings() {
               />
             </label>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: General — apariencia y preferencias de dispositivo */}
+      {activeTab === 'general' && (
+        <div className="space-y-6">
+          <div className="bg-dark-800 rounded-xl p-5 border border-dark-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
+                <Monitor className="text-primary-400" size={22} />
+              </div>
+              <div>
+                <h3 className="text-white font-bold">Tamaño de interfaz</h3>
+                <p className="text-dark-400 text-sm">
+                  Agrandar o reducir toda la UI — útil en TVs/boxes donde se ve pequeña
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(Math.max(80, uiScale - 10)))}
+                className="btn-secondary px-4 py-2 font-bold"
+              >−</button>
+              <span className="text-white font-mono text-lg w-16 text-center">{uiScale}%</span>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(Math.min(200, uiScale + 10)))}
+                className="btn-secondary px-4 py-2 font-bold"
+              >+</button>
+              <button
+                data-tv-card
+                tabIndex={0}
+                onClick={() => setUiScalePct(setUiScale(0))}
+                className="btn-ghost px-3 py-2 text-sm"
+              >Auto</button>
             </div>
           </div>
 

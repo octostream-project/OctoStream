@@ -4402,7 +4402,9 @@ public class ExoPlayerPlugin extends Plugin {
 
     /**
      * Importar configuración: picker SAF de un archivo JSON. Devuelve
-     * {content} con el texto del archivo (tope 4 MB — un backup nunca es más).
+     * {content} con el texto del archivo (tope 32 MB — un backup con
+     * historial largo, posiciones localpos_* y varios perfiles puede
+     * superar los 4 MB originales).
      */
     @PluginMethod
     public void importConfig(PluginCall call) {
@@ -4446,7 +4448,7 @@ public class ExoPlayerPlugin extends Plugin {
             int total = 0, r;
             while ((r = in.read(buf)) >= 0) {
                 total += r;
-                if (total > 4 * 1024 * 1024) { call.reject("archivo demasiado grande"); return; }
+                if (total > 32 * 1024 * 1024) { call.reject("archivo demasiado grande"); return; }
                 bos.write(buf, 0, r);
             }
             JSObject ret = new JSObject();

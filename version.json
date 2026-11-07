@@ -1,18 +1,18 @@
 {
-  "versionCode": 20925,
-  "versionName": "2.09.25",
+  "versionCode": 20929,
+  "versionName": "2.09.29",
   "minCode": 0,
-  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-arm64-v8a.apk",
-  "sha256": "e36ae7d32e86eab62f58739766f2b7244a8fbb8ebb0ddaf01d86b276abd9fdd3",
-  "notes": "Deportes por fecha y resultados; diagnostico seguro del reproductor; descargas pausables y reintentables; vista previa de sincronizacion LAN; mejoras TV; DocumaniaTV, YouTube/NewPipe, Plataformas y fuentes.",
+  "apkUrl": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.29/octostream-2.09.29-arm64-v8a.apk",
+  "sha256": "78e3e5ed2536506e6f2c84b0ec79a7fccb9913d5b806a1970ba8a5a647dffaae",
+  "notes": "",
   "apkUrls": {
-    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-armeabi-v7a.apk",
-    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.25/octostream-2.09.25-x86_64.apk"
+    "arm64-v8a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.29/octostream-2.09.29-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.29/octostream-2.09.29-armeabi-v7a.apk",
+    "x86_64": "https://github.com/octostream-project/OctoStream/releases/download/v2.09.29/octostream-2.09.29-x86_64.apk"
   },
   "sha256s": {
-    "arm64-v8a": "e36ae7d32e86eab62f58739766f2b7244a8fbb8ebb0ddaf01d86b276abd9fdd3",
-    "armeabi-v7a": "3505706f0ad4475e05e4076605bbdc77dcd9f9d600c1bc65ca54d2b988f1c8f7",
-    "x86_64": "da26ff26792ae4d2d73295a6283f87cf2ca8b2a30c4ab0b5f70d001d27cd6f20"
+    "arm64-v8a": "78e3e5ed2536506e6f2c84b0ec79a7fccb9913d5b806a1970ba8a5a647dffaae",
+    "armeabi-v7a": "1c3b00e3f7f6497a65d62d606a7052f4b7b8052b8b1322bec0ac03e1056c5501",
+    "x86_64": "d430f5bb25bcfbbbab8e656782e6f319bc68b88f4476876022366ae3a2795143"
   }
 }
