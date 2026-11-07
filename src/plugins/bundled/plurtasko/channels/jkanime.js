@@ -370,4 +370,40 @@ export const jkanime = {
     }
     return items
   },
+
+  // Últimos episodios publicados: portada de jkanime.net, tarjetas
+  // <a href="/slug/N/"> con alt "Título - N" y data-animepic con el póster.
+  // Devuelve items de la serie madre (id = ficha) con el nº de episodio.
+  async getLatestEpisodes({ top = 20, signal } = {}) {
+    const html = await fetchHtml(HOST, signal)
+    if (!html) return []
+    const items = []
+    const seen = new Set()
+    const matches = findMultipleMatches(html, '<a href="(https://jkanime\\.net/[a-z0-9-]+/(\\d+)/?)"[^>]*>([\\s\\S]*?)</a>')
+    for (const m of matches) {
+      const epUrl = m[1]
+      const episode = parseInt(m[2], 10)
+      const block = m[3]
+      if (!episode || seen.has(epUrl)) continue
+      seen.add(epUrl)
+      const parentUrl = epUrl.replace(/\/\d+\/?$/, '/')
+      let title = decodeEntities(
+        findSingleMatch(block, 'alt="([^"]+)"') ||
+        findSingleMatch(block, '<h5[^>]*>([^<]+)</h5>') || ''
+      ).replace(/\s*-\s*\d+\s*$/, '').trim()
+      const poster = findSingleMatch(block, 'data-animepic="([^"]+)"') || findSingleMatch(block, 'src="([^"]+)"')
+      if (!title) continue
+      items.push({
+        id: `jkanime:${parentUrl}`,
+        type: CONTENT_TYPES.ANIME,
+        name: `${title} E${episode}`,
+        title,
+        episode,
+        poster: poster ? absoluteUrl(poster, HOST) : null,
+        url: epUrl,
+        pluginId: 'plurtasko',
+      })
+    }
+    return items.slice(0, top)
+  },
 }

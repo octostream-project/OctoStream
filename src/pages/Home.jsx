@@ -209,6 +209,20 @@ export default function Home() {
       await Promise.allSettled(initial.map(loadOne))
       if (myReqId === reqIdRef.current) setLoading(false)
 
+      // Anime tab: latest published episodes scraped from provider sites
+      // (JKAnime, AnimeAV1, LatAnime). Loaded separately so a down site
+      // never delays the standard rows.
+      if (tab === 'anime' && myReqId === reqIdRef.current) {
+        try {
+          const items = await pluginManager.getCatalogContent('plurtasko', 'plurtasko-latest-anime', 'anime', 0, 20)
+          if (myReqId !== reqIdRef.current) return
+          const safeItems = (items || []).filter(item => isAllowedInProfile(item, profile))
+          if (safeItems.length > 0) {
+            setRows(prev => [{ title: 'Últimos episodios', items: safeItems, key: 'anime-latest-eps' }, ...prev])
+          }
+        } catch (e) { /* skip */ }
+      }
+
       // Streaming-service catalogs are opt-in and loaded separately so they
       // don't delay the standard Home rows or query unselected platforms.
       const selectedPlatforms = new Set(homePrefs.platforms?.[tab] || [])

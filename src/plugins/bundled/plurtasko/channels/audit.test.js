@@ -29,13 +29,18 @@ import { subtorrents } from './subtorrents.js'
 import { estrenoscinesaa } from './estrenoscinesaa.js'
 import { cinemitas } from './cinemitas.js'
 import { bloghorror } from './bloghorror.js'
+import { latanime } from './latanime.js'
+import { repelis28 } from './repelis28.js'
+import { poseidonhd2 } from './poseidonhd2.js'
+import { sololatino } from './sololatino.js'
 
 const CHANNELS = [
   animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd,
   animeav1, hdfull, entrepeliculasyseries, serieskao, flizzmovies,
   pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt,
   tioanime, jkanime, dontorrent, grantorrent, subtorrents,
-  estrenoscinesaa, cinemitas, bloghorror,
+  estrenoscinesaa, cinemitas, bloghorror, latanime, repelis28,
+  poseidonhd2, sololatino,
 ]
 
 const QUERY_BY_KIND = {

@@ -193,8 +193,7 @@ export const kitsuFactory = (config) => {
         // plugins resolve by series name + episode number. Season and episode
         // cards reuse the series poster/backdrop (Kitsu has no per-episode art).
         const epPoster = base.backdrop || tmdb?.backdrop || base.poster
-        const isMovie = isMovieSubtype
-        if (!isMovie && tmdb?.seasonsList?.length > 0) {
+        if (!isMovieSubtype && tmdb?.seasonsList?.length > 0) {
           // Con ficha TMDB mandan sus temporadas (los cours reales con
           // nombre y recuento). No se genera meta.episodes plano: Details
           // crea placeholders por temporada y findProviderEpisode convierte
@@ -214,10 +213,10 @@ export const kitsuFactory = (config) => {
           // catálogo incompleto): la ficha TMDB trae episode_count por
           // temporada y el número de episodio del anime es continuo entre
           // cours, así que la suma equivale al conteo absoluto.
-          if (!epCount && !isMovie && tmdb?.seasonsList?.length) {
+          if (!epCount && !isMovieSubtype && tmdb?.seasonsList?.length) {
             epCount = tmdb.seasonsList.reduce((n, s) => n + (s.episodeCount || 0), 0)
           }
-          if (isMovie || epCount === 1) {
+          if (isMovieSubtype || epCount === 1) {
             base.seasonsList = [{ seasonNumber: 1, name, episodeCount: 1, poster: base.poster }]
             base.episodes = [{ id: `${base.id}-ep1`, season: 1, episode: 1, name, poster: epPoster }]
           } else if (epCount > 0) {

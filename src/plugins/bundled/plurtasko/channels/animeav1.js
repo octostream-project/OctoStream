@@ -272,4 +272,41 @@ export const animeav1 = {
       return true
     })
   },
+
+  // Últimos episodios publicados: portada de animeav1, tarjetas
+  // <a href="/ver/<slug>/<N>" title="Ver Título episodio N"> con data-src al póster.
+  async getLatestEpisodes({ top = 20, signal } = {}) {
+    const html = await fetchHtml(HOST, signal)
+    if (!html) return []
+    const items = []
+    const seen = new Set()
+    const matches = findMultipleMatches(html, '(<a[^>]*href="https?://[^"]*/ver/([a-z0-9-]+)/(\\d+)"[^>]*>)([\\s\\S]*?)</a>')
+    for (const m of matches) {
+      const tag = m[1]
+      const epUrl = findSingleMatch(tag, 'href="([^"]+)"')
+      const slug = m[2]
+      const episode = parseInt(m[3], 10)
+      const block = m[4]
+      if (!episode || !slug || !epUrl || seen.has(epUrl)) continue
+      seen.add(epUrl)
+      const parentUrl = `${HOST}anime/${slug}`
+      let title = decodeEntities(
+        findSingleMatch(tag, 'title="Ver\\s+([^"]+?)\\s+episodio\\s+\\d+"') ||
+        findSingleMatch(block, 'alt="([^"]+)"') || ''
+      ).replace(/\s*episodio\s*\d+\s*$/i, '').trim()
+      const poster = findSingleMatch(block, 'data-src="([^"]+)"') || findSingleMatch(block, 'src="([^"]+)"')
+      if (!title) continue
+      items.push({
+        id: `animeav1:${parentUrl}`,
+        type: CONTENT_TYPES.ANIME,
+        name: `${title} E${episode}`,
+        title,
+        episode,
+        poster: poster ? absoluteUrl(poster, HOST) : null,
+        url: epUrl,
+        pluginId: 'plurtasko',
+      })
+    }
+    return items.slice(0, top)
+  },
 }

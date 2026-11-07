@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Key, Check, ExternalLink, AlertCircle, Film, Captions, Monitor, Play, ArrowUp, ArrowDown, Languages, Download, Globe, Image, RefreshCw, Puzzle, ChevronRight, Magnet, List, TrendingUp } from 'lucide-react'
-import { invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
+import { invalidateImageQuality, invalidateTmdbApiKey } from '../plugins/builtIn/tmdb.js'
 import { traktDeviceCode, traktDeviceToken, traktMe, clearTraktTokens, getTraktToken } from '../plugins/builtIn/extProviders.js'
 import OctoLoader from '../components/OctoLoader.jsx'
 import Toggle from '../components/ui/Toggle.jsx'
@@ -275,6 +275,7 @@ export default function Settings() {
     const key = apiKey.trim()
     if (!key) {
       localStorage.removeItem('octostream_tmdb_key')
+      invalidateTmdbApiKey()
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       return
@@ -290,6 +291,7 @@ export default function Settings() {
         return
       }
       localStorage.setItem('octostream_tmdb_key', key)
+      invalidateTmdbApiKey()
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {

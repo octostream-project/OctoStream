@@ -970,14 +970,10 @@ export default function Details() {
   const playEpisodeByNumber = async (seasonNum, epNum, { resumeAt = null } = {}) => {
     const season = meta?.seasonsList?.find(s => s.seasonNumber === seasonNum)
     if (!season) return
-    const cacheKey = `${meta.id}-s${seasonNum}`
-    let eps = episodesCacheRef.current[cacheKey]
-    if (!eps) {
-      try {
-        eps = await tmdbPlugin.getSeasonEpisodes({ id: meta.id, seasonNumber: seasonNum, tmdbId: meta.tmdbId, tmdbKind: meta.tmdbKind })
-      } catch { eps = null }
-      if (eps && eps.length > 0) episodesCacheRef.current[cacheKey] = eps
-    }
+    // fetchSeasonEpisodes ya cubre caché → provider → TMDB → placeholders;
+    // antes solo probaba TMDB y si fallaba el resume/"siguiente episodio"
+    // moría en silencio sin mostrar nada.
+    const eps = await fetchSeasonEpisodes(seasonNum)
     const ep = eps?.find(e => e.season === seasonNum && e.episode === epNum)
     if (!ep) return
     setSelectedSeason(season)
@@ -1007,8 +1003,13 @@ export default function Details() {
       if (!(savedProgress > 0.05 && savedProgress < 0.95) || !(savedTime > 0)) return
     }
     autoplayConsumedRef.current = true
-    if (direct) playEpisodeByNumber(location.state.resumeSeason, location.state.resumeEpisode)
-    else resumeSavedEpisode()
+    // setTimeout(0): el resume reproduce y cambia de vista — hacerlo en el
+    // mismo tick del efecto disparaba set-state-in-effect y podía pelear
+    // con el primer pintado de la ficha.
+    setTimeout(() => {
+      if (direct) playEpisodeByNumber(location.state.resumeSeason, location.state.resumeEpisode)
+      else resumeSavedEpisode()
+    }, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, location.state?.autoplay, historyItem, savedProgress, savedTime])
 

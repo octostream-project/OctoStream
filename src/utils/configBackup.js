@@ -9,6 +9,8 @@ import { isAndroidNative } from './platform.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
 import { setItemSync } from './storage.js'
+import { invalidateTmdbApiKey, invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
+import { invalidateLangPriority } from './streamMeta.js'
 
 const PREFIX = 'octostream_'
 const BACKUP_NAME = 'octostream-backup.json'
@@ -208,5 +210,11 @@ export async function importSettings(categories = null) {
   }
   // En Android la clave SSH recién restaurada sube al Keystore del plugin.
   await applyReceivedSshCreds()
+  // Las claves/cachés en memoria (TMDB api key, calidad de imagen, prioridad
+  // de idioma de streams) no se enteran del localStorage restaurado — sin
+  // esto la app seguiría usando los valores antiguos hasta reiniciar.
+  try { invalidateTmdbApiKey() } catch { /* ignorado */ }
+  try { invalidateImageQuality() } catch { /* ignorado */ }
+  try { invalidateLangPriority() } catch { /* ignorado */ }
   return count
 }

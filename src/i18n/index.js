@@ -16,11 +16,6 @@ const builtInTranslations = {
   en: enPack.translations,
 }
 
-const customTranslations = {
-  es: {},
-  en: {},
-}
-
 let listeners = new Set()
 
 function subscribeLanguage(callback) {
@@ -30,29 +25,6 @@ function subscribeLanguage(callback) {
 
 function notifyLanguageChange() {
   listeners.forEach(cb => cb())
-}
-
-export const getLanguagePacks = () => Object.values(languagePacks)
-
-const registerLanguagePack = (pack) => {
-  if (!pack?.id || !pack?.translations) return false
-  languagePacks[pack.id] = pack
-  builtInTranslations[pack.id] = { ...builtInTranslations[pack.id], ...pack.translations }
-  return true
-}
-
-export const loadLanguagePacksFromManager = (manager) => {
-  const plugins = manager.getLanguagePlugins()
-  plugins.forEach(plugin => {
-    const pack = plugin.getLanguagePack?.()
-    if (pack) registerLanguagePack(pack)
-  })
-  notifyLanguageChange()
-}
-
-export const addCustomTranslations = (lang, translations) => {
-  if (!customTranslations[lang]) customTranslations[lang] = {}
-  Object.assign(customTranslations[lang], translations)
 }
 
 // Cacheado: t() se llama cientos de veces por pantalla y antes cada una
@@ -72,8 +44,7 @@ export const setLanguage = (lang) => {
 
 export const t = (key, fallback = key) => {
   const lang = getLanguage()
-  return customTranslations[lang]?.[key]
-    || builtInTranslations[lang]?.[key]
+  return builtInTranslations[lang]?.[key]
     || builtInTranslations['en']?.[key]
     || fallback
 }

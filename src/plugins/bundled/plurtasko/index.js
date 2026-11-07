@@ -30,6 +30,9 @@ import { monoschinos } from './channels/monoschinos.js'
 import { pelispedia } from './channels/pelispedia.js'
 import { pelisplushd } from './channels/pelisplushd.js'
 import { repelishd } from './channels/repelishd.js'
+import { repelis28 } from './channels/repelis28.js'
+import { poseidonhd2 } from './channels/poseidonhd2.js'
+import { sololatino } from './channels/sololatino.js'
 import { animeav1 } from './channels/animeav1.js'
 import { hdfull, hasHdfullCredentials } from './channels/hdfull.js'
 import { entrepeliculasyseries } from './channels/entrepeliculasyseries.js'
@@ -41,6 +44,7 @@ import { seriesyonkissx } from './channels/seriesyonkissx.js'
 import { doramaexpress } from './channels/doramaexpress.js'
 import { doramasyt } from './channels/doramasyt.js'
 import { tioanime } from './channels/tioanime.js'
+import { latanime } from './channels/latanime.js'
 import { jkanime } from './channels/jkanime.js'
 import { dontorrent } from './channels/dontorrent.js'
 import { grantorrent } from './channels/grantorrent.js'
@@ -58,7 +62,7 @@ import { getItemSync } from '../../../utils/storage.js'
 // Registry of all available channels.
 // doramedplay excluido: el sitio pasó a ser 100% VIP (páginas de contenido
 // redirigen a /vip/); catálogo y búsqueda siguen públicos pero no hay streams.
-const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas, pelispanda, magistv24, documaniatv]
+const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelisplushd, repelishd, animeav1, entrepeliculasyseries, serieskao, flizzmovies, pelisgratishd, gnulatv, seriesyonkissx, doramaexpress, doramasyt, tioanime, jkanime, dontorrent, grantorrent, subtorrents, bloghorror, estrenoscinesaa, cinemitas, pelispanda, magistv24, documaniatv, latanime, repelis28, poseidonhd2]
 
 // Canales caídos (auditoría feb/2026): fuera del registro activo para que no
 // consuman tiempo de búsqueda ni devuelvan errores al usuario. Se conserva el
@@ -73,7 +77,10 @@ const CHANNELS = [hdfull, animeflvone, animeyt, monoschinos, pelispedia, pelispl
 // - grantorrent: .zip/.foo/.mov/.net/.one sin DNS; los .lol/.wf actuales
 //   son dominios aparcados (parklogic).
 // RepelisHD se reactivó migrando a CineHDPlus (cinehdplus.work + playlatinsrc).
-const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd', 'grantorrent'])
+const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyseries', 'pelisgratishd', 'pelisplushd', 'grantorrent',
+  // sololatino: ficha/búsqueda/episodios OK pero sus players son embed69 por
+  // episodio (tt{id}-SxE) y el token api/player-url exige CSRF — 0 streams.
+  'sololatino'])
 
 // Canales torrent: se desactivan con el ajuste "Búsquedas torrent" de
 // Settings (octostream_torrent_search). Apagado = no se consultan los sitios
@@ -210,6 +217,10 @@ function validateById(channel, resultUrl, tmdbId, imdbId) {
   return null
 }
 
+// Virtual catalog id: merges "últimos episodios" from every channel that
+// implements getLatestEpisodes (jkanime, animeav1, latanime…).
+const LATEST_EPISODES_CATALOG_ID = 'plurtasko-latest-anime'
+
 // Build a flat catalog list from all channels.
 function buildCatalogs() {
   const catalogs = []
@@ -218,7 +229,40 @@ function buildCatalogs() {
       catalogs.push(cat)
     }
   }
+  catalogs.push({ id: LATEST_EPISODES_CATALOG_ID, name: 'Últimos episodios', type: CONTENT_TYPES.ANIME })
   return catalogs
+}
+
+// Merge each channel's latest-episodes list round-robin, deduping the same
+// episode published on several sites by normalized title + episode number.
+const normLatestKey = (title, ep) =>
+  `${(title || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\b(castellano|latino|subtitulado|vose|espanol|english|japones)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim()}#${ep || ''}`
+
+async function latestEpisodesCatalog({ top = 20 }) {
+  const sources = await Promise.allSettled(
+    activeChannels()
+      .filter(ch => typeof ch.getLatestEpisodes === 'function')
+      .map(ch => ch.getLatestEpisodes({ top }))
+  )
+  const lists = sources.filter(r => r.status === 'fulfilled').map(r => r.value || [])
+  const seen = new Set()
+  const merged = []
+  for (let i = 0; merged.length < top; i++) {
+    let added = false
+    for (const list of lists) {
+      const item = list[i]
+      if (!item) continue
+      const key = normLatestKey(item.title, item.episode)
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(item)
+      added = true
+    }
+    if (!added) break
+  }
+  return merged
 }
 
 // Normalize a title for comparison: lowercase, strip articles, punctuation, accents.
@@ -470,7 +514,8 @@ function findProviderEpisode(episodes, season, episode, seasonsList) {
     }
     match = episodes.find(item => Number(item.episode) === absolute)
   }
-  if (!match && Number(season) > 1 && episodes.every(item => (Number(item.season) || 1) === 1)) {
+  if (!match && Number(season) > 1 && episodes.every(item => (Number(item.season) || 1) === 1) &&
+      (!seasonsList || seasonsList.length <= 1)) {
     match = episodes.find(item => Number(item.episode) === Number(episode))
   }
   return match || null
@@ -968,6 +1013,9 @@ export const plurtaskoFactory = (config) => {
 
     async getCatalog({ id, skip = 0, top = 50 }) {
       try {
+        if (id === LATEST_EPISODES_CATALOG_ID) {
+          return await latestEpisodesCatalog({ top: Math.max(top, 20) })
+        }
         const channel = channelForCatalog(id)
         if (!channel) return []
         return await channel.getCatalog({ id, skip, top })
@@ -1303,10 +1351,10 @@ export const plurtaskoFactory = (config) => {
               }
             }
 
-            // Para series: si se pasa season/episode, obtener los episodios del canal
-            // y buscar el episodio concreto
+            // Para series/anime/dorama: si se pasa season/episode, obtener los
+            // episodios del canal y buscar el episodio concreto
             let rawStreams = null
-            if (type === CONTENT_TYPES.SERIES && season != null && ch._getEpisodes) {
+            if (isEpisodicType(type) && season != null && ch._getEpisodes) {
               try {
                 const episodes = await ch._getEpisodes(match.url)
                 if (episodes && episodes.length > 0) {
@@ -1332,8 +1380,13 @@ export const plurtaskoFactory = (config) => {
                   }
 
                   // Si todavía no hay match y el provider solo tiene S1,
-                  // intentar por número de episodio directo (sin temporada)
-                  if (!ep && season > 1 && episodes.every(e => e.season === 1)) {
+                  // intentar por número de episodio directo (sin temporada).
+                  // Con seasonsList multi-temporada (TMDB en anime) el número
+                  // relativo siempre pertenece a la primera temporada en un
+                  // provider absoluto — mejor no devolver nada que el episodio
+                  // equivocado.
+                  if (!ep && season > 1 && episodes.every(e => e.season === 1) &&
+                      (!seasonsList || seasonsList.length <= 1)) {
                     console.log(`[Plurtasko] Channel ${ch.id}: provider only has S1, trying episode ${episode}`)
                     ep = episodes.find(e => e.episode === episode)
                   }
@@ -1360,11 +1413,11 @@ export const plurtaskoFactory = (config) => {
               rawStreams = await ch.getStreams({ type, id: match.id, season, episode, debridEnabled })
             }
             if ((!rawStreams || rawStreams.length === 0) &&
-                (type === CONTENT_TYPES.SERIES || type === CONTENT_TYPES.MOVIE) &&
+                (isEpisodicType(type) || type === CONTENT_TYPES.MOVIE) &&
                 // Si el match declara otra temporada (páginas por temporada,
                 // ej. DonTorrent), no caer al fallback de episodios: cogería
                 // un capítulo de la temporada equivocada.
-                !(type === CONTENT_TYPES.SERIES && match.season != null && season != null && match.season !== season)) {
+                !(isEpisodicType(type) && match.season != null && season != null && match.season !== season)) {
               try {
                 // getMeta loads the series/anime HTML and lets each channel
                 // parse its own episode format. For movies, many anime sites
@@ -1384,7 +1437,8 @@ export const plurtaskoFactory = (config) => {
                     ep = episodes.find(e => e.episode === absEp) ||
                          episodes.find(e => e.episode === absEp - 1)
                   }
-                  if (!ep && season > 1 && episodes.every(e => e.season === 1)) {
+                  if (!ep && season > 1 && episodes.every(e => e.season === 1) &&
+                      (!seasonsList || seasonsList.length <= 1)) {
                     ep = episodes.find(e => e.episode === episode)
                   }
                   if (ep) targetEpisode = ep

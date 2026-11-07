@@ -39,11 +39,26 @@ export function btihOf(magnet) {
   return (String(magnet || '').match(/btih:([a-zA-Z0-9]{32,40})/i)?.[1] || '').toLowerCase()
 }
 
+// Los jobs nunca se borraban: maps crecían durante toda la sesión. Se
+// conservan los recientes (un magnet "ready" puede reproducirse horas
+// después) y se podan los terminados más viejos.
+const JOBS_MAX = 100
+function pruneJobs() {
+  if (jobs.size <= JOBS_MAX) return
+  for (const [id, job] of jobs) {
+    if (jobs.size <= JOBS_MAX) break
+    if (job.status === 'processing') continue
+    jobs.delete(id)
+    for (const [h, jid] of byHash) if (jid === id) byHash.delete(h)
+  }
+}
+
 export function trackMagnet(id, infoHash, name) {
   const hash = String(infoHash || '').toLowerCase()
   const job = { id, infoHash: hash, name: name || '', progress: 0, status: 'processing', links: null }
   jobs.set(id, job)
   if (hash) byHash.set(hash, id)
+  pruneJobs()
   ensurePolling()
   notify()
   return job

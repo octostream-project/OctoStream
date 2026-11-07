@@ -26,11 +26,11 @@ const AGENT = 'octostream_stream'
 // Solo host para logs: las URLs de unlock llevan token en el query.
 const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
 
-// Las llamadas a AllDebrid van por el túnel WARP en Android: el provider
-// registra la IP de salida y liga los links desbloqueados a ella. Con VPS
-// SSH configurado sale por el túnel dedicado (vps:true) — unlock y playback
-// comparten la misma IP de salida del VPS; sin VPS cae al proxy WARP y la
-// consistencia IP se mantiene igual.
+// Las llamadas a AllDebrid van por el túnel del VPS en Android: el provider
+// registra la IP de salida y liga los links desbloqueados a ella. Regla de
+// producto — TODO el tráfico debrid sale por el VPS (vps:true); sin VPS
+// conectado httpClient rechaza con VPS_NOT_CONNECTED (nunca WARP ni IP de
+// casa). `debrid_direct` es el override de pruebas por dispositivo.
 async function apiGetJson(url) {
   // httpClient comprueba VPS/WARP en el momento de la petición. Un waitForWarp
   // previo duplicaba el gate y bloqueaba hasta 20s con SSH vivo y WARP caído.
@@ -39,10 +39,7 @@ async function apiGetJson(url) {
 
 // PIN flow: handshake de autenticación — a diferencia de /link/unlock no
 // genera URLs ligadas a la IP de salida, pero sigue siendo API debrid:
-// misma regla, todo por el VPS (sin él no hay debrid).
-async function apiGetJsonPin(url) {
-  return apiGetJson(url)
-}
+// misma regla, todo por el VPS (sin él no hay debrid). Usa apiGetJson.
 
 // RealDebrid fue eliminado del proyecto: limpia el token persistido de
 // instalaciones viejas para que no quede credencial huérfana en el dispositivo.
@@ -111,7 +108,7 @@ export function hasAnyDebrid() {
 export async function getPin() {
   try {
     const url = `${API_BASE}/pin/get?agent=${AGENT}`
-    const data = await apiGetJsonPin(url)
+    const data = await apiGetJson(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       pin: data.data.pin,
@@ -129,7 +126,7 @@ export async function getPin() {
 export async function checkPin(pin, check) {
   try {
     const url = `${API_BASE}/pin/check?agent=${AGENT}&pin=${encodeURIComponent(pin)}&check=${encodeURIComponent(check)}`
-    const data = await apiGetJsonPin(url)
+    const data = await apiGetJson(url)
     if (data.status !== 'success') throw new Error(data.error?.message || 'Unknown error')
     return {
       activated: data.data.activated === true,
