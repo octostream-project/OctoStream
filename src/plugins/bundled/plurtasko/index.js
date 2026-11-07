@@ -93,8 +93,18 @@ const DEAD_CHANNEL_IDS = new Set(['gnulatv', 'doramaexpress', 'entrepeliculasyse
 // de torrents ni se emiten streams .torrent/magnet.
 const TORRENT_CHANNEL_IDS = new Set(['dontorrent', 'grantorrent', 'subtorrents', 'bloghorror', 'pelispanda'])
 const torrentSearchEnabled = () => getItemSync('octostream_torrent_search') !== 'false'
+// Canales que fallan repetidamente en esta sesión (sitio caído en caliente):
+// se excluyen de activeChannels() sin reiniciar la app. Umbral alto para no
+// matar un canal por un timeout aislado.
+const sessionDeadChannels = new Set()
+const channelErrorCounts = new Map()
+const noteChannelError = (id) => {
+  const n = (channelErrorCounts.get(id) || 0) + 1
+  channelErrorCounts.set(id, n)
+  if (n >= 5) sessionDeadChannels.add(id)
+}
 const activeChannels = () => {
-  const alive = CHANNELS.filter(ch => !DEAD_CHANNEL_IDS.has(ch.id))
+  const alive = CHANNELS.filter(ch => !DEAD_CHANNEL_IDS.has(ch.id) && !sessionDeadChannels.has(ch.id))
   return torrentSearchEnabled()
     ? alive
     : alive.filter(ch => !TORRENT_CHANNEL_IDS.has(ch.id))
@@ -226,6 +236,7 @@ function validateById(channel, resultUrl, tmdbId, imdbId) {
 // Virtual catalog id: merges "últimos episodios" from every channel that
 // implements getLatestEpisodes (jkanime, animeav1, latanime…).
 const LATEST_EPISODES_CATALOG_ID = 'plurtasko-latest-anime'
+const LATEST_SERIES_CATALOG_ID = 'plurtasko-latest-series'
 
 // Build a flat catalog list from all channels.
 function buildCatalogs() {
@@ -236,6 +247,7 @@ function buildCatalogs() {
     }
   }
   catalogs.push({ id: LATEST_EPISODES_CATALOG_ID, name: 'Últimos episodios', type: CONTENT_TYPES.ANIME })
+  catalogs.push({ id: LATEST_SERIES_CATALOG_ID, name: 'Últimos episodios', type: CONTENT_TYPES.SERIES })
   return catalogs
 }
 
@@ -246,10 +258,10 @@ const normLatestKey = (title, ep) =>
     .replace(/\b(castellano|latino|subtitulado|vose|espanol|english|japones)\b/g, '')
     .replace(/[^a-z0-9]+/g, ' ').trim()}#${ep || ''}`
 
-async function latestEpisodesCatalog({ top = 20 }) {
+async function latestEpisodesCatalog({ top = 20, type } = {}) {
   const sources = await Promise.allSettled(
     activeChannels()
-      .filter(ch => typeof ch.getLatestEpisodes === 'function')
+      .filter(ch => typeof ch.getLatestEpisodes === 'function' && (!type || ch.types.includes(type)))
       .map(ch => ch.getLatestEpisodes({ top }))
   )
   const lists = sources.filter(r => r.status === 'fulfilled').map(r => r.value || [])
@@ -260,6 +272,7 @@ async function latestEpisodesCatalog({ top = 20 }) {
     for (const list of lists) {
       const item = list[i]
       if (!item) continue
+      if (type && item.type && item.type !== type) continue
       const key = normLatestKey(item.title, item.episode)
       if (seen.has(key)) continue
       seen.add(key)
@@ -1020,7 +1033,10 @@ export const plurtaskoFactory = (config) => {
     async getCatalog({ id, skip = 0, top = 50 }) {
       try {
         if (id === LATEST_EPISODES_CATALOG_ID) {
-          return await latestEpisodesCatalog({ top: Math.max(top, 20) })
+          return await latestEpisodesCatalog({ top: Math.max(top, 20), type: CONTENT_TYPES.ANIME })
+        }
+        if (id === LATEST_SERIES_CATALOG_ID) {
+          return await latestEpisodesCatalog({ top: Math.max(top, 20), type: CONTENT_TYPES.SERIES })
         }
         const channel = channelForCatalog(id)
         if (!channel) return []
@@ -1406,6 +1422,7 @@ export const plurtaskoFactory = (config) => {
                   }
                 }
               } catch (e) {
+                noteChannelError(ch.id)
                 console.warn(`[Plurtasko] Channel ${ch.id}: failed to get episodes:`, e?.message)
               }
             }
@@ -1482,6 +1499,7 @@ export const plurtaskoFactory = (config) => {
               if (onBatch) onBatch(sortHdfull(allStreams))
             }
           } catch (e) {
+            noteChannelError(ch.id)
             logWarn(`[Plurtasko] Channel ${ch.id} failed:`, String(e?.message || e))
           }
         })
@@ -1630,7 +1648,7 @@ export const plurtaskoFactory = (config) => {
               sig => ch.search({ query, type: type || undefined, signal: sig }),
               20000, signal,
               `channel search timeout`
-            ).catch(() => []))
+            ).catch((e) => { noteChannelError(ch.id); return [] }))
         )
         return rankSearchResults(query, results.flat())
       } catch (e) {

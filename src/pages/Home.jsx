@@ -223,6 +223,18 @@ export default function Home() {
         } catch (e) { /* skip */ }
       }
 
+      // Series tab: latest published episodes (PoseidonHD2 /episodios).
+      if (tab === 'series' && myReqId === reqIdRef.current) {
+        try {
+          const items = await pluginManager.getCatalogContent('plurtasko', 'plurtasko-latest-series', 'series', 0, 20)
+          if (myReqId !== reqIdRef.current) return
+          const safeItems = (items || []).filter(item => isAllowedInProfile(item, profile))
+          if (safeItems.length > 0) {
+            setRows(prev => [{ title: 'Últimos episodios', items: safeItems, key: 'series-latest-eps' }, ...prev])
+          }
+        } catch (e) { /* skip */ }
+      }
+
       // Streaming-service catalogs are opt-in and loaded separately so they
       // don't delay the standard Home rows or query unselected platforms.
       const selectedPlatforms = new Set(homePrefs.platforms?.[tab] || [])

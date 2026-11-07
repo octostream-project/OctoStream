@@ -183,4 +183,44 @@ export const poseidonhd2 = {
     if (!html) return []
     return parsePlayerOptions(html, signal)
   },
+
+  // Últimos episodios subidos — /episodios → sección "Destacadas" con
+  // <article> (alt=título, srcSet=póster, span.Year="SxE"). El href ya es
+  // la URL del episodio (/temporada/S/episodio/E) — se emite la ficha de
+  // serie + season/episode para que Details abra el capítulo correcto.
+  async getLatestEpisodes({ limit = 10, signal } = {}) {
+    const html = cleanHtml(await fetchHtml(`${HOST}episodios`, signal))
+    if (!html) return []
+    const bloque = findSingleMatch(html, '<h1[\\s\\S]*?Destacadas</h3>') || html
+    const items = []
+    for (const m of findMultipleMatches(bloque, '<article[\\s\\S]*?</article>')) {
+      const block = m[0]
+      const epUrl = findSingleMatch(block, '<a href="([^"]+)"')
+      let title = findSingleMatch(block, 'alt="([^"]+)"')
+      if (!epUrl || !title) continue
+      const abs = absoluteUrl(epUrl, HOST)
+      const serieUrl = abs.replace(/\/temporada\/.*$/, '')
+      if (serieUrl === abs) continue // no es episodio de serie
+      const sx = findSingleMatch(block, '<span class="[^"]*Year[^"]*">([^<]*)</span>')
+      // El "SxE" puede venir en el span o embebido en el título ("Doctora X 1x9")
+      const sm = (sx && sx.match(/(\d+)\s*x\s*(\d+)/i)) || title.match(/(\d{1,2})\s*x\s*(\d{1,3})/i)
+      const season = sm ? parseInt(sm[1], 10) : 1
+      const episode = sm ? parseInt(sm[2], 10) : 1
+      title = decodeEntities(title).trim()
+      const poster = findSingleMatch(block, 'srcSet="([^&"]+)')
+      items.push({
+        id: `poseidonhd2:${serieUrl}`,
+        name: title,
+        title,
+        type: CONTENT_TYPES.SERIES,
+        poster: poster ? absoluteUrl(poster, HOST) : null,
+        url: serieUrl,
+        season,
+        episode,
+        pluginId: 'plurtasko',
+      })
+      if (items.length >= limit) break
+    }
+    return items
+  },
 }
