@@ -92,7 +92,7 @@ export default function ContinueWatching() {
               navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster, currentTime: item.currentTime || 0 } } })
             } else {
               // Siguiente episodio calculado → Details lo reproduce directo.
-              navigate(`/details/${item.type}/${item.id}`, {
+              navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`, {
                 state: nextEp
                   ? { autoplay: true, resumeSeason: nextEp.season, resumeEpisode: nextEp.episode }
                   : { autoplay: true },

@@ -73,7 +73,7 @@ export default function History() {
               >
                 {/* Poster thumbnail - clickable to go to details */}
                 <button
-                  onClick={() => navigate(`/details/${item.type}/${item.id}`)}
+                  onClick={() => navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`)}
                   tabIndex={0}
                   data-tv-card
                   className="flex-shrink-0"
@@ -90,7 +90,7 @@ export default function History() {
 
                 {/* Info - clickable to go to details */}
                 <button
-                  onClick={() => navigate(`/details/${item.type}/${item.id}`)}
+                  onClick={() => navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`)}
                   tabIndex={0}
                   data-tv-card
                   className="tv-no-scale flex-1 min-w-0 text-left"
@@ -124,7 +124,7 @@ export default function History() {
 
                 {/* Play button */}
                 <button
-                  onClick={() => navigate(`/details/${item.type}/${item.id}`, { state: { autoplay: true } })}
+                  onClick={() => navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`, { state: { autoplay: true } })}
                   tabIndex={0}
                   data-tv-card
                   className="p-2.5 rounded-lg text-primary-400 hover:bg-primary-900/30 transition-colors flex-shrink-0"

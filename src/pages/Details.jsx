@@ -1669,7 +1669,7 @@ export default function Details() {
           <h2 className="text-xl font-bold text-white mb-4">Similar</h2>
           <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
             {meta.similar.map(item => {
-              const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
+              const goToItem = () => navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`)
               return (
                 <div
                   key={`${item.type}-${item.id}`}
@@ -1700,7 +1700,7 @@ export default function Details() {
           <h2 className="text-xl font-bold text-white mb-4">Recomendaciones</h2>
           <div data-tv-row className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
             {meta.recommendations.map(item => {
-              const goToItem = () => navigate(`/details/${item.type}/${item.id}`)
+              const goToItem = () => navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`)
               return (
                 <div
                   key={`${item.type}-${item.id}`}

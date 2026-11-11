@@ -207,7 +207,13 @@ export const poseidonhd2 = {
       const season = sm ? parseInt(sm[1], 10) : 1
       const episode = sm ? parseInt(sm[2], 10) : 1
       title = decodeEntities(title).trim()
-      const poster = findSingleMatch(block, 'srcSet="([^&"]+)')
+      // Next.js image optimizer: srcSet/src = /_next/image?url=<tmdb-url-encoded>&w=…
+      const imgRaw = findSingleMatch(block, 'srcSet="([^"]+)"') || findSingleMatch(block, 'src="([^"]+)"') || ''
+      const imgFirst = imgRaw.split(',')[0].trim()
+      const imgParam = imgFirst.match(/[?&]url=([^&\s]+)/)
+      let poster = null
+      if (imgParam) { try { poster = decodeURIComponent(imgParam[1]) } catch { poster = null } }
+      if (!poster) poster = imgFirst.startsWith('http') ? imgFirst : null
       items.push({
         id: `poseidonhd2:${serieUrl}`,
         name: title,

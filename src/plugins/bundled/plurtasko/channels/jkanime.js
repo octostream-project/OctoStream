@@ -126,10 +126,33 @@ export const jkanime = {
       episode: 1,
       url: `${url.replace(/\/$/, '')}/1/`,
     }]
-    if (!token) return firstEpisode()
+    // Fallback: el AJAX de episodios falla con HTTP 419 (CSRF) — parsear los
+    // enlaces /<slug>/<N>/ que ya vienen en el HTML SSR de la ficha.
+    const htmlEpisodes = () => {
+      const slug = url.replace(/\/+$/, '').split('/').pop()
+      if (!slug) return null
+      // La ficha solo enlaza el último capítulo (/slug/N/) — el resto carga
+      // por AJAX (que da 419). Los episodios son secuenciales: generar 1..max.
+      let maxEp = 0
+      for (const m of findMultipleMatches(html, `href="(?:https://jkanime\\.net)?/${slug}/(\\d+)/?"`)) {
+        const nro = parseInt(m[1], 10)
+        if (nro > maxEp) maxEp = nro
+      }
+      if (!maxEp) return null
+      const base = url.replace(/\/$/, '')
+      const eps = []
+      for (let nro = 1; nro <= maxEp; nro++) {
+        const epUrl = `${base}/${nro}/`
+        eps.push({ id: `jkanime:${epUrl}`, name: `Episodio ${nro}`, season: 1, episode: nro, url: epUrl })
+      }
+      return eps
+    }
+    const fallbackEps = () => htmlEpisodes() || firstEpisode()
+
+    if (!token) return fallbackEps()
 
     const idSerie = findSingleMatch(html, '/ajax/episodes/(\\d+)/')
-    if (!idSerie) return firstEpisode()
+    if (!idSerie) return fallbackEps()
 
     // Fetch episodes via AJAX
     const ajaxUrl = `${HOST}ajax/episodes/${idSerie}/1/`
@@ -138,10 +161,10 @@ export const jkanime = {
       'X-Requested-With': 'XMLHttpRequest',
       'X-CSRF-TOKEN': token,
     })
-    if (!ajaxResult) return firstEpisode()
+    if (!ajaxResult) return fallbackEps()
 
     const total = findSingleMatch(ajaxResult, '"total":(\\d+)')
-    if (!total) return firstEpisode()
+    if (!total) return fallbackEps()
 
     // Parse episodes from JSON response
     const matches = findMultipleMatches(ajaxResult, '"number":(\\d+),"title":"([^"]+)"')
@@ -192,7 +215,7 @@ export const jkanime = {
       if (nextMatches.length === 0) break
     }
 
-    return episodes
+    return episodes.length ? episodes : fallbackEps()
   },
 
   async getStreams({ id }) {

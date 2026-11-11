@@ -165,7 +165,7 @@ export default function RemotePlayReceiver() {
   return (
     <>
       {pairReq && (
-        <Modal onClose={() => answerPair(false)} labelledBy="pair-title" closeOnBackdrop={false} z="z-[90]">
+        <Modal onClose={() => answerPair(false)} labelledBy="pair-title" closeOnBackdrop={false} z="z-[120]">
             <h2 id="pair-title" className="text-lg font-semibold text-white mb-2">Solicitud de dispositivo</h2>
             <p className="text-dark-300 text-sm mb-1">
               <span className="font-medium text-primary-300">{pairReq.alias || pairReq.ip}</span>{' '}

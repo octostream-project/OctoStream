@@ -88,7 +88,7 @@ function ContentCard({ item }) {
       navigate('/youtube', { state: { video: { url: item.id.slice(3), name: item.name, thumbnailUrl: item.poster } } })
       return
     }
-    navigate(`/details/${item.type}/${item.id}`)
+    navigate(`/details/${item.type}/${encodeURIComponent(item.id)}`)
   }, [navigate, item])
 
   if (!isAllowedInProfile(item, profile)) return null
