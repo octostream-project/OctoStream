@@ -2,7 +2,7 @@ import { useStore } from '../store/useStore.js'
 import { BACKUP_CATEGORIES, ALL_CATEGORIES, categoryOf, collectSettings } from './configBackup.js'
 import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
 import { getProfiles, persistProfiles, profileDataKey } from './profiles.js'
-import { getJsonSync, setJsonSync } from './storage.js'
+import { getJsonSync, setJsonSync, getItemSync, setItemSync } from './storage.js'
 
 // Mismas secciones que la copia de seguridad: listas, historial, cuentas y
 // resto de ajustes. La selección se guarda por dispositivo.
@@ -75,7 +75,7 @@ export function previewRemoteSync(remoteData, categories = null) {
 
 export function loadSyncCategories() {
   try {
-    return normalizeSyncCategories(JSON.parse(localStorage.getItem(SYNC_CATEGORIES_KEY) || 'null'))
+    return normalizeSyncCategories(JSON.parse(getItemSync(SYNC_CATEGORIES_KEY) || 'null'))
   } catch {
     return [...DEFAULT_SYNC_CATEGORIES]
   }
@@ -83,7 +83,7 @@ export function loadSyncCategories() {
 
 export function saveSyncCategories(categories) {
   const cats = normalizeSyncCategories(categories)
-  try { localStorage.setItem(SYNC_CATEGORIES_KEY, JSON.stringify(cats)) } catch { /* storage bloqueado */ }
+  try { setItemSync(SYNC_CATEGORIES_KEY, JSON.stringify(cats)) } catch { /* storage bloqueado */ }
   return cats
 }
 
@@ -297,8 +297,8 @@ export function mergeRemoteData(remoteData, categories = null) {
       if (key.startsWith('octostream_profile_')) continue
       if (!wanted.has(categoryOf(key))) continue
       try {
-        if (localStorage.getItem(key) !== value) {
-          localStorage.setItem(key, value)
+        if (getItemSync(key) !== value) {
+          setItemSync(key, value)
           counts.settings++
         }
       } catch { /* localStorage puede estar lleno o bloqueado */ }

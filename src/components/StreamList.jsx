@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getItemSync, setItemSync } from '../utils/storage.js'
 import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, getLangPrioritySaved, isDownloadableDirect } from '../utils/streamMeta.js'
 import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
@@ -28,7 +29,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   // solo listos en debrid, y solo fuentes con seeders.
   const FILTERS_KEY = 'octostream_stream_filters'
   const [filters, setFilters] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') || {} } catch { return {} }
+    try { return JSON.parse(getItemSync(FILTERS_KEY) || '{}') || {} } catch { return {} }
   })
   if (!streams?.length) return null
   // Entradas "processing" (debrid descargando el magnet): atenuadas con
@@ -58,11 +59,11 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
   const sortMode = comparators[filters.sort] ? filters.sort : 'language'
   const toggleFilter = (k) => setFilters(f => {
     const next = { ...f, [k]: !f[k] }
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)) } catch { /* sin storage */ }
+    try { setItemSync(FILTERS_KEY, JSON.stringify(next)) } catch { /* sin storage */ }
     return next
   })
   const prefLang = (() => {
-    try { return (JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')[0]) || 'ESP' } catch { return 'ESP' }
+    try { return (JSON.parse(getItemSync('octostream_lang_priority') || '[]')[0]) || 'ESP' } catch { return 'ESP' }
   })()
   const applyFilters = (list) => list.filter(s => {
     if (filters.lang && parseStreamLang(s) !== prefLang) return false
@@ -100,7 +101,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
           value={sortMode}
           onChange={e => setFilters(f => {
             const next = { ...f, sort: e.target.value }
-            try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
+            try { setItemSync(FILTERS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
             return next
           })}
           className="rounded-lg border border-dark-700 bg-dark-800 px-2 py-1.5 text-sm text-white focus:border-primary-500 focus:outline-none"

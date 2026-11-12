@@ -6,19 +6,20 @@ import { pickLocalVideo, pickLocalSubtitle, playLocalFile } from '../utils/exoPl
 import { isAndroidNative, isElectron } from '../utils/platform.js'
 import { Play, Link2, Plus, Trash2, Clapperboard, Usb, Subtitles, X } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState.jsx'
+import { getItemSync, setItemSync } from '../utils/storage.js'
 
 const STORAGE_KEY = 'octostream_custom_streams'
 
 function loadCustomStreams() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+    return JSON.parse(getItemSync(STORAGE_KEY) || '[]')
   } catch {
     return []
   }
 }
 
 function saveCustomStreams(streams) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(streams))
+  setItemSync(STORAGE_KEY, JSON.stringify(streams))
 }
 
 export default function AddStream() {

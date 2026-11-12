@@ -18,6 +18,7 @@ import {
   getStreamingPlatformCatalogContent,
   STREAMING_GENRES,
 } from '../plugins/bundled/streamingCatalogs.js'
+import { getItemSync, setItemSync } from '../utils/storage.js'
 
 // Only TMDB catalogs are shown on the Home page.
 // Plurtasko channels are accessible from the Search and Details pages.
@@ -113,7 +114,7 @@ const TAB_CATS = {
 
 const HOME_PREFS_KEY = 'octostream_home_layout'
 const readHomePrefs = () => {
-  try { return JSON.parse(localStorage.getItem(HOME_PREFS_KEY) || '{}') || {} } catch { return {} }
+  try { return JSON.parse(getItemSync(HOME_PREFS_KEY) || '{}') || {} } catch { return {} }
 }
 const orderedCategories = (categories, prefs, tab) => {
   const saved = prefs.order?.[tab] || []
@@ -276,7 +277,7 @@ export default function Home() {
   const cats = allCats.filter(c => !hiddenCats.has(c.id))
   const saveHomePrefs = (next) => {
     setHomePrefs(next)
-    try { localStorage.setItem(HOME_PREFS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
+    try { setItemSync(HOME_PREFS_KEY, JSON.stringify(next)) } catch { /* storage lleno */ }
   }
   const moveCategory = (index, direction) => {
     const order = allCats.map(c => c.id)

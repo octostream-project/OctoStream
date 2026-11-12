@@ -7,6 +7,7 @@ import Modal from './ui/Modal.jsx'
 import { getSyncServer, getDiscovered, scanDevices, pullSync, pushSync, forgetTokens } from '../utils/remotePlay.js'
 import { mergeRemoteData, localSyncPayload, previewRemoteSync, SYNC_CATEGORIES, loadSyncCategories, saveSyncCategories } from '../utils/syncMerge.js'
 import { logAdKeyPropagation } from '../plugins/bundled/alldebrid.js'
+import { getItemSync, setItemSync } from '../utils/storage.js'
 
 // Panel de sincronización LAN (estilo LocalSend): los demás OctoStream de la
 // red se descubren solos por UDP y aparecen aquí; al pulsar uno se elige
@@ -25,7 +26,7 @@ export default function SyncDevices() {
   const [sweeping, setSweeping] = useState(false)
   const [status, setStatus] = useState('idle') // idle | connecting | syncing | done | error
   const [message, setMessage] = useState('')
-  const [lastSync, setLastSync] = useState(() => localStorage.getItem('octostream_last_sync') || '')
+  const [lastSync, setLastSync] = useState(() => getItemSync('octostream_last_sync') || '')
   const [pairedDevices, setPairedDevices] = useState([])
   const [confirmForget, setConfirmForget] = useState(false)
   const [pendingImport, setPendingImport] = useState(null)
@@ -66,7 +67,7 @@ export default function SyncDevices() {
       setStatus('done')
       setMessage(`Datos recibidos y unidos a los tuyos${syncCountsText(counts) ? ` (${syncCountsText(counts)})` : ''}`)
       const now = new Date().toLocaleString('es-ES')
-      localStorage.setItem('octostream_last_sync', now)
+      setItemSync('octostream_last_sync', now)
       setLastSync(now)
     } catch (e) {
       console.error('[Sync] Parse error:', e.message)
@@ -203,7 +204,7 @@ export default function SyncDevices() {
     setStatus('done')
     setMessage(msg)
     const now = new Date().toLocaleString('es-ES')
-    localStorage.setItem('octostream_last_sync', now)
+    setItemSync('octostream_last_sync', now)
     setLastSync(now)
     refreshPaired()
   }

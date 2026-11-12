@@ -6,7 +6,7 @@ import { getBundledPlugin, isBundledPlugin } from './bundled/index.js'
 import { logError, logWarn } from '../utils/logger.js'
 import { validateExternalPluginConfig } from './schemas.js'
 import { withCancelTimeout } from './utils.js'
-import { getJsonSync, setJsonSync, removeItemSync, getItemSync } from '../utils/storage.js'
+import { getJsonSync, setJsonSync, removeItemSync, getItemSync, setItemSync } from '../utils/storage.js'
 
 const META_TIMEOUT_MS = 8000
 const SEARCH_TIMEOUT_MS = 15000
@@ -405,7 +405,7 @@ export class PluginManager {
     if (PluginManager._diskLoaded) return
     PluginManager._diskLoaded = true
     try {
-      const raw = JSON.parse(localStorage.getItem(PluginManager.STREAM_DISK_KEY) || '[]')
+      const raw = JSON.parse(getItemSync(PluginManager.STREAM_DISK_KEY) || '[]')
       const now = Date.now()
       for (const [k, v] of raw) {
         if (v?.ts && now - v.ts < PluginManager.STREAM_DISK_TTL_MS
@@ -421,7 +421,7 @@ export class PluginManager {
       const arr = [...PluginManager.streamCache.entries()]
         .filter(([, v]) => !v.streams?.some(s => s._noCache))
         .slice(-30)
-      localStorage.setItem(PluginManager.STREAM_DISK_KEY, JSON.stringify(arr))
+      setItemSync(PluginManager.STREAM_DISK_KEY, JSON.stringify(arr))
     } catch { /* cuota llena */ }
   }
 
@@ -433,7 +433,7 @@ export class PluginManager {
   // Clear stale stream cache (called on app init)
   static clearStreamCache() {
     PluginManager.streamCache.clear()
-    try { localStorage.removeItem(PluginManager.STREAM_DISK_KEY) } catch { /* sin storage */ }
+    try { removeItemSync(PluginManager.STREAM_DISK_KEY) } catch { /* sin storage */ }
   }
 
   async getStreams(type, id, name, signal, genres, season, episode, originalName, originCountry, originalLanguage, englishName, year) {

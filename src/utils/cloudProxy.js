@@ -12,6 +12,7 @@
 // antiguos y podía dejar la app bloqueada en "Conectando WARP".
 
 import { CloudProxy as NativeCloudProxy } from '@octostream/cloud-proxy'
+import { setItemSync } from './storage.js'
 
 function api() {
   const bridge = window.octostream?.cloudProxy
@@ -21,7 +22,7 @@ function api() {
 // Intención del usuario respecto a la red: el watchdog de warpStatus
 // solo reconecta un plano caído cuando la última acción fue encender.
 const NET_INTENT_KEY = 'octostream_net_intent'
-const setNetIntent = (on) => { try { localStorage.setItem(NET_INTENT_KEY, on ? '1' : '0') } catch { /* sin storage */ } }
+const setNetIntent = (on) => { try { setItemSync(NET_INTENT_KEY, on ? '1' : '0') } catch { /* sin storage */ } }
 export const CloudProxy = {
   // opts.exitLoc: ubicación de salida WARP — "auto" (colo más cercano),
   // "random" (doble salto, otro país cualquiera) o código ISO ("DE","NL"…)

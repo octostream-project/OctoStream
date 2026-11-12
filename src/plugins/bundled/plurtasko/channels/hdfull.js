@@ -7,14 +7,15 @@ import { CONTENT_TYPES } from '../../../base.js'
 import { fetchHtml, postHtml, decodeEntities, absoluteUrl, hostOf } from '../http.js'
 import { findSingleMatch, findMultipleMatches, normalizeServer } from '../scraper.js'
 import { httpPostWithHeaders, httpGetWithHeaders } from '../../../../utils/httpClient.js'
+import { getItemSync, setItemSync } from '../../../../utils/storage.js'
 
 // Credenciales HDFull: se leen de localStorage (configuradas por el usuario en
 // Settings) con fallback a las variables de entorno de Vite (.env).
 // Se leen en cada ensureLogin() para que un cambio en Settings surta efecto
 // sin tener que reconstruir la app.
 function getHdfullCredentials() {
-  const lsUser = localStorage.getItem('octostream_hdfull_username') || ''
-  const lsPass = localStorage.getItem('octostream_hdfull_password') || ''
+  const lsUser = getItemSync('octostream_hdfull_username') || ''
+  const lsPass = getItemSync('octostream_hdfull_password') || ''
   return {
     username: lsUser || import.meta.env?.VITE_HDFULL_USERNAME || '',
     password: lsPass || import.meta.env?.VITE_HDFULL_PASSWORD || '',
@@ -55,14 +56,14 @@ const DOMAINS = [
 const HOST_KEY = 'octostream_host_hdfull'
 let activeDomain = (() => {
   try {
-    const saved = typeof localStorage !== 'undefined' && localStorage.getItem(HOST_KEY)
+    const saved = typeof localStorage !== 'undefined' && getItemSync(HOST_KEY)
     if (saved && DOMAINS.some(d => d.replace(/\/+$/, '') === saved.replace(/\/+$/, ''))) return saved
   } catch { /* storage no disponible */ }
   return DOMAINS[0]
 })()
 function setActiveDomain(d) {
   activeDomain = d
-  try { typeof localStorage !== 'undefined' && localStorage.setItem(HOST_KEY, d) } catch { /* noop */ }
+  try { typeof localStorage !== 'undefined' && setItemSync(HOST_KEY, d) } catch { /* noop */ }
 }
 let loggedIn = false
 let sessionCookies = ''  // Store session cookies from login response

@@ -14,7 +14,7 @@ import { refreshWarpStatus, subscribeWarpStatus, getWarpDetails, warpStrictEnabl
 import { getUiScale, setUiScale } from '../utils/uiScale.js'
 import { checkForUpdate } from '../utils/appUpdater.js'
 import { exportSettings, importSettings, BACKUP_CATEGORIES } from '../utils/configBackup.js'
-import { setItemSync, removeItemSync } from '../utils/storage.js'
+import { getItemSync, setItemSync, removeItemSync } from '../utils/storage.js'
 import { invalidateLangPriority } from '../utils/streamMeta.js'
 import { getSubStyle, saveSubStyle } from '../utils/subStyle.js'
 import ProfileSettings from '../components/ProfileSettings.jsx'
@@ -28,7 +28,7 @@ const LANG_LABELS = {
 
 function getDefaultLangPriority() {
   try {
-    const saved = JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')
+    const saved = JSON.parse(getItemSync('octostream_lang_priority') || '[]')
     if (Array.isArray(saved) && saved.length === 4) return saved
   } catch { /* ignorado */ }
   return ['ESP', 'LAT', 'SUB', 'ENG']
@@ -127,17 +127,17 @@ export default function Settings() {
   }, [menuLayout, mobileMenu])
 
   // API keys
-  const [apiKey, setApiKey] = useState(localStorage.getItem('octostream_tmdb_key') || '')
+  const [apiKey, setApiKey] = useState(getItemSync('octostream_tmdb_key') || '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const [osApiKey, setOsApiKey] = useState(localStorage.getItem('octostream_opensubs_apikey') || '')
+  const [osApiKey, setOsApiKey] = useState(getItemSync('octostream_opensubs_apikey') || '')
   const [osSaved, setOsSaved] = useState(false)
   const [osError, setOsError] = useState('')
   const [subStyle, setSubStyle] = useState(() => getSubStyle())
   // Subtítulos en español automáticos cuando el audio no es español
   // (pipeline: OpenSubtitles → traducción IA → transcripción — duck.ai,
   // sin clave extra).
-  const [autoSubs, setAutoSubs] = useState(localStorage.getItem('octostream_autosubs') !== 'false')
+  const [autoSubs, setAutoSubs] = useState(getItemSync('octostream_autosubs') !== 'false')
   const updSubStyle = patch => {
     const next = { ...subStyle, ...patch }
     setSubStyle(next)
@@ -145,15 +145,15 @@ export default function Settings() {
   }
 
   // Catálogos temáticos externos (MDBList / Trakt)
-  const [mdbApiKey, setMdbApiKey] = useState(localStorage.getItem('octostream_mdblist_key') || '')
+  const [mdbApiKey, setMdbApiKey] = useState(getItemSync('octostream_mdblist_key') || '')
   const [mdbSaved, setMdbSaved] = useState(false)
   const [mdbError, setMdbError] = useState('')
-  const [traktKey, setTraktKey] = useState(localStorage.getItem('octostream_trakt_key') || '')
-  const [traktSecret, setTraktSecret] = useState(localStorage.getItem('octostream_trakt_secret') || '')
-  const [traktLists, setTraktLists] = useState(localStorage.getItem('octostream_trakt_lists') || '')
+  const [traktKey, setTraktKey] = useState(getItemSync('octostream_trakt_key') || '')
+  const [traktSecret, setTraktSecret] = useState(getItemSync('octostream_trakt_secret') || '')
+  const [traktLists, setTraktLists] = useState(getItemSync('octostream_trakt_lists') || '')
   const [traktSaved, setTraktSaved] = useState(false)
   const [traktError, setTraktError] = useState('')
-  const [traktUser, setTraktUser] = useState(localStorage.getItem('octostream_trakt_user') || '')
+  const [traktUser, setTraktUser] = useState(getItemSync('octostream_trakt_user') || '')
 
   // PIN flow state (Trakt OAuth device)
   const [traktPin, setTraktPin] = useState(null) // { userCode, verificationUrl, expiresIn, deviceCode }
@@ -163,7 +163,7 @@ export default function Settings() {
   const traktPinPollingRef = useRef(false)
 
   // AllDebrid API key
-  const [adApiKey, setAdApiKey] = useState(localStorage.getItem('octostream_alldebrid_key') || '')
+  const [adApiKey, setAdApiKey] = useState(getItemSync('octostream_alldebrid_key') || '')
   const [adSaved, setAdSaved] = useState(false)
   // Auditoría: cuenta AllDebrid + historial de desbloqueos + propagación.
   const [adAudit, setAdAudit] = useState(null)
@@ -182,18 +182,18 @@ export default function Settings() {
   const adPinTimerRef = useRef(null)
   const adPinPollingRef = useRef(false)
   // HDFull credentials
-  const [hdfullUser, setHdfullUser] = useState(localStorage.getItem('octostream_hdfull_username') || '')
-  const [hdfullPass, setHdfullPass] = useState(localStorage.getItem('octostream_hdfull_password') || '')
+  const [hdfullUser, setHdfullUser] = useState(getItemSync('octostream_hdfull_username') || '')
+  const [hdfullPass, setHdfullPass] = useState(getItemSync('octostream_hdfull_password') || '')
   const [hdfullSaved, setHdfullSaved] = useState(false)
   const [hdfullTesting, setHdfullTesting] = useState(false)
   const [hdfullTestResult, setHdfullTestResult] = useState('') // 'ok' | 'fail' | ''
 
   // AIOStreams (agregador tipo POV/Stremio: uuid + password por Basic auth)
-  const [aioInstance, setAioInstance] = useState(localStorage.getItem('octostream_aiostreams_instance') || 'https://aiostreams.elfhosted.com')
-  const [aioUuid, setAioUuid] = useState(localStorage.getItem('octostream_aiostreams_uuid') || '')
-  const [aioPass, setAioPass] = useState(localStorage.getItem('octostream_aiostreams_password') || '')
+  const [aioInstance, setAioInstance] = useState(getItemSync('octostream_aiostreams_instance') || 'https://aiostreams.elfhosted.com')
+  const [aioUuid, setAioUuid] = useState(getItemSync('octostream_aiostreams_uuid') || '')
+  const [aioPass, setAioPass] = useState(getItemSync('octostream_aiostreams_password') || '')
   const [aioSaved, setAioSaved] = useState(false)
-  const [aioManifest, setAioManifest] = useState(localStorage.getItem('octostream_aiostreams_manifest') || '')
+  const [aioManifest, setAioManifest] = useState(getItemSync('octostream_aiostreams_manifest') || '')
   const [aioTest, setAioTest] = useState(null) // null | {loading:true} | {ok,results} | {ok:false,error}
 
   // Clear PIN polling interval on unmount
@@ -204,8 +204,8 @@ export default function Settings() {
   }, [])
 
   // Screensaver settings
-  const [ssEnabled, setSsEnabled] = useState(localStorage.getItem('octostream_screensaver_enabled') !== 'false')
-  const [ssTimeout, setSsTimeout] = useState(parseInt(localStorage.getItem('octostream_screensaver_timeout') || '5', 10))
+  const [ssEnabled, setSsEnabled] = useState(getItemSync('octostream_screensaver_enabled') !== 'false')
+  const [ssTimeout, setSsTimeout] = useState(parseInt(getItemSync('octostream_screensaver_timeout') || '5', 10))
 
   // WARP VPN state
   const [vpnStatus, setVpnStatus] = useState('disconnected') // disconnected | connecting | connected
@@ -214,16 +214,16 @@ export default function Settings() {
   // Salida WARP: 'auto' = colo cercano (tu país); 'random' = segundo salto
   // (WARP-en-WARP, otro país cualquiera); o país fijado que el propio
   // aether verifica contra el trace de Cloudflare antes de aceptar el túnel.
-  const [warpExitLoc, setWarpExitLoc] = useState(localStorage.getItem('octostream_warp_exit') || 'auto')
+  const [warpExitLoc, setWarpExitLoc] = useState(getItemSync('octostream_warp_exit') || 'auto')
   // Salida remota: IP/dominio del VPS al que se llega por túnel SSH.
   // Vacío = WARP local doble-salto de este dispositivo.
-  const [warpRemote, setWarpRemote] = useState(localStorage.getItem('octostream_warp_remote') || '')
+  const [warpRemote, setWarpRemote] = useState(getItemSync('octostream_warp_remote') || '')
   // SSH del remoto: con usuario+clave el host se alcanza por túnel SSH al
   // VPS (port-forward al proxy loopback) — funciona fuera de casa, sin
   // Tailscale ni apps extra. Vacío = remoto plano en la misma WiFi.
-  const [warpSshUser, setWarpSshUser] = useState(localStorage.getItem('octostream_warp_ssh_user') || '')
+  const [warpSshUser, setWarpSshUser] = useState(getItemSync('octostream_warp_ssh_user') || '')
   const [warpSshPass, setWarpSshPass] = useState('')
-  const [warpSshPort, setWarpSshPort] = useState(localStorage.getItem('octostream_warp_ssh_port') || '22')
+  const [warpSshPort, setWarpSshPort] = useState(getItemSync('octostream_warp_ssh_port') || '22')
   // Host key SSH pendiente de confirmación (TOFU): {fingerprint, changed}.
   const [hostKeyPrompt, setHostKeyPrompt] = useState(null)
   // Huella SSH pendiente: el auto-connect la rechaza sin UI y el aviso
@@ -246,26 +246,26 @@ export default function Settings() {
   const [vpsTestBusy, setVpsTestBusy] = useState(false)
   const [leakTest, setLeakTest] = useState(null) // null | {busy:true} | {tunnel, direct}
   const [leakBusy, setLeakBusy] = useState(false)
-  const [imgQuality, setImgQuality] = useState(localStorage.getItem('octostream_image_quality') || 'medium')
+  const [imgQuality, setImgQuality] = useState(getItemSync('octostream_image_quality') || 'medium')
   const [ssSaved, setSsSaved] = useState(false)
 
   // Autoplay settings
-  const [autoplayEnabled, setAutoplayEnabled] = useState(localStorage.getItem('octostream_autoplay') !== 'false')
+  const [autoplayEnabled, setAutoplayEnabled] = useState(getItemSync('octostream_autoplay') !== 'false')
   // Auto next episode: si está activo, al terminar un episodio se reproduce
   // automáticamente el siguiente. Si está desactivado, el usuario debe elegir
   // manualmente. Se guarda en localStorage y se lee desde VideoPlayer/Details.
-  const [autoNextEp, setAutoNextEp] = useState(localStorage.getItem('octostream_auto_next_ep') !== 'false')
+  const [autoNextEp, setAutoNextEp] = useState(getItemSync('octostream_auto_next_ep') !== 'false')
 
   // Language priority settings
   const [langPriority, setLangPriority] = useState(getDefaultLangPriority())
 
   // Búsquedas torrent (DonTorrent, GranTorrent, SubTorrents). Apagado = los
   // sitios torrent no se consultan ni emiten streams.
-  const [torrentSearch, setTorrentSearch] = useState(localStorage.getItem('octostream_torrent_search') !== 'false')
+  const [torrentSearch, setTorrentSearch] = useState(getItemSync('octostream_torrent_search') !== 'false')
 
   const handleScreensaverSave = () => {
-    localStorage.setItem('octostream_screensaver_enabled', ssEnabled ? 'true' : 'false')
-    localStorage.setItem('octostream_screensaver_timeout', String(ssTimeout))
+    setItemSync('octostream_screensaver_enabled', ssEnabled ? 'true' : 'false')
+    setItemSync('octostream_screensaver_timeout', String(ssTimeout))
     setSsSaved(true)
     setTimeout(() => setSsSaved(false), 2000)
   }
@@ -274,7 +274,7 @@ export default function Settings() {
     setError('')
     const key = apiKey.trim()
     if (!key) {
-      localStorage.removeItem('octostream_tmdb_key')
+      removeItemSync('octostream_tmdb_key')
       invalidateTmdbApiKey()
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -290,7 +290,7 @@ export default function Settings() {
         setError('API key inválida. Verifica tu clave en themoviedb.org')
         return
       }
-      localStorage.setItem('octostream_tmdb_key', key)
+      setItemSync('octostream_tmdb_key', key)
       invalidateTmdbApiKey()
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -303,12 +303,12 @@ export default function Settings() {
     setOsError('')
     const key = osApiKey.trim()
     if (!key) {
-      localStorage.removeItem('octostream_opensubs_apikey')
+      removeItemSync('octostream_opensubs_apikey')
       setOsSaved(true)
       setTimeout(() => setOsSaved(false), 2000)
       return
     }
-    localStorage.setItem('octostream_opensubs_apikey', key)
+    setItemSync('octostream_opensubs_apikey', key)
     setOsSaved(true)
     setTimeout(() => setOsSaved(false), 2000)
   }
@@ -317,7 +317,7 @@ export default function Settings() {
     setMdbError('')
     const key = mdbApiKey.trim()
     if (!key) {
-      localStorage.removeItem('octostream_mdblist_key')
+      removeItemSync('octostream_mdblist_key')
       setMdbSaved(true)
       setTimeout(() => setMdbSaved(false), 2000)
       return
@@ -329,7 +329,7 @@ export default function Settings() {
         setMdbError('API key inválida. Verifica tu clave en mdblist.com')
         return
       }
-      localStorage.setItem('octostream_mdblist_key', key)
+      setItemSync('octostream_mdblist_key', key)
       setMdbSaved(true)
       setTimeout(() => setMdbSaved(false), 2000)
     } catch {
@@ -341,7 +341,7 @@ export default function Settings() {
     setTraktError('')
     const key = traktKey.trim()
     if (!key) {
-      localStorage.removeItem('octostream_trakt_key')
+      removeItemSync('octostream_trakt_key')
     } else {
       // Trakt valida el Client ID consultando un endpoint público con los headers.
       try {
@@ -357,14 +357,14 @@ export default function Settings() {
         setTraktError('No se pudo verificar el Client ID. Revisa tu conexión.')
         return
       }
-      localStorage.setItem('octostream_trakt_key', key)
+      setItemSync('octostream_trakt_key', key)
     }
     const secret = traktSecret.trim()
-    if (secret) localStorage.setItem('octostream_trakt_secret', secret)
-    else localStorage.removeItem('octostream_trakt_secret')
+    if (secret) setItemSync('octostream_trakt_secret', secret)
+    else removeItemSync('octostream_trakt_secret')
     const lists = traktLists.trim()
-    if (lists) localStorage.setItem('octostream_trakt_lists', lists)
-    else localStorage.removeItem('octostream_trakt_lists')
+    if (lists) setItemSync('octostream_trakt_lists', lists)
+    else removeItemSync('octostream_trakt_lists')
     setTraktSaved(true)
     setTimeout(() => setTraktSaved(false), 2000)
   }
@@ -373,11 +373,11 @@ export default function Settings() {
     const u = hdfullUser.trim()
     const p = hdfullPass.trim()
     if (!u || !p) {
-      localStorage.removeItem('octostream_hdfull_username')
-      localStorage.removeItem('octostream_hdfull_password')
+      removeItemSync('octostream_hdfull_username')
+      removeItemSync('octostream_hdfull_password')
     } else {
-      localStorage.setItem('octostream_hdfull_username', u)
-      localStorage.setItem('octostream_hdfull_password', p)
+      setItemSync('octostream_hdfull_username', u)
+      setItemSync('octostream_hdfull_password', p)
     }
     setHdfullSaved(true)
     setTimeout(() => setHdfullSaved(false), 2000)
@@ -390,8 +390,8 @@ export default function Settings() {
       // Guardar temporalmente para que el canal lea las credenciales actualizadas
       const u = hdfullUser.trim()
       const p = hdfullPass.trim()
-      if (u) localStorage.setItem('octostream_hdfull_username', u)
-      if (p) localStorage.setItem('octostream_hdfull_password', p)
+      if (u) setItemSync('octostream_hdfull_username', u)
+      if (p) setItemSync('octostream_hdfull_password', p)
       const { hdfull } = await import('../plugins/bundled/plurtasko/channels/hdfull.js')
       const items = await hdfull.getCatalog({ id: 'hdfull-movies', skip: 0, top: 1 })
       setHdfullTestResult(items.length > 0 ? 'ok' : 'fail')
@@ -405,8 +405,8 @@ export default function Settings() {
 
   const handleAdSave = () => {
     const key = adApiKey.trim()
-    if (!key) localStorage.removeItem('octostream_alldebrid_key')
-    else localStorage.setItem('octostream_alldebrid_key', key)
+    if (!key) removeItemSync('octostream_alldebrid_key')
+    else setItemSync('octostream_alldebrid_key', key)
     setAdSaved(true)
     setTimeout(() => setAdSaved(false), 2000)
   }
@@ -464,7 +464,7 @@ export default function Settings() {
           const result = await adCheckPin(pin.pin, pin.check)
           if (result?.activated && result.apikey) {
             clearInterval(adPinTimerRef.current)
-            localStorage.setItem('octostream_alldebrid_key', result.apikey)
+            setItemSync('octostream_alldebrid_key', result.apikey)
             setAdApiKey(result.apikey)
             setAdPin(null)
             setAdPinLoading(false)
@@ -515,19 +515,19 @@ export default function Settings() {
         if (dead) return
         if (creds?.user) setWarpSshUser(creds.user)
         if (creds?.port) setWarpSshPort(String(creds.port))
-        const legacy = localStorage.getItem('octostream_warp_ssh_pass')
+        const legacy = getItemSync('octostream_warp_ssh_pass')
         if (creds?.pass) {
           setWarpSshPass(creds.pass)
         } else if (legacy) {
           setWarpSshPass(legacy)
           await CloudProxy.setRemoteSsh({
-            user: creds?.user || localStorage.getItem('octostream_warp_ssh_user') || '',
+            user: creds?.user || getItemSync('octostream_warp_ssh_user') || '',
             pass: legacy,
-            port: creds?.port || parseInt(localStorage.getItem('octostream_warp_ssh_port') || '22', 10),
+            port: creds?.port || parseInt(getItemSync('octostream_warp_ssh_port') || '22', 10),
           })
         }
       } catch { /* ignorado */ }
-      localStorage.removeItem('octostream_warp_ssh_pass')
+      removeItemSync('octostream_warp_ssh_pass')
     })()
     return () => { dead = true }
   }, [])
@@ -582,14 +582,14 @@ export default function Settings() {
   const toggleWarpStrict = () => {
     const next = !warpStrict
     setWarpStrict(next)
-    localStorage.setItem('octostream_warp_strict', next ? 'true' : 'false')
+    setItemSync('octostream_warp_strict', next ? 'true' : 'false')
     CloudProxy.setStrictMode(next).catch(() => {})
   }
 
   const applyWarpRemote = async (host) => {
     const { host: h, port: embeddedPort } = parseRemoteHostInput(host)
     setWarpRemote(h)
-    localStorage.setItem('octostream_warp_remote', h)
+    setItemSync('octostream_warp_remote', h)
     if (embeddedPort) await applyWarpRemoteSsh(warpSshUser, warpSshPass, embeddedPort)
     try { await CloudProxy.setRemoteHost(h) } catch { /* ignorado */ }
     // Con el túnel vivo el cambio de origen solo aplica reconectando.
@@ -607,11 +607,11 @@ export default function Settings() {
     setWarpSshUser(user)
     setWarpSshPass(pass)
     setWarpSshPort(String(prt))
-    localStorage.setItem('octostream_warp_ssh_user', user)
+    setItemSync('octostream_warp_ssh_user', user)
     // La clave la persiste el plugin nativo cifrada con Android Keystore —
     // no duplicarla en claro en localStorage.
-    localStorage.removeItem('octostream_warp_ssh_pass')
-    localStorage.setItem('octostream_warp_ssh_port', String(prt))
+    removeItemSync('octostream_warp_ssh_pass')
+    setItemSync('octostream_warp_ssh_port', String(prt))
     try { await CloudProxy.setRemoteSsh({ user, pass, port: prt }) } catch { /* ignorado */ }
     if (vpnStatus === 'connected') {
       try { await CloudProxy.disconnect() } catch { /* ignorado */ }
@@ -622,7 +622,7 @@ export default function Settings() {
 
   const changeWarpExit = async (id) => {
     setWarpExitLoc(id)
-    localStorage.setItem('octostream_warp_exit', id)
+    setItemSync('octostream_warp_exit', id)
     // Con el túnel vivo el cambio solo aplica reconectando — la
     // reconexión pasa por el mismo path que toggleVpn (con el nuevo modo).
     if (vpnStatus === 'connected' && vpnStatus !== 'connecting') {
@@ -676,11 +676,11 @@ export default function Settings() {
     setVpsTest(null)
     setVpnStatus('connecting')
     try {
-      localStorage.setItem('octostream_warp_remote', host)
-      localStorage.setItem('octostream_warp_ssh_user', user)
+      setItemSync('octostream_warp_remote', host)
+      setItemSync('octostream_warp_ssh_user', user)
       // La clave la guarda el plugin cifrada — no dejar copia en claro.
-      localStorage.removeItem('octostream_warp_ssh_pass')
-      localStorage.setItem('octostream_warp_ssh_port', String(port))
+      removeItemSync('octostream_warp_ssh_pass')
+      setItemSync('octostream_warp_ssh_port', String(port))
       await CloudProxy.setRemoteHost(host)
       await CloudProxy.setRemoteSsh({ user, pass, port })
       await CloudProxy.disconnect()
@@ -740,14 +740,14 @@ export default function Settings() {
   // Necesita Client ID guardado; el Secret se usa para canjear el código.
   const handleTraktPinStart = useCallback(async () => {
     setTraktPinError('')
-    const key = traktKey.trim() || localStorage.getItem('octostream_trakt_key') || ''
-    const secret = traktSecret.trim() || localStorage.getItem('octostream_trakt_secret') || ''
+    const key = traktKey.trim() || getItemSync('octostream_trakt_key') || ''
+    const secret = traktSecret.trim() || getItemSync('octostream_trakt_secret') || ''
     if (!key || !secret) {
       setTraktPinError('Guarda primero el Client ID y el Client Secret')
       return
     }
-    localStorage.setItem('octostream_trakt_key', key)
-    localStorage.setItem('octostream_trakt_secret', secret)
+    setItemSync('octostream_trakt_key', key)
+    setItemSync('octostream_trakt_secret', secret)
     setTraktPinLoading(true)
     setTraktPin(null)
     if (traktPinTimerRef.current) clearInterval(traktPinTimerRef.current)
@@ -910,7 +910,7 @@ export default function Settings() {
                   label="Activar autoplay de episodios"
                   onChange={newVal => {
                     setAutoplayEnabled(newVal)
-                    localStorage.setItem('octostream_autoplay', newVal ? 'true' : 'false')
+                    setItemSync('octostream_autoplay', newVal ? 'true' : 'false')
                   }}
                 />
               </label>
@@ -925,7 +925,7 @@ export default function Settings() {
                   label="Cambio automático de capítulo"
                   onChange={newVal => {
                     setAutoNextEp(newVal)
-                    localStorage.setItem('octostream_auto_next_ep', newVal ? 'true' : 'false')
+                    setItemSync('octostream_auto_next_ep', newVal ? 'true' : 'false')
                   }}
                 />
               </label>
@@ -958,7 +958,7 @@ export default function Settings() {
                         const newArr = [...langPriority]
                         ;[newArr[idx - 1], newArr[idx]] = [newArr[idx], newArr[idx - 1]]
                         setLangPriority(newArr)
-                        localStorage.setItem('octostream_lang_priority', JSON.stringify(newArr))
+                        setItemSync('octostream_lang_priority', JSON.stringify(newArr))
                         invalidateLangPriority()
                       }}
                       disabled={idx === 0}
@@ -973,7 +973,7 @@ export default function Settings() {
                         const newArr = [...langPriority]
                         ;[newArr[idx + 1], newArr[idx]] = [newArr[idx], newArr[idx + 1]]
                         setLangPriority(newArr)
-                        localStorage.setItem('octostream_lang_priority', JSON.stringify(newArr))
+                        setItemSync('octostream_lang_priority', JSON.stringify(newArr))
                         invalidateLangPriority()
                       }}
                       disabled={idx === langPriority.length - 1}
@@ -1478,7 +1478,7 @@ export default function Settings() {
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">TMDB API Key</span>
-                {localStorage.getItem('octostream_tmdb_key') ? (
+                {getItemSync('octostream_tmdb_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1490,7 +1490,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">OpenSubtitles API Key</span>
-                {localStorage.getItem('octostream_opensubs_apikey') ? (
+                {getItemSync('octostream_opensubs_apikey') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1502,7 +1502,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">MDBList API Key</span>
-                {localStorage.getItem('octostream_mdblist_key') ? (
+                {getItemSync('octostream_mdblist_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1514,7 +1514,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">Trakt Client ID</span>
-                {localStorage.getItem('octostream_trakt_key') ? (
+                {getItemSync('octostream_trakt_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1526,9 +1526,9 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">Trakt cuenta</span>
-                {localStorage.getItem('octostream_trakt_token') ? (
+                {getItemSync('octostream_trakt_token') ? (
                   <span className="flex items-center gap-1 text-green-400">
-                    <Check size={14} /> Conectada{localStorage.getItem('octostream_trakt_user') ? ` (@${localStorage.getItem('octostream_trakt_user')})` : ''}
+                    <Check size={14} /> Conectada{getItemSync('octostream_trakt_user') ? ` (@${getItemSync('octostream_trakt_user')})` : ''}
                   </span>
                 ) : (
                   <span className="flex items-center gap-1 text-dark-500">
@@ -1538,7 +1538,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">HDFull</span>
-                {localStorage.getItem('octostream_hdfull_username') ? (
+                {getItemSync('octostream_hdfull_username') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1581,7 +1581,7 @@ export default function Settings() {
                 checked={autoSubs}
                 onChange={newVal => {
                   setAutoSubs(newVal)
-                  localStorage.setItem('octostream_autosubs', newVal ? 'true' : 'false')
+                  setItemSync('octostream_autosubs', newVal ? 'true' : 'false')
                 }}
                 label="Subtítulos automáticos en español"
                 color="green"
@@ -1786,7 +1786,7 @@ export default function Settings() {
           </div>
 
           {/* Auditoría de la clave: cuenta, uso reciente y propagación por sync */}
-          {localStorage.getItem('octostream_alldebrid_key') && (
+          {getItemSync('octostream_alldebrid_key') && (
             <div className="bg-dark-800/50 rounded-xl p-5 border border-dark-700">
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -1946,7 +1946,7 @@ export default function Settings() {
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">AllDebrid API Key</span>
-                {localStorage.getItem('octostream_alldebrid_key') ? (
+                {getItemSync('octostream_alldebrid_key') ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -1958,7 +1958,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-dark-400">AIOStreams (manifest o UUID + contraseña)</span>
-                {localStorage.getItem('octostream_aiostreams_manifest') || (localStorage.getItem('octostream_aiostreams_uuid') && localStorage.getItem('octostream_aiostreams_password')) ? (
+                {getItemSync('octostream_aiostreams_manifest') || (getItemSync('octostream_aiostreams_uuid') && getItemSync('octostream_aiostreams_password')) ? (
                   <span className="flex items-center gap-1 text-green-400">
                     <Check size={14} /> Configurada
                   </span>
@@ -2398,7 +2398,7 @@ export default function Settings() {
                 label="Buscar enlaces torrent"
                 onChange={newVal => {
                   setTorrentSearch(newVal)
-                  localStorage.setItem('octostream_torrent_search', newVal ? 'true' : 'false')
+                  setItemSync('octostream_torrent_search', newVal ? 'true' : 'false')
                 }}
               />
             </label>
@@ -2519,7 +2519,7 @@ export default function Settings() {
                   data-tv-card
                   onClick={() => {
                     setImgQuality(value)
-                    localStorage.setItem('octostream_image_quality', value)
+                    setItemSync('octostream_image_quality', value)
                     invalidateImageQuality()
                   }}
                   className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

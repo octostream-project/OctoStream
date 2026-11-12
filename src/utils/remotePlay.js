@@ -5,6 +5,7 @@
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpPostJson } from './httpClient.js'
 import { isValidWatchPartyState } from './watchParty.js'
+import { getItemSync, setItemSync, removeItemSync } from './storage.js'
 // Import ESTÁTICO del plugin — registra 'SyncServer' al cargar la app. El
 // import dinámico en frío (chunk + __vite__mapDeps) es frágil en WebViews
 // de TV antiguos: si fallaba, getSyncServer() devolvía null → el panel de
@@ -68,13 +69,13 @@ const LAST_DEVICE_KEY = 'octostream_last_cast_device'
 
 export function getLastDevice() {
   try {
-    const raw = localStorage.getItem(LAST_DEVICE_KEY)
+    const raw = getItemSync(LAST_DEVICE_KEY)
     return raw ? JSON.parse(raw) : null
   } catch { return null }
 }
 
 function saveLastDevice(device) {
-  try { localStorage.setItem(LAST_DEVICE_KEY, JSON.stringify(device)) } catch { /* ignorado */ }
+  try { setItemSync(LAST_DEVICE_KEY, JSON.stringify(device)) } catch { /* ignorado */ }
 }
 
 // ── Identidad propia y tokens de emparejamiento ──────────────────────────
@@ -91,17 +92,17 @@ async function getDeviceInfo() {
 
 const TOKENS_KEY = 'octostream_pair_tokens'
 function loadTokens() {
-  try { return JSON.parse(localStorage.getItem(TOKENS_KEY) || '{}') } catch { return {} }
+  try { return JSON.parse(getItemSync(TOKENS_KEY) || '{}') } catch { return {} }
 }
 function saveToken(deviceId, info) {
   try {
     const t = loadTokens()
     t[deviceId] = { token: info.token, alias: info.alias || '', fingerprint: info.fingerprint || '' }
-    localStorage.setItem(TOKENS_KEY, JSON.stringify(t))
+    setItemSync(TOKENS_KEY, JSON.stringify(t))
   } catch { /* ignorado */ }
 }
 export function forgetTokens() {
-  try { localStorage.removeItem(TOKENS_KEY) } catch { /* ignorado */ }
+  try { removeItemSync(TOKENS_KEY) } catch { /* ignorado */ }
 }
 
 // Dispositivos vistos por UDP broadcast (anuncio automático estilo LocalSend).

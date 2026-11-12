@@ -13,13 +13,14 @@ import {
   getStreamingPlatformCatalogContent,
   STREAMING_GENRES,
 } from '../plugins/bundled/streamingCatalogs.js'
+import { getItemSync, setItemSync } from '../utils/storage.js'
 
 const HOME_PREFS_KEY = 'octostream_home_layout'
 const readPrefs = () => {
-  try { return JSON.parse(localStorage.getItem(HOME_PREFS_KEY) || '{}') || {} } catch { return {} }
+  try { return JSON.parse(getItemSync(HOME_PREFS_KEY) || '{}') || {} } catch { return {} }
 }
 const writePrefs = (prefs) => {
-  try { localStorage.setItem(HOME_PREFS_KEY, JSON.stringify(prefs)) } catch { /* lleno */ }
+  try { setItemSync(HOME_PREFS_KEY, JSON.stringify(prefs)) } catch { /* lleno */ }
 }
 
 // Plataforma de un catálogo: el nombre menos un sufijo de género conocido

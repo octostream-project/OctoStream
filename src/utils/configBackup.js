@@ -8,7 +8,7 @@
 import { isAndroidNative } from './platform.js'
 import { ExoPlayer } from '@octostream/exo-player'
 import { sshCredsForTransfer, applyReceivedSshCreds } from './sshCreds.js'
-import { setItemSync } from './storage.js'
+import { getItemSync, setItemSync } from './storage.js'
 import { invalidateTmdbApiKey, invalidateImageQuality } from '../plugins/builtIn/tmdb.js'
 import { invalidateLangPriority } from './streamMeta.js'
 
@@ -113,7 +113,7 @@ export function collectSettings(categories, excludedKeys = null, includeProfiles
     const profileRegistryNeeded = k === PROFILE_REGISTRY_KEY
       && (!wanted || wanted.has('lists') || wanted.has('history') || wanted.has('settings'))
     if (wanted && !wanted.has(categoryOf(k)) && !profileRegistryNeeded) continue
-    settings[k] = localStorage.getItem(k)
+    settings[k] = getItemSync(k)
   }
   return settings
 }

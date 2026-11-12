@@ -7,6 +7,7 @@ import { sanitizeHttpUrl } from './sanitizeUrl.js'
 import { initAiSubs, disposeAiSubs, maybeAutoSubs } from './aiSubs.js'
 import { pushSubStyle } from './subStyle.js'
 import { isWarpConnected } from './warpStatus.js'
+import { getItemSync, setItemSync, removeItemSync } from './storage.js'
 
 let stateListener = null
 let zapListener = null
@@ -237,7 +238,7 @@ export async function playLocalFile({ uri, title, startTime, subtitles }, onStat
   let resumeAt = startTime || 0
   if (!resumeAt) {
     try {
-      const saved = JSON.parse(localStorage.getItem(key) || 'null')
+      const saved = JSON.parse(getItemSync(key) || 'null')
       if (saved?.position > 5 && (saved.duration <= 0 || saved.position < saved.duration * 0.95)) {
         resumeAt = saved.position
       }
@@ -248,7 +249,7 @@ export async function playLocalFile({ uri, title, startTime, subtitles }, onStat
     ? (ev) => {
         if (ev?.state === 'position' && ev.position > 0) {
           try {
-            localStorage.setItem(key, JSON.stringify({
+            setItemSync(key, JSON.stringify({
               position: ev.position / 1000, // ms → s (los eventos llegan en ms)
               duration: ev.duration / 1000,
               at: Date.now(),
@@ -256,7 +257,7 @@ export async function playLocalFile({ uri, title, startTime, subtitles }, onStat
           } catch { /* noop */ }
         } else if (ev?.state === 'ended') {
           // Terminó: borrar la posición para que la próxima vez empiece de cero.
-          try { localStorage.removeItem(key) } catch { /* noop */ }
+          try { removeItemSync(key) } catch { /* noop */ }
         }
         onStateChange(ev)
       }

@@ -4397,6 +4397,27 @@ public class ExoPlayerPlugin extends Plugin {
         intent.setType("application/json");
         String name = call.getString("filename", "octostream-backup.json");
         intent.putExtra(Intent.EXTRA_TITLE, name);
+        // Limpia un export anterior abortado (proceso muerto con el picker
+        // abierto deja el temporal y la preferencia huérfanos).
+        cleanupPendingExportFile();
+        // El contenido se vuelca a un temporal ANTES de abrir el picker: el
+        // PluginCall no garantiza conservar args grandes tras el round-trip
+        // de la actividad (proceso en background, call evictada) — leer
+        // "content" en el callback producía archivos de 0 bytes.
+        String content = call.getString("content", "{}");
+        String tmpPath = null;
+        try {
+            java.io.File tmp = java.io.File.createTempFile("octo-export-", ".json",
+                getContext().getCacheDir());
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp)) {
+                fos.write(content.getBytes("UTF-8"));
+            }
+            tmpPath = tmp.getAbsolutePath();
+        } catch (Exception e) {
+            Log.w(TAG, "exportConfig temp: " + e.getMessage());
+        }
+        getContext().getSharedPreferences("octostream_exo", Context.MODE_PRIVATE)
+            .edit().putString("pending_export", tmpPath == null ? "" : tmpPath).apply();
         startActivityForResult(call, intent, "exportConfigResult");
     }
 
@@ -4417,15 +4438,45 @@ public class ExoPlayerPlugin extends Plugin {
         startActivityForResult(call, intent, "importConfigResult");
     }
 
+    private void clearPendingExport() {
+        getContext().getSharedPreferences("octostream_exo", Context.MODE_PRIVATE)
+            .edit().remove("pending_export").apply();
+    }
+
+    private void cleanupPendingExportFile() {
+        try {
+            String p = getContext().getSharedPreferences("octostream_exo", Context.MODE_PRIVATE)
+                .getString("pending_export", "");
+            if (p != null && !p.isEmpty()) new java.io.File(p).delete();
+        } catch (Throwable ignored) {}
+        clearPendingExport();
+    }
+
     @ActivityCallback
     private void exportConfigResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
         Uri uri = result != null && result.getData() != null ? result.getData().getData() : null;
-        if (uri == null) { call.reject("cancelled"); return; }
-        String content = call.getString("content", "{}");
+        if (uri == null) { cleanupPendingExportFile(); call.reject("cancelled"); return; }
+        // Fuente prioritaria: el temporal preparado antes del picker. Solo si
+        // no existe (p. ej. falló createTempFile) se usa el arg del call.
+        String tmpPath = getContext().getSharedPreferences("octostream_exo", Context.MODE_PRIVATE)
+            .getString("pending_export", "");
+        java.io.InputStream in = null;
+        try {
+            if (tmpPath != null && !tmpPath.isEmpty() && new java.io.File(tmpPath).isFile()) {
+                in = new java.io.FileInputStream(tmpPath);
+            }
+        } catch (Exception ignored) {}
         try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
-            if (out == null) { call.reject("no se pudo abrir el destino"); return; }
-            out.write(content.getBytes("UTF-8"));
+            if (out == null) { cleanupPendingExportFile(); call.reject("no se pudo abrir el destino"); return; }
+            if (in != null) {
+                byte[] buf = new byte[65536];
+                int r;
+                while ((r = in.read(buf)) >= 0) out.write(buf, 0, r);
+            } else {
+                String content = call.getString("content", "{}");
+                out.write(content.getBytes("UTF-8"));
+            }
             out.flush();
             JSObject ret = new JSObject();
             ret.put("saved", true);
@@ -4433,6 +4484,9 @@ public class ExoPlayerPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("error escribiendo: " + e.getMessage());
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            cleanupPendingExportFile();
         }
     }
 

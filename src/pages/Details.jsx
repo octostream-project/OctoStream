@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useParams, useNavigate } from 'react-router-dom'
 import { pluginManager } from '../plugins/manager.js'
+import { getItemSync } from '../utils/storage.js'
 import { tmdbPlugin, getCast, getPersonDetails } from '../plugins/builtIn/tmdb.js'
 import { useStore } from '../store/useStore.js'
 import VideoPlayer from '../components/VideoPlayer.jsx'
@@ -572,7 +573,7 @@ export default function Details() {
         // solo entre las fuentes reales.
         const playable = (s || []).filter(st => !st.processing)
         if (location.state?.autoplay && playable.length > 0) {
-          const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
+          const autoplayEnabled = getItemSync('octostream_autoplay') !== 'false'
           // If there's saved progress (not completed) and autoplay is enabled,
           // play directly from the saved position without showing the resume dialog
           if (autoplayEnabled && savedProgress > 0.05 && savedProgress < 0.95 && savedTime > 0) {
@@ -1260,7 +1261,7 @@ export default function Details() {
         // forcePlay = selección explícita desde el panel de episodios del
         // player nativo: el usuario ya eligió — reproducir al instante aunque
         // el autoplay esté desactivado.
-        const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
+        const autoplayEnabled = getItemSync('octostream_autoplay') !== 'false'
         if (autoplayEnabled || forcePlay) {
           // Try to use the same server that was used before
           const savedServer = historyItem?.server || ''
@@ -1372,7 +1373,7 @@ export default function Details() {
 
   const handleEnded = () => {
     // Check if autoplay is enabled
-    const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
+    const autoplayEnabled = getItemSync('octostream_autoplay') !== 'false'
     if (!autoplayEnabled) {
       stopPlayback().catch(() => {})
       setSelectedStream(null)
@@ -1380,7 +1381,7 @@ export default function Details() {
     }
 
     // Respect the "auto next episode" setting: if disabled, stop after each episode.
-    if (localStorage.getItem('octostream_auto_next_ep') === 'false') {
+    if (getItemSync('octostream_auto_next_ep') === 'false') {
       console.log('[Details] Auto next episode disabled, stopping after current episode')
       stopPlayback().catch(() => {})
       setSelectedStream(null)

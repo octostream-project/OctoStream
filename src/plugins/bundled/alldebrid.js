@@ -12,7 +12,7 @@
 //   4. ExoPlayer/HLS.js plays the direct URL
 //   5. For torrents/magnets, we upload the magnet and poll for status
 
-import { getItemSync, removeItemSync } from '../../utils/storage.js'
+import { getItemSync, setItemSync, removeItemSync } from '../../utils/storage.js'
 import { pickTorrentEntries } from '../../utils/torrentPick.js'
 import { httpGetJson, httpPostJson } from '../../utils/httpClient.js'
 import { CloudProxy } from '../../utils/cloudProxy.js'
@@ -331,13 +331,13 @@ export async function getLinkHistory() {
 const AD_KEY_LOG = 'octostream_ad_key_log'
 export function logAdKeyPropagation(alias) {
   try {
-    const log = JSON.parse(localStorage.getItem(AD_KEY_LOG) || '[]')
+    const log = JSON.parse(getItemSync(AD_KEY_LOG) || '[]')
     log.unshift({ ts: Date.now(), alias: String(alias || 'desconocido') })
-    localStorage.setItem(AD_KEY_LOG, JSON.stringify(log.slice(0, 20)))
+    setItemSync(AD_KEY_LOG, JSON.stringify(log.slice(0, 20)))
   } catch { /* sin storage */ }
 }
 export function getAdKeyLog() {
-  try { return JSON.parse(localStorage.getItem(AD_KEY_LOG) || '[]') } catch { return [] }
+  try { return JSON.parse(getItemSync(AD_KEY_LOG) || '[]') } catch { return [] }
 }
 
 // Upload a magnet link and return the magnet ID.

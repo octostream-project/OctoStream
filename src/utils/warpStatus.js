@@ -8,6 +8,7 @@
 
 import { isAndroidNative } from './platform.js'
 import { CloudProxy } from './cloudProxy.js'
+import { getItemSync } from './storage.js'
 
 let _connected = false
 let _connecting = false
@@ -20,7 +21,7 @@ const _waiters = new Set()
 // Kill-switch estricto (ajuste): si el túnel cae, el proxy muerto se
 // conserva y TODA petición falla en vez de salir por la IP real.
 export function warpStrictEnabled() {
-  try { return localStorage.getItem('octostream_warp_strict') === 'true' } catch { return false }
+  try { return getItemSync('octostream_warp_strict') === 'true' } catch { return false }
 }
 
 let _strictApplied = null
@@ -236,7 +237,7 @@ export function startNetWatchdog() {
   _watchTimer = setInterval(async () => {
     const st = await getWarpDetails().catch(() => null)
     if (!st) return
-    const intentOn = (() => { try { return localStorage.getItem('octostream_net_intent') !== '0' } catch { return true } })()
+    const intentOn = (() => { try { return getItemSync('octostream_net_intent') !== '0' } catch { return true } })()
     if (_wasConnected && !st.connected && !st.connecting && intentOn) {
       _wasConnected = false // un intento; la siguiente sonda evalúa de nuevo
       console.warn('[NetWatchdog] plano caído con sesión viva — reconectando')

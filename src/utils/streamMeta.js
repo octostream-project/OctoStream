@@ -1,6 +1,7 @@
 // Helpers de metadatos de streams extraídos de Details.jsx — la misma lógica
 // la usan ahora la lista de fuentes (StreamList) y la ordenación por idioma.
 import { inferStreamType } from './streamType.js'
+import { getItemSync, setItemSync } from './storage.js'
 
 // Extract language code from stream name like "vidhide (LAT)" or "HDFull Esp hd1080"
 export function parseStreamLang(stream) {
@@ -105,7 +106,7 @@ const LANG_PRIORITY_DEFAULT = ['ESP', 'LAT', 'DUAL', 'SUB', 'ENG']
 export function setLangPriority(order) {
   const clean = Array.isArray(order) && order.length ? order : LANG_PRIORITY_DEFAULT
   langPriorityCache = clean
-  try { localStorage.setItem('octostream_lang_priority', JSON.stringify(clean)) } catch { /* sin storage */ }
+  try { setItemSync('octostream_lang_priority', JSON.stringify(clean)) } catch { /* sin storage */ }
 }
 export function getLangPrioritySaved() {
   return getLangPriority()
@@ -113,7 +114,7 @@ export function getLangPrioritySaved() {
 function getLangPriority() {
   if (langPriorityCache) return langPriorityCache
   try {
-    const saved = JSON.parse(localStorage.getItem('octostream_lang_priority') || '[]')
+    const saved = JSON.parse(getItemSync('octostream_lang_priority') || '[]')
     if (Array.isArray(saved) && saved.length > 0) {
       langPriorityCache = saved
       return saved

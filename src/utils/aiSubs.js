@@ -15,7 +15,7 @@ import { ExoPlayer } from '@octostream/exo-player'
 import { isAndroidNative } from './platform.js'
 import { httpGetJson, httpGetText } from './httpClient.js'
 import { dictateWav, duckChat } from './duckAi.js'
-import { getJsonSync, setJsonSync } from './storage.js'
+import { getJsonSync, setJsonSync, getItemSync } from './storage.js'
 import { parseStreamLang } from './streamMeta.js'
 
 const OPENSUBS_STREMIO = 'https://opensubtitles-v3.strem.io'
@@ -534,7 +534,7 @@ let lastAutoKey = '' // los reintentos de playStream no re-disparan
 export function maybeAutoSubs(options = {}) {
   if (!isAndroidNative()) return
   // Ajuste del usuario (Ajustes → Subtítulos): apagado = nada automático.
-  try { if (localStorage.getItem('octostream_autosubs') === 'false') return } catch { /* storage inaccesible */ }
+  try { if (getItemSync('octostream_autosubs') === 'false') return } catch { /* storage inaccesible */ }
   if (options.mode === 'live') return
   const lang = parseStreamLang({ lang: options.lang }) || String(options.lang || '').trim().toUpperCase()
   if (!lang || SPANISH_AUDIO.has(lang)) return

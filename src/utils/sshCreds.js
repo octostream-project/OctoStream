@@ -10,6 +10,7 @@
 
 import { isAndroidNative } from './platform.js'
 import { CloudProxy } from './cloudProxy.js'
+import { getItemSync, setItemSync, removeItemSync } from './storage.js'
 
 const SSH_KEYS = {
   host: 'octostream_warp_remote',
@@ -24,7 +25,7 @@ const SSH_KEY_LIST = Object.values(SSH_KEYS)
 export async function sshCredsForTransfer() {
   const out = {}
   for (const k of SSH_KEY_LIST) {
-    const v = localStorage.getItem(k)
+    const v = getItemSync(k)
     if (v != null && v !== '') out[k] = v
   }
   if (isAndroidNative()) {
@@ -43,14 +44,14 @@ export async function sshCredsForTransfer() {
 // cifrado del plugin y se borra la copia en claro.
 export async function applyReceivedSshCreds() {
   if (!isAndroidNative()) return
-  const pass = localStorage.getItem(SSH_KEYS.pass)
+  const pass = getItemSync(SSH_KEYS.pass)
   if (!pass) return
   try {
     await CloudProxy.setRemoteSsh({
-      user: localStorage.getItem(SSH_KEYS.user) || '',
+      user: getItemSync(SSH_KEYS.user) || '',
       pass,
-      port: parseInt(localStorage.getItem(SSH_KEYS.port) || '22', 10) || 22,
+      port: parseInt(getItemSync(SSH_KEYS.port) || '22', 10) || 22,
     })
   } catch { /* credenciales ausentes o plugin no disponible */ }
-  localStorage.removeItem(SSH_KEYS.pass)
+  removeItemSync(SSH_KEYS.pass)
 }

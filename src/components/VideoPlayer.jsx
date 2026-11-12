@@ -28,6 +28,7 @@ import CastMenu from './CastMenu.jsx'
 import { sendStop, sendWatchPartyState } from '../utils/remotePlay.js'
 import { isWarpConnected, waitForWarp } from '../utils/warpStatus.js'
 import LogoLoader from './LogoLoader.jsx'
+import { getItemSync } from '../utils/storage.js'
 
 // Log solo host — las URLs de stream llevan tokens firmados.
 const urlHost = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
@@ -1387,9 +1388,9 @@ function VideoPlayerInner({ mode = 'vod', stream, title, onClose, onEnded, meta,
   // natively (la UI web no se renderiza con el nativo activo).
   useEffect(() => {
     if (!isExoPlayerAvailable()) return
-    const autoNextEpEnabled = localStorage.getItem('octostream_auto_next_ep') !== 'false'
+    const autoNextEpEnabled = getItemSync('octostream_auto_next_ep') !== 'false'
     if (nextEpisode && autoNextEpEnabled) {
-      const autoplayEnabled = localStorage.getItem('octostream_autoplay') !== 'false'
+      const autoplayEnabled = getItemSync('octostream_autoplay') !== 'false'
       setNextEpisode({
         title: nextEpisode.name || `Episodio ${nextEpisode.episode}`,
         seriesName: title?.split(' - ')[0] || meta?.name || '',

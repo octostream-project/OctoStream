@@ -8,6 +8,7 @@
 import { httpGetText, httpPostText, httpPostJson, shortSignal } from '../../../utils/httpClient.js'
 import { isAndroidNative } from '../../../utils/platform.js'
 import { isWarpConnected, refreshWarpStatus } from '../../../utils/warpStatus.js'
+import { getItemSync, setItemSync } from '../../../utils/storage.js'
 
 // Solo host:puerto para logs — las URLs pueden llevar tokens de sesión.
 export const hostOf = (u) => { try { return new URL(u).host } catch { return 'unknown' } }
@@ -483,7 +484,7 @@ export function makeHostRotator(hosts, persistKey = null) {
   // arranque en frío reprobaba primero los dominios muertos de la lista.
   if (persistKey) {
     try {
-      const saved = typeof localStorage !== 'undefined' && localStorage.getItem(persistKey)
+      const saved = typeof localStorage !== 'undefined' && getItemSync(persistKey)
       if (saved && hosts.some(h => h.replace(/\/+$/, '') === saved.replace(/\/+$/, ''))) {
         working = saved
       }
@@ -492,7 +493,7 @@ export function makeHostRotator(hosts, persistKey = null) {
   const setWorking = (h) => {
     working = h
     if (persistKey) {
-      try { typeof localStorage !== 'undefined' && localStorage.setItem(persistKey, h) } catch { /* ignorado */ }
+      try { typeof localStorage !== 'undefined' && setItemSync(persistKey, h) } catch { /* ignorado */ }
     }
   }
   return {

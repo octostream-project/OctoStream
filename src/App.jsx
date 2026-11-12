@@ -20,6 +20,7 @@ import { AppUpdater } from './utils/appUpdater.js'
 import { getTorrentEngine } from './utils/torrentEngine.js'
 import { promptStorageAccessOnce } from './utils/storageAccessOnboarding.js'
 import { toast } from './components/ui/Toast.jsx'
+import { getItemSync } from './utils/storage.js'
 
 // Lazy-loaded pages: each route becomes its own chunk.
 const Home = lazy(() => import('./pages/Home.jsx'))
@@ -49,8 +50,8 @@ function useIdleScreensaver() {
 
   // localStorage es síncrono; leer una vez por montaje en vez de por render
   const { enabled, timeoutMs } = useMemo(() => {
-    const en = localStorage.getItem(SCREENSAVER_ENABLED_KEY) !== 'false'
-    const mins = parseInt(localStorage.getItem(SCREENSAVER_TIMEOUT_KEY) || '5', 10)
+    const en = getItemSync(SCREENSAVER_ENABLED_KEY) !== 'false'
+    const mins = parseInt(getItemSync(SCREENSAVER_TIMEOUT_KEY) || '5', 10)
     return { enabled: en, timeoutMs: Math.max(1, mins) * 60 * 1000 }
   }, [])
 
