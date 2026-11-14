@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getItemSync, setItemSync } from '../utils/storage.js'
-import { Server, Play, Download, Zap, Hourglass, Users } from 'lucide-react'
+import { Server, Play, Download, Zap, Hourglass, Users, CloudDownload } from 'lucide-react'
 import { parseStreamLang, parseStreamQuality, qualityColorClass, langColorClass, langFlag, getLangPrioritySaved, isDownloadableDirect } from '../utils/streamMeta.js'
-import { subscribeDebridJobs, getDebridJob } from '../utils/debridJobs.js'
+import { subscribeDebridJobs, getDebridJob, btihOf } from '../utils/debridJobs.js'
 import { hasAnyDebrid } from '../plugins/bundled/alldebrid.js'
 import { useDebridAvailable } from '../hooks/useDebridAvailable.js'
 import { compareStreamsByReliability, subscribeStreamReliability } from '../utils/streamReliability.js'
@@ -21,7 +21,7 @@ function useStreamReliabilityTick() {
 // Lista de fuentes de un contenido/episodio. Estaba duplicada dos veces en
 // Details.jsx (fuentes de película y de episodio): layout grid cuando hay
 // más de 6 enlaces, lista completa si no.
-export default function StreamList({ streams, onPlay, onDownload, disabled = false }) {
+export default function StreamList({ streams, onPlay, onDownload, onCacheDebrid, disabled = false }) {
   useDebridJobsTick()
   useStreamReliabilityTick()
   const debridOk = useDebridAvailable()
@@ -80,6 +80,46 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
     .filter(s => !s.processing && (canUnlock || s.streamType !== 'debrid'))
     .sort(comparators[sortMode]))
   const processing = canDebrid ? applyFilters(streams.filter(s => s.processing).sort(comparators[sortMode])) : []
+
+  // Botón "cachear en debrid": manda el magnet del torrent a AllDebrid
+  // para tenerlo listo en el servidor y reproducirlo luego al instante,
+  // sin depender del swarm local ni descargar el archivo al dispositivo.
+  const cacheHashOf = (s) => s._infoHash || btihOf(s.url)
+  const cacheJobOf = (s) => { const h = cacheHashOf(s); return h ? getDebridJob(h) : null }
+  const isCacheable = (s) => s.streamType === 'torrent'
+    && cacheHashOf(s) && s.cached !== true
+  const debridCacheBtn = (s, inline = false) => {
+    if (!onCacheDebrid || !canDebrid || !isCacheable(s)) return null
+    const job = cacheJobOf(s)
+    const busy = job && job.status !== 'ready' && job.status !== 'error'
+    const title = job?.status === 'ready' ? 'Listo en AllDebrid'
+      : busy ? `En cola de AllDebrid — ${job.progress}%`
+      : 'Cachear en AllDebrid para ver al instante'
+    const icon = busy
+      ? <Hourglass size={inline ? 14 : 18} className="animate-pulse text-amber-400" />
+      : job?.status === 'ready'
+        ? <Zap size={inline ? 14 : 18} className="text-emerald-400" />
+        : <CloudDownload size={inline ? 14 : 18} />
+    const cls = inline
+      ? 'ml-auto p-1 text-dark-400 hover:text-amber-400 transition-colors flex-shrink-0'
+      : 'p-2 text-dark-400 hover:text-amber-400 transition-colors flex-shrink-0'
+    const act = (e) => { e.stopPropagation(); onCacheDebrid(s) }
+    // En la tarjeta-grid el padre es un <button> real: span role=button
+    // (un <button> anidado sería HTML inválido y React lo rompe).
+    return inline ? (
+      <span role="button" tabIndex={0} className={cls} title={title}
+        onClick={act}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); act(e) } }}>
+        {icon}
+      </span>
+    ) : (
+      <button type="button" tabIndex={0} className={cls} title={title}
+        onClick={act}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); act(e) } }}>
+        {icon}
+      </button>
+    )
+  }
   const chip = (k, label) => (
     <button
       key={k}
@@ -212,6 +252,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
                 {!quality && !lang && (
                   <span className="text-sm text-dark-400 font-medium">HD</span>
                 )}
+                {debridCacheBtn(stream, true)}
               </div>
               <span className="text-white text-xs font-medium truncate">{stream.name || ''}</span>
               <div className="flex items-center gap-1 text-xs text-dark-400">
@@ -276,6 +317,7 @@ export default function StreamList({ streams, onPlay, onDownload, disabled = fal
               <p className="text-white text-sm font-medium truncate">{stream.name}</p>
               <p className="text-xs text-dark-400 truncate">{stream.channelName || stream.server || stream.pluginName}</p>
             </div>
+            {debridCacheBtn(stream)}
             {onDownload && (stream.streamType === 'torrent' || isDownloadableDirect(stream)) && (
               <button
                 tabIndex={0}

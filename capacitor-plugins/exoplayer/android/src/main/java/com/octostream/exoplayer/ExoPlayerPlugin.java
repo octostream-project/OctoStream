@@ -5547,18 +5547,25 @@ public class ExoPlayerPlugin extends Plugin {
             private int stallTicks = 0;
             private int lastDropCount = 0;
             private long stallSignal() {
+                // VOD: la posición es la señal de verdad — solo avanza si el
+                // pipeline realmente consume medios. Los contadores del
+                // decoder se congelan en 0 con tunneling/audio-offload
+                // (dispositivos débiles) y con el decoder FFmpeg (AC3/DTS de
+                // remuxes) aunque el vídeo salga bien → falsos stalls que
+                // recargaban la fuente y devolvían el player a "cargando".
+                if (!"live".equals(playerMode)) {
+                    try { return player.getCurrentPosition(); }
+                    catch (Exception e) { return Long.MIN_VALUE; }
+                }
+                // En directos la posición queda clavada en el borde del live
+                // edge aunque reproduzca bien — ahí sí mandan los contadores.
                 try {
                     DecoderCounters vc = player.getVideoDecoderCounters();
                     if (vc != null) return vc.renderedOutputBufferCount;
                     DecoderCounters ac = player.getAudioDecoderCounters();
                     if (ac != null) return ac.renderedOutputBufferCount;
                 } catch (Exception ignored) {}
-                // Sin contadores (decoder aún no creado — raro): la posición
-                // solo es fiable en VOD; en directos la ventana deslizante la
-                // deja quieta en el borde aun reproduciendo bien → señal no
-                // fiable, saltar la detección para no recargar en falso.
-                if ("live".equals(playerMode)) return Long.MIN_VALUE;
-                return player.getCurrentPosition();
+                return Long.MIN_VALUE;
             }
             @Override
             public void run() {
@@ -5622,7 +5629,13 @@ public class ExoPlayerPlugin extends Plugin {
                 if (nextEpTitle != null && !nextEpTitle.isEmpty() && !nextEpShown) {
                     long threshold = duration > 120000 ? 30000 : 10000;
                     long timeLeft = duration > 0 ? duration - position : -1;
-                    if (duration > 0 && timeLeft <= threshold && timeLeft > 0) {
+                    // Guarda anti-falso-positivo: si el contenedor reporta una
+                    // duración errónea (mkv/relay con metadatos rotos) el popup
+                    // podía saltar al minuto y su cuenta atrás de 10s cargaba
+                    // el siguiente episodio a mitad de la reproducción.
+                    // position>60s y duration>=3min descartan duraciones
+                    // erróneas (~90s) que disparaban el auto-play al minuto.
+                    if (duration >= 180000 && position > 60000 && timeLeft <= threshold && timeLeft > 0) {
                         nextEpShown = true;
                         Log.i(TAG, "Showing next episode popup: " + nextEpTitle);
                         showNextEpPopup();
@@ -11128,6 +11141,7 @@ public class ExoPlayerPlugin extends Plugin {
         closePlayer();
         if (debridRelay != null) { debridRelay.close(); debridRelay = null; }
         if (pendingDebridRelay != null) { pendingDebridRelay.close(); pendingDebridRelay = null; }
+        playlistProbePool.shutdownNow();
         logoCache.clear();
         super.handleOnDestroy();
     }

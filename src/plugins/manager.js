@@ -370,8 +370,20 @@ export class PluginManager {
     return owner ? [owner] : compatible
   }
 
+  // Caché de metadatos: la ficha re-abierta (volver atrás, "Continuar
+  // viendo", relacionadas) no re-pide getMeta a los plugins/TMDB.
+  // Solo en memoria — seasonsList puede ser grande para disco.
+  static metaCache = new Map()
+  static META_CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutos
+  static META_CACHE_MAX = 100
+
   async getMeta(type, id, signal) {
     await this.ensureReady()
+    const cacheKey = `${type}:${id}`
+    const cachedMeta = PluginManager.metaCache.get(cacheKey)
+    if (cachedMeta && Date.now() - cachedMeta.ts < PluginManager.META_CACHE_TTL_MS) {
+      return { ...cachedMeta.meta }
+    }
     const candidates = this.matchingPlugins(type, id)
     const results = await Promise.allSettled(
       candidates.map(plugin =>
@@ -381,7 +393,13 @@ export class PluginManager {
     for (let i = 0; i < results.length; i++) {
       const result = results[i]
       if (result.status === 'fulfilled' && result.value) {
-        return { ...result.value, pluginId: candidates[i].id }
+        const meta = { ...result.value, pluginId: candidates[i].id }
+        PluginManager.metaCache.set(cacheKey, { meta, ts: Date.now() })
+        if (PluginManager.metaCache.size > PluginManager.META_CACHE_MAX) {
+          const oldest = PluginManager.metaCache.keys().next().value
+          if (oldest) PluginManager.metaCache.delete(oldest)
+        }
+        return meta
       }
       if (result.status === 'rejected') {
         logWarn(`getMeta failed in plugin ${candidates[i].id}`, String(result.reason?.message || result.reason))

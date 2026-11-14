@@ -16,7 +16,7 @@ import Modal from '../components/ui/Modal.jsx'
 import { toast } from '../components/ui/Toast.jsx'
 import { resolveEmbed } from '../plugins/bundled/plurtasko/resolver.js'
 import { hasAnyDebrid, debridAvailable, unlockLink as adUnlockLink, uploadMagnet as adUploadMagnet } from '../plugins/bundled/alldebrid.js'
-import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob, markDebridTriggered, isDebridTriggered } from '../utils/debridJobs.js'
+import { getDebridJob, trackMagnet, adoptDebridMagnets, btihOf, resolveDebridJob, markDebridTriggered, isDebridTriggered, clearDebridTriggered } from '../utils/debridJobs.js'
 import { resolveYouTubeStream } from '../utils/youtube.js'
 import { waitForWarp } from '../utils/warpStatus.js'
 import { httpGetText } from '../utils/httpClient.js'
@@ -585,7 +585,7 @@ export default function Details() {
               setResumeTime(savedTime)
               setSelectedStream(chosen)
               addToHistory({ id: m.id, type: m.type, name: m.name, poster: m.poster, server: chosen.server || chosen.pluginName || '', ...(m.seasonsList ? { seasonsList: m.seasonsList } : {}) })
-            })
+            }, AUTOPLAY_NAV_DELAY_MS)
           } else if (!autoplayEnabled && savedProgress > 0.05 && savedProgress < 0.95 && savedTime > 0) {
             // Autoplay disabled: show resume dialog so user can choose
             setResumeTime(savedTime)
@@ -600,7 +600,7 @@ export default function Details() {
               setResumeTime(0)
               setSelectedStream(chosen)
               addToHistory({ id: m.id, type: m.type, name: m.name, poster: m.poster, server: chosen.server || chosen.pluginName || '', ...(m.seasonsList ? { seasonsList: m.seasonsList } : {}) })
-            })
+            }, AUTOPLAY_NAV_DELAY_MS)
           }
           // autoplay desactivado y sin progreso → no reproducir; el usuario elige
         }
@@ -623,18 +623,40 @@ export default function Details() {
 
   const [resolvingStream, setResolvingStream] = useState(false)
   const [resolvingText, setResolvingText] = useState('')
+  // Cuenta atrás visible del autoplay diferido: sin ella la ficha parece
+  // colgada durante la espera y el usuario cree que "Continuar" no funciona.
+  const [autoplayEta, setAutoplayEta] = useState(0)
+  const [autoplaySecs, setAutoplaySecs] = useState(0)
+  useEffect(() => {
+    if (!autoplayEta) return undefined
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((autoplayEta - Date.now()) / 1000))
+      setAutoplaySecs(left)
+      if (left <= 0) setAutoplayEta(0)
+    }
+    tick()
+    const iv = setInterval(tick, 500)
+    return () => clearInterval(iv)
+  }, [autoplayEta])
 
-  // Programa el autoplay con 60s de retraso. Si el usuario elige un stream
+  // Programa el autoplay con retraso. Si el usuario elige un stream
   // manualmente (handlePlay), el timer se cancela.
   const AUTOPLAY_DELAY_MS = 60000
+  // Al venir de "Continuar viendo" el usuario ya decidió: 10s bastan para
+  // ver la lista y cancelar tocando otro enlace — 60s parecía no responder.
+  const AUTOPLAY_NAV_DELAY_MS = 10000
   const scheduleAutoplay = (fn, delayMs = AUTOPLAY_DELAY_MS) => {
     if (autoplayTimerRef.current) clearTimeout(autoplayTimerRef.current)
+    setAutoplayEta(Date.now() + delayMs)
+    setAutoplaySecs(Math.ceil(delayMs / 1000))
     autoplayTimerRef.current = setTimeout(() => {
       autoplayTimerRef.current = null
+      setAutoplayEta(0)
       fn()
     }, delayMs)
   }
   const cancelAutoplay = () => {
+    setAutoplayEta(0)
     if (autoplayTimerRef.current) {
       clearTimeout(autoplayTimerRef.current)
       autoplayTimerRef.current = null
@@ -651,6 +673,11 @@ export default function Details() {
   // instancia AIOStreams (pedirla es lo que dispara el procesamiento).
   const startDebridDownload = async (stream) => {
     try {
+      // Torrents de canales que no son AIOStreams solo llevan el magnet en
+      // `url` — sin _magnet/_infoHash no se podría subir a AllDebrid.
+      if (!stream._magnet && /^magnet:/i.test(String(stream.url || ''))) {
+        stream = { ...stream, _magnet: stream.url, _infoHash: stream._infoHash || btihOf(stream.url) }
+      }
       const hash = (btihOf(stream._magnet) || stream._infoHash || '').toLowerCase()
       // Dedup local: ya trackeado en la cola o trigger enviado hace
       // segundos — ni la subida ni el disparo a la instancia deben
@@ -669,6 +696,7 @@ export default function Details() {
           trackMagnet(id, hash || stream._infoHash, stream.releaseTitle || stream.name)
           toast('Añadido a AllDebrid — verás el progreso aquí y aparecerá al estar listo')
         } else {
+          if (hash) clearDebridTriggered(hash)
           toast.error('AllDebrid no aceptó el magnet (cooldown o límite de la cuenta)')
         }
       } else if (stream._triggerUrl) {
@@ -1792,6 +1820,15 @@ export default function Details() {
         </div>
       )}
 
+      {/* Cuenta atrás del autoplay diferido — aviso de que va a sonar y de
+          que tocar otro enlace lo cancela (handlePlay → cancelAutoplay). */}
+      {autoplayEta > 0 && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2 px-4 py-2.5 rounded-full bg-dark-800/95 border border-primary-500/40 shadow-2xl text-sm text-white">
+          <Play size={14} className="text-primary-400" />
+          Reproduciendo en {autoplaySecs}s — toca un enlace para elegir otro
+        </div>
+      )}
+
       {/* Pantalla de carga mientras se resuelve un servidor/enlace */}
       {resolvingStream && (
         <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center gap-5">
@@ -2269,6 +2306,7 @@ export default function Details() {
               streams={sortByLangPriority(streams)}
               onPlay={handlePlay}
               onDownload={handleDownloadClick}
+              onCacheDebrid={startDebridDownload}
               disabled={!!resolvingStream}
             />
           </div>
@@ -2441,6 +2479,7 @@ export default function Details() {
               streams={sortByLangPriority(episodeStreams)}
               onPlay={handlePlay}
               onDownload={handleDownloadClick}
+              onCacheDebrid={startDebridDownload}
               disabled={!!resolvingStream}
             />
           </div>

@@ -17,7 +17,7 @@ import { getTmdbApiKey } from '../../builtIn/tmdb.js'
 import { resolveEmbedWithMeta, resolveEmbed69All, probeM3u8Quality, DEAD_LINK } from './resolver.js'
 import { fetchHtml } from './http.js'
 import { detectLangFromText, normalizeLang, extractQualityFromUrl, extractQualityFromText } from './meta.js'
-import { isAlldebridSupported, debridAvailable, unlockLink as adUnlockLink } from '../alldebrid.js'
+import { isAlldebridSupported, debridAvailable } from '../alldebrid.js'
 
 // AllDebrid es el único servicio debrid configurado. Debrid solo existe
 // con ruta VPS (todo debrid por VPS): sin él no se producen ni se
@@ -195,22 +195,6 @@ function normalizeStream(s, defaultLang) {
   const base = s.releaseTitle || server
   const name = `${base}${lang ? ` (${lang})` : ''} ${quality}`.trim()
   return { ...s, quality, lang, server, name }
-}
-
-// Desbloquea hosters compatibles y magnets con AllDebrid.
-async function debridUnlock(url) {
-  let debridUrl = url
-  if (/mega\.nz\/embed\//i.test(url)) {
-    debridUrl = url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')
-  }
-  if (!(await debridAvailable()) || !isAlldebridSupported(debridUrl)) return null
-  try {
-    const result = await adUnlockLink(debridUrl)
-    return result?.link ? { link: result.link, via: 'AllDebrid' } : null
-  } catch (e) {
-    logWarn(`[AllDebrid] Failed to unlock: ${hostOf(debridUrl)}`, String(e?.message || e))
-    return null
-  }
 }
 
 // Validate a channel search result by TMDB/IMDb ID when the channel exposes it.
@@ -798,6 +782,11 @@ async function resolveStreams(streams, onBatch, context = {}) {
 
   // Resolve all embeds in parallel with a concurrency limit
   const CONCURRENCY = 5
+  // Una sola comprobación de ruta debrid para todo el lote: las fuentes
+  // que la necesitan se emiten como streamType 'debrid' y Details las
+  // desbloquea AL PULSAR PLAY — cero llamadas /link/unlock durante el
+  // browse (antes cada embed que fallaba el resolver JS gastaba una).
+  const debridOk = await anyDebridEnabled()
   const resolveOne = async (s) => {
     // Check if this is an embed69 URL (cuevana embed wrapper)
     if (s.url && /embed69\.org|cuevanapro\.org|\/vidurl\//.test(s.url)) {
@@ -828,11 +817,11 @@ async function resolveStreams(streams, onBatch, context = {}) {
               } catch (e) {
                 logWarn(`[Plurtasko] JS resolver failed for ${srv.server}: ${hostOf(srv.url)}`, String(e?.message || e))
               }
-              // Try debrid
-              const debrid = await debridUnlock(srv.url)
-              if (debrid?.link) {
-                const streamType = inferStreamType(debrid.link, 'mp4')
-                return { ...srv, directUrl: debrid.link, streamType, viaDebrid: debrid.via }
+              // Debrid lazy: sin unlock durante el browse — el servidor
+              // se marca para emitirse como fuente 'debrid'.
+              const candUrl = srv.url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')
+              if (debridOk && isAlldebridSupported(candUrl)) {
+                return { ...srv, debridUrl: candUrl }
               }
               // Resolution failed - keep as embed for native WebView
               return { ...srv, directUrl: null, streamType: 'embed' }
@@ -850,6 +839,24 @@ async function resolveStreams(streams, onBatch, context = {}) {
             const meta = srv.meta || {}
             const lang = srv.lang || s.lang || meta.lang || ''
 
+            if (srv.debridUrl) {
+              // Fila 'debrid' (se desbloquea al pulsarla) + la embed
+              // original como fallback si el unlock falla en Details.
+              const dServer = `${srv.server} (Debrid)`
+              results.push({
+                ...s,
+                name: `${dServer}${lang ? ` (${lang})` : ''}`,
+                url: srv.debridUrl,
+                streamType: 'debrid',
+                server: dServer,
+                lang,
+                quality: pickQuality(srv.quality, s.quality),
+                title: meta.title || s.title,
+                originalUrl: s.url,
+                headers,
+              })
+              srv.directUrl = null
+            }
             if (!srv.directUrl) {
               // Keep unresolved embeds - the WebView/native player can try to play them
               results.push({
@@ -867,7 +874,7 @@ async function resolveStreams(streams, onBatch, context = {}) {
               continue
             }
             const quality = pickQuality(urlQuality, meta.quality, srv.quality, s.quality)
-            const srvName = srv.viaDebrid ? `${srv.server} (Debrid)` : srv.server
+            const srvName = srv.server
             results.push({
               ...s,
               name: `${srvName}${lang ? ` (${lang})` : ''}`,
@@ -879,10 +886,6 @@ async function resolveStreams(streams, onBatch, context = {}) {
               title: meta.title || s.title,
               originalUrl: s.url,
               headers,
-              viaDebrid: srv.viaDebrid,
-              // Si el link vino de debrid, guardar el enlace restringido para
-              // re-desbloquearlo cuando la URL firmada caduque.
-              ...(srv.viaDebrid ? { originalDebridUrl: srv.url } : {}),
             })
           }
           return results
@@ -918,19 +921,13 @@ async function resolveStreams(streams, onBatch, context = {}) {
         }
       }
 
-      // Try debrid services if JS resolver failed (or if it's a premium host)
-      let viaDebrid = null
-      if (!directUrl) {
-        console.log(`[Plurtasko] Trying debrid for: ${hostOf(s.url)}`)
-        const debrid = await debridUnlock(s.url)
-        if (debrid?.link) {
-          directUrl = debrid.link
-          viaDebrid = debrid.via
-          console.log(`[Plurtasko] Debrid unlocked: ${hostOf(s.url)} → ${hostOf(directUrl)}`)
-        } else {
-          console.log(`[Plurtasko] Debrid failed for: ${hostOf(s.url)}`)
-        }
-      }
+      // Debrid lazy: sin unlock durante el browse. Si el host es
+      // desbloqueable por AllDebrid la fuente se emite como 'debrid' y
+      // Details la desbloquea al pulsarla (mega.nz/embed → /file/, que
+      // es la forma que AllDebrid acepta).
+      const lazyDebridUrl = (!directUrl && debridOk
+        && isAlldebridSupported(s.url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/')))
+        ? s.url.replace(/mega\.nz\/embed\//i, 'mega.nz/file/') : null
 
       if (directUrl) {
         // Detect stream type from URL - check for HLS patterns including query params
@@ -978,12 +975,41 @@ async function resolveStreams(streams, onBatch, context = {}) {
           const hostMatch = s.url.match(/https?:\/\/([^\/]+)/)
           serverName = hostMatch ? hostMatch[1].replace(/^www\./, '') + ' (Debrid)' : 'Premium (Debrid)'
         }
-        return [{ ...s, server: serverName, name: serverName + (lang ? ` (${lang})` : ''), url: directUrl, streamType: newType, quality, lang, title: embedMeta.title || s.title, originalUrl: s.url, headers, ...(viaDebrid ? { originalDebridUrl: s.url, viaDebrid } : {}) }]
+        return [{ ...s, server: serverName, name: serverName + (lang ? ` (${lang})` : ''), url: directUrl, streamType: newType, quality, lang, title: embedMeta.title || s.title, originalUrl: s.url, headers }]
+      }
+      // Fila 'debrid' perezosa: Details la desbloquea al pulsarla. Los
+      // hosts premium no tienen fallback embed (nunca lo tuvieron); el
+      // resto la emite junto a la embed por si el unlock falla al play.
+      let lazyRow = null
+      if (lazyDebridUrl) {
+        const lazyLang = s.lang || embedMeta.lang || ''
+        const lazyHost = (() => { try { return new URL(s.url).origin } catch { return '' } })()
+        const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+        const lazyHeaders = lazyHost
+          ? { Referer: lazyHost + '/', Origin: lazyHost, 'User-Agent': MOBILE_UA }
+          : { 'User-Agent': MOBILE_UA }
+        const hostMatch = s.url.match(/https?:\/\/([^\/]+)/)
+        const dServer = isPremiumHost
+          ? (hostMatch ? hostMatch[1].replace(/^www\./, '') + ' (Debrid)' : 'Premium (Debrid)')
+          : `${s.server} (Debrid)`
+        lazyRow = {
+          ...s,
+          server: dServer,
+          name: `${dServer}${lazyLang ? ` (${lazyLang})` : ''}`,
+          url: lazyDebridUrl,
+          streamType: 'debrid',
+          quality: pickQuality(embedMeta.quality, s.quality),
+          lang: lazyLang,
+          title: embedMeta.title || s.title,
+          originalUrl: s.url,
+          headers: lazyHeaders,
+        }
       }
       // Keep as embed - the WebView/native player can try to play it.
       // But skip hosts that can never be played without debrid:
       // - premium file hosts (rapidgator, nitroflare, etc.) when debrid failed
       if (isPremiumHost) {
+        if (lazyRow) return [lazyRow]
         console.log(`[Plurtasko] Skipping ${s.server} (no playable URL available, debrid failed or not supported)`)
         return []
       }
@@ -991,7 +1017,8 @@ async function resolveStreams(streams, onBatch, context = {}) {
       const headers = embedHost
         ? { Referer: embedHost + '/', Origin: embedHost, 'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' }
         : { 'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' }
-      return [{ ...s, streamType: 'embed', lang: s.lang || embedMeta.lang || '', quality: s.quality || embedMeta.quality || '', title: embedMeta.title || s.title, originalUrl: s.url, headers }]
+      const embedRow = { ...s, streamType: 'embed', lang: s.lang || embedMeta.lang || '', quality: s.quality || embedMeta.quality || '', title: embedMeta.title || s.title, originalUrl: s.url, headers }
+      return lazyRow ? [lazyRow, embedRow] : [embedRow]
     }
 
     return []

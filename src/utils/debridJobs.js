@@ -81,6 +81,11 @@ export function isDebridTriggered(infoHash) {
   if (Date.now() - ts > TRIGGER_TTL_MS) { triggeredHashes.delete(h); return false }
   return true
 }
+// La subida falló (cooldown/límite): sin esto el hash quedaba marcado 10min
+// y el siguiente toque respondía "ya está en cola" aunque nunca se subió.
+export function clearDebridTriggered(infoHash) {
+  triggeredHashes.delete(String(infoHash || '').toLowerCase())
+}
 
 // Empareja entradas "descargando" con los magnets ya presentes en la
 // cola de AllDebrid (subidos por la instancia AIOStreams, no por la app).

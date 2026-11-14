@@ -130,6 +130,10 @@ export function makeTorrentStream(provider, torrentUrl, quality, title) {
   // El idioma se detecta del nombre del release (LATINO/Castellano/VOSE…);
   // sin pista queda sin etiqueta en vez de asumir un idioma.
   const lang = detectLangFromText(`${label} ${file}`)
+  // Magnet → identidad debrid: _infoHash permite consultar el caché de
+  // AllDebrid (applyDebridAvailability) y _magnet subirlo a la cola para
+  // verlo luego sin esperar al swarm local.
+  const btih = (torrentUrl.match(/btih:([a-zA-Z0-9]{32,40})/i)?.[1] || '').toLowerCase()
   return {
     name: `${provider}${lang ? ` (${lang})` : ''} ${quality || 'HD'}`,
     url: torrentUrl,
@@ -140,5 +144,6 @@ export function makeTorrentStream(provider, torrentUrl, quality, title) {
     title: label,
     pluginName: provider,
     pluginId: 'plurtasko',
+    ...(btih ? { _magnet: torrentUrl, _infoHash: btih } : {}),
   }
 }

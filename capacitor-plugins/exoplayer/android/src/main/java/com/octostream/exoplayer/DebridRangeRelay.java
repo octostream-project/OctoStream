@@ -230,7 +230,15 @@ final class DebridRangeRelay implements AutoCloseable {
             throw new IOException("Relay stopped");
         }
         try {
-            return task.get();
+            // Sin timeout un chunk colgado (proxy muerto a mitad de
+            // descarga) bloqueaba el hilo de la conexión para siempre y
+            // isRunning() nunca lo detectaba — la reproducción quedaba
+            // en espera eterna en vez de recrear el relay.
+            return task.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            task.cancel(true);
+            failures.incrementAndGet();
+            throw new IOException("Chunk download timeout");
         } catch (Exception e) {
             failures.incrementAndGet();
             throw e;
