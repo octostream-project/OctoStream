@@ -167,6 +167,11 @@ export default function UpdateChecker() {
   if (!update) return null
 
   const startInstall = async () => {
+    // El diálogo (y la APK descargada) pueden ser de una sesión anterior:
+    // si la app se actualizó por otra vía, instalar la APK vieja hace que
+    // Android rechace con INSTALL_FAILED_VERSION_DOWNGRADE. Re-verificar.
+    const cur = await AppUpdater.getAppVersion().catch(() => null)
+    if (cur && update.versionCode <= cur.versionCode) { setUpdate(null); return }
     const perm = await AppUpdater.canInstallUnknownApps().catch(() => ({ allowed: true }))
     if (!perm.allowed) { setPhase('needPerm'); return }
     // Si falta el permiso, el plugin resuelve {needsPermission:true} en vez de
