@@ -141,7 +141,12 @@ export async function exportSettings(categories = null) {
   const content = buildBackup(categories, extra)
   if (isAndroidNative()) {
     try {
-      const r = await ExoPlayer.exportConfig({ filename: BACKUP_NAME, content })
+      // Nombre único con fecha: el export Android va directo a
+      // Descargas/OctoStream vía MediaStore y nunca debe pisar un
+      // backup anterior — cada export es un archivo nuevo.
+      const stamp = new Date().toISOString().slice(0, 23).replace(/[:T.]/g, '-')
+      const filename = BACKUP_NAME.replace(/\.json$/, `-${stamp}.json`)
+      const r = await ExoPlayer.exportConfig({ filename, content })
       return r?.saved === true
     } catch (e) {
       if (e?.message === 'cancelled') return false

@@ -2343,7 +2343,9 @@ export default function Settings() {
                     const cats = BACKUP_CATEGORIES.filter(c => backupCats[c.id]).map(c => c.id)
                     if (!cats.length) { setBackupMsg('Marca al menos una sección'); return }
                     const ok = await exportSettings(cats)
-                    setBackupMsg(ok ? 'Copia guardada' : '')
+                    setBackupMsg(ok
+                      ? (isAndroidNative() ? 'Copia guardada en Descargas/OctoStream' : 'Copia guardada')
+                      : '')
                   } catch (e) {
                     setBackupMsg(`No se pudo exportar: ${e?.message || 'error'}`)
                   }

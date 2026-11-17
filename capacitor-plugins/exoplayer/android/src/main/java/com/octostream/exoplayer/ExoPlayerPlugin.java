@@ -4392,10 +4392,24 @@ public class ExoPlayerPlugin extends Plugin {
      */
     @PluginMethod
     public void exportConfig(PluginCall call) {
+        String content = call.getString("content", "{}");
+        String name = call.getString("filename", "octostream-backup.json");
+        // API 29+: escritura directa en MediaStore.Downloads, SIN picker SAF.
+        // El picker dejaba una ventana mortal: Android mata el proceso con
+        // DocumentsUI en primer plano (poco RAM / "Don't keep activities") y
+        // el ActivityCallback nunca llega — el documento queda creado a 0
+        // bytes. Con MediaStore no hay picker ni resultado que perder.
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try {
+                exportViaMediaStore(call, content, name);
+                return;
+            } catch (Exception e) {
+                Log.w(TAG, "exportConfig mediastore: " + e.getMessage() + " — fallback SAF");
+            }
+        }
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        String name = call.getString("filename", "octostream-backup.json");
         intent.putExtra(Intent.EXTRA_TITLE, name);
         // Limpia un export anterior abortado (proceso muerto con el picker
         // abierto deja el temporal y la preferencia huérfanos).
@@ -4404,7 +4418,6 @@ public class ExoPlayerPlugin extends Plugin {
         // PluginCall no garantiza conservar args grandes tras el round-trip
         // de la actividad (proceso en background, call evictada) — leer
         // "content" en el callback producía archivos de 0 bytes.
-        String content = call.getString("content", "{}");
         String tmpPath = null;
         try {
             java.io.File tmp = java.io.File.createTempFile("octo-export-", ".json",
@@ -4419,6 +4432,34 @@ public class ExoPlayerPlugin extends Plugin {
         getContext().getSharedPreferences("octostream_exo", Context.MODE_PRIVATE)
             .edit().putString("pending_export", tmpPath == null ? "" : tmpPath).apply();
         startActivityForResult(call, intent, "exportConfigResult");
+    }
+
+    /**
+     * Export directo a Descargas/OctoStream vía MediaStore (API 29+):
+     * IS_PENDING mientras se escribe y se publica al final. Sin picker,
+     * sin permisos y sin ventana de muerte del proceso.
+     */
+    private void exportViaMediaStore(PluginCall call, String content, String name) throws Exception {
+        android.content.ContentValues cv = new android.content.ContentValues();
+        cv.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name);
+        cv.put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json");
+        cv.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/OctoStream");
+        cv.put(android.provider.MediaStore.Downloads.IS_PENDING, 1);
+        Uri uri = getContext().getContentResolver().insert(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+        if (uri == null) throw new IllegalStateException("mediastore insert null");
+        try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new IllegalStateException("openOutputStream null");
+            out.write(content.getBytes("UTF-8"));
+            out.flush();
+        }
+        cv.clear();
+        cv.put(android.provider.MediaStore.Downloads.IS_PENDING, 0);
+        getContext().getContentResolver().update(uri, cv, null, null);
+        JSObject ret = new JSObject();
+        ret.put("saved", true);
+        ret.put("uri", uri.toString());
+        call.resolve(ret);
     }
 
     /**
