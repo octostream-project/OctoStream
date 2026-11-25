@@ -18,13 +18,19 @@ import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
 
 // Candidate domains — the service rotates often; first one answering with
-// schedule markup wins and is cached.
+// schedule markup wins and is cached. dlive.sx/dlstreams.st ya no resuelven
+// DNS; el servicio vive ahora en thedaddy.* (dlhd.st redirige ahí).
 const BASE_CANDIDATES = [
-  'https://dlive.sx',
+  'https://thedaddy.li',
+  'https://thedaddy.pk',
   'https://dlhd.st',
+  'https://dlive.sx',
   'https://dlstreams.st',
 ]
-const EXTRA_SOURCES = ['extra_sports', 'extra_backup', 'extra_sd']
+const EXTRA_SOURCES = [
+  'extra_sports', 'extra_backup', 'extra_sd',
+  'extra_plus', 'extra_ppv', 'extra_topembed',
+]
 const BASE_TTL = 30 * 60 * 1000
 const SCHEDULE_TTL = 5 * 60 * 1000
 

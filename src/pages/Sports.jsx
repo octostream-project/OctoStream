@@ -294,8 +294,9 @@ function formatKickoff(ms) {
 }
 
 // Ventana "próximo a empezar": los partidos que arrancan en los próximos
-// 15 min se muestran como EN DIRECTO aunque el proveedor aún no los marque.
-const LIVE_EARLY_MS = 15 * 60 * 1000
+// 20 min se muestran como EN DIRECTO aunque el proveedor aún no los marque
+// — así sus canales/enlaces ya están visibles y scrapeados antes del saque.
+const LIVE_EARLY_MS = 20 * 60 * 1000
 
 // Icono del deporte cuando no hay escudo/foto (como hace la propia FCTV):
 // por sportType numérico (FCTV) o slug de Sofascore (DLive). Marca es fútbol.
@@ -345,7 +346,7 @@ const MatchCard = memo(function MatchCard({ item, resolving, onPlay, liveLabel, 
   const score = item._score
   const hasScore = score?.home != null && score?.away != null
   const kickoff = formatKickoff(item._matchDate)
-  // EN DIRECTO también si el saque es en ≤15 min (el proveedor suele
+  // EN DIRECTO también si el saque es en ≤20 min (el proveedor suele
   // marcarlo live unos minutos tarde).
   const live = item._isLive
     || (item._matchDate && item._matchDate - Date.now() <= LIVE_EARLY_MS
@@ -673,7 +674,12 @@ export default function Sports() {
               merged.push({ ...d, pluginId: DLIVE_PLUGIN })
             }
           }
+          // DLive primero en las listas: sus canales son la fuente principal.
+          // El sort es estable y va DESPUÉS de dedupeMatches — el item
+          // primario del merge sigue siendo FCTV (metadatos/fecha correctos).
+          const hasDlive = (i) => i.pluginId === DLIVE_PLUGIN || !!i._dliveItem
           return applyStickyScores(dedupeMatches(merged))
+            .sort((a, b) => (hasDlive(b) ? 1 : 0) - (hasDlive(a) ? 1 : 0))
         }
         const paint = () => {
           if (cancelled || fctvItems === null) return
@@ -875,9 +881,15 @@ export default function Sports() {
     pickerOpenedAtRef.current = Date.now()
     lastPickerItemRef.current = item.id
     const acc = []
+    // DLive primero dentro de cada tier: sus canales (watchlivelive/HLS y
+    // players propios) son la fuente principal de streams deportivos;
+    // los embeds FCTV quedan como respaldo debajo.
+    const isDliveSrc = (s) => s._fctvItem?.pluginId === DLIVE_PLUGIN
     const order = (list) => [
-      ...list.filter(s => s.streamType !== 'embed'),
-      ...list.filter(s => s.streamType === 'embed'),
+      ...list.filter(s => isDliveSrc(s) && s.streamType !== 'embed'),
+      ...list.filter(s => !isDliveSrc(s) && s.streamType !== 'embed'),
+      ...list.filter(s => isDliveSrc(s) && s.streamType === 'embed'),
+      ...list.filter(s => !isDliveSrc(s) && s.streamType === 'embed'),
     ]
     const flush = () => {
       if (requestId !== playRequestRef.current || ctrl.signal.aborted) return
@@ -1043,7 +1055,7 @@ export default function Sports() {
       // sin tarjeta de calendario también van ahí; los que no están en directo
       // ni en la jornada se descartan (evita duplicados sin escudos).
       // Solo se mueve a EN DIRECTO lo que puede estar jugándose ahora:
-      // fecha pasada/en ≤15 min o sin fecha. Un partido con kickoff futuro
+      // fecha pasada/en ≤20 min o sin fecha. Un partido con kickoff futuro
       // NO sale aunque el proveedor lo marque live por error — la flag
       // parpadea y vaciaba jornadas enteras.
       const hasResult = (i) => i._score?.home != null && i._score?.away != null
