@@ -12,7 +12,7 @@ import { fetchMarcaCalendar, MARCA_SLUGS } from '../utils/marcaLive.js'
 import { teamsMatch, leagueKey, normTeam } from '../utils/teamMatch.js'
 import { enrichLogos, fetchLeagueEvents } from '../utils/sofascore.js'
 import { fctvEmbedFallbacks, fctvLookupItem, fctvWarmupSitemap } from '../plugins/bundled/fctv/index.js'
-import { sortLinks, isGenericLabel } from '../plugins/bundled/dlive/parse.js'
+import { sortLinks, isGenericLabel, rewriteToPlayer } from '../plugins/bundled/dlive/parse.js'
 import { matchesForSportsView, preferFctvMatchDate } from '../utils/sportsMatch.js'
 
 const SPORTS_PLUGIN = 'fctv'
@@ -908,16 +908,19 @@ export default function Sports() {
             // resolución headless/WebView los abre en el player.
             if (!list.length && src._links?.length) {
               let genericIdx = 0
-              list = sortLinks(src._links).map(l => ({
-                name: isGenericLabel(l.label) ? `DLive · Enlace ${++genericIdx}` : `DLive ${l.label || 'Web'}`,
-                title: 'DLive · Web',
-                url: l.url,
-                referer: l.referer,
-                streamType: 'embed',
-                isLive: true,
-                _noCache: true,
-                _wvPlayback: /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b/i.test(l.url) || undefined,
-              }))
+              list = sortLinks(src._links).map(l => {
+                const playerUrl = rewriteToPlayer(l.url)
+                return {
+                  name: isGenericLabel(l.label) ? `DLive · Enlace ${++genericIdx}` : `DLive ${l.label || 'Web'}`,
+                  title: 'DLive · Web',
+                  url: playerUrl,
+                  referer: l.referer,
+                  streamType: 'embed',
+                  isLive: true,
+                  _noCache: true,
+                  _wvPlayback: /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b|daddy\.php|premiumtv/i.test(playerUrl) || undefined,
+                }
+              })
             }
             // FCTV: si la resolución volvió vacía (timeout de la API, abort
             // del manager), los embeds se construyen solo con los metadatos

@@ -49,27 +49,29 @@ const API_HOST_CANDIDATES = [
   'https://apis-data10.tcdru136ovur.ru',
 ]
 
-// Web-domain fallbacks if both params and hub page fail
+// Web-domain fallbacks if both params and hub page fail (fctv33go.mom es el
+// vigente según params nov 2026; los otros dos siguen sirviendo sitemaps).
 const WEB_DOMAIN_FALLBACKS = [
+  'https://www.fctv33go.mom',
   'https://www.fctv33hd.cv',
   'https://www.fctv33go.sbs',
-  'https://www.fctv33hd.host',
 ]
 
-// Player-iframe domain fallbacks (g_player_domains.foth)
+// Player-iframe domain fallbacks (g_player_domains.foth, nov 2026)
 const PLAYER_DOMAIN_FALLBACKS = [
-  'https://jack29eo.mpgreatestclgczbmiddle.my',
-  'https://nadia59bc.mp77g69ainei3gx2voxygen.ru',
-  'https://morgan33cg.006hndchurch05g7ifbreathing.sbs',
+  'https://jack13eo.mpaver6fuiwild.my',
+  'https://nadia83bc.mp77g69ainei3gx2voxygen.ru',
+  'https://nia03cc.ra4zxrjoinedq9bv2heat.sbs',
 ]
 
 // Direct iframe-player host fallbacks (common:web:client.*.iframePlayerDomains).
-// teagan01bp.* es el Referer oficial según el rbHeaders embebido del APK.
+// Refrescados desde /api/common/params (nov 2026): los dos últimos de la
+// tanda anterior (tim01bp/teagan01bp) ya no responden.
 const IFRAME_DOMAIN_FALLBACKS = [
   'nadia01eo.tn76degree12ec3out.cfd',
   'mimi01eo.fut0newsiryroquite.cfd',
-  'tim01bp.2wc4tool8utphnumber.cfd',
-  'teagan01bp.mvksstick9uq6cprotection.cfd',
+  'jack03eo.m8ow6pride8nly2qearly.cfd',
+  'jack07eo.m8ow6pride8nly2qearly.cfd',
 ]
 
 function safeJson(s) { try { return JSON.parse(s) } catch { return null } }

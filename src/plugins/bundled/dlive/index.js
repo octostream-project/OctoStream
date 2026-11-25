@@ -12,7 +12,7 @@
 import { createPlugin, PluginManifest, CONTENT_TYPES } from '../../base.js'
 import { logWarn } from '../../../utils/logger.js'
 import { httpGetText, httpGetJson, shortSignal } from '../../../utils/httpClient.js'
-import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, eventKeyNoLeague, sofaSportFor, sortLinks, isGenericLabel, usableLinks, stripIcons } from './parse.js'
+import { parseSchedule, extractLiveLiveUrl, catalogFor, eventId, eventKeyNoLeague, sofaSportFor, sortLinks, isGenericLabel, usableLinks, stripIcons, circularKickoffUtc, rewriteToPlayer } from './parse.js'
 import { probeHlsQuality } from '../../../utils/streamProbe.js'
 import { langFromChannelLabel } from '../../../utils/streamMeta.js'
 import { enrichLogos } from '../../../utils/sofascore.js'
@@ -136,29 +136,64 @@ const SPORT_LABEL = {
   'dlive-tennis': 'Tenis', 'dlive-motor': 'Motor', 'dlive-others': 'Otros',
 }
 
+// La categoría "LIVE NOW" desapareció del schedule (los extras que la
+// llevaban responden vacíos), así que el flag live se deriva del horario:
+// en emisión si el saque fue hace <3h o es en ≤20 min — misma ventana que
+// la página (LIVE_EARLY_MS) para que los canales se scrapeen antes del
+// inicio. circularKickoffUtc convierte el HH:mm UTC en timestamp real.
+const LIVE_BACK_MS = 3 * 3600e3
+const LIVE_AHEAD_MS = 20 * 60e3
+
 function toItem(e, catId) {
+  const kickoff = circularKickoffUtc(e.time)
+  const now = Date.now()
+  const inWindow = kickoff && (now - kickoff) <= LIVE_BACK_MS && (kickoff - now) <= LIVE_AHEAD_MS
+  // La hora visible va en local del usuario — el data-time crudo es UTC.
+  const localTime = kickoff
+    ? new Date(kickoff).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    : e.time
   return {
     id: eventId(e),
     type: 'channel',
     pluginId: 'dlive',
     name: e.home && e.away ? `${e.home} vs ${e.away}` : e.title,
     title: e.home && e.away ? `${e.home} vs ${e.away}` : e.title,
-    description: [e.league || e.category, e.time].filter(Boolean).join(' · '),
+    description: [e.league || e.category, localTime].filter(Boolean).join(' · '),
     _home: e.home ? { name: e.home, logo: null } : null,
     _away: e.away ? { name: e.away, logo: null } : null,
     _league: { name: e.league || e.category },
     _score: null,
     _sofaSport: sofaSportFor(e.category, e.league),
-    // DLive only publishes HH:mm, not the event date. Never turn that into
-    // today's date; FCTV/Marca provide the authoritative kickoff timestamp.
-    _matchDate: 0,
-    _isLive: !!e.live,
+    // Horario circular (±12h): el schedule no publica fecha, solo HH:mm UTC.
+    // FCTV/Marca la sobrescriben con la suya (authoritative) al fusionar.
+    _matchDate: kickoff,
+    _isLive: !!e.live || !!inWindow,
     genre: SPORT_LABEL[catId] || 'Otros',
     _links: e.links,
   }
 }
 
 // ─── Stream resolution ───────────────────────────────────────────────────────
+
+// El player real vive en dembed.st/premiumtv/daddy.php?id=N — watch.php y
+// stream-N.php son solo wrappers de anuncios que lo iframean en cadena (el
+// WebView acababa mostrando publicidad y el vídeo nacía en un iframe de
+// tercer nivel, fuera del alcance del resolver). El host del player es el
+// mismo para todos los canales; se extrae de una página stream-N y se
+// cachea para resistir rotaciones de dominio.
+let playerBaseCache = null // { ts, base } — base = "https://host/premiumtv/daddy.php"
+async function resolvePlayerBase(base, signal) {
+  if (playerBaseCache && Date.now() - playerBaseCache.ts < BASE_TTL) return playerBaseCache.base
+  try {
+    const html = await httpGetText(`${base}/stream/stream-1.php`, UA, shortSignal(signal, 8000))
+    const m = String(html || '').match(/<iframe[^>]*src="(https?:\/\/[^/]+\/[^"?]*daddy\.php)\?id=\d+"/)
+    if (m) {
+      playerBaseCache = { ts: Date.now(), base: m[1] }
+      return m[1]
+    }
+  } catch { /* fallthrough — se usa el fallback stream-N */ }
+  return null
+}
 
 // watchlivelive.php expone el m3u8 firmado en el iframe (sin JS) → HLS directo.
 // watch.php / watchextra / stream-N son players ofuscados → embed (la app los
@@ -169,6 +204,13 @@ async function resolveEventStreams(item, signal) {
   // (admin/delta/foxtrot… Stream) se ocultan cuando hay al menos un canal
   // nombrado — usableLinks los conserva solo si TODOS lo son.
   const links = usableLinks(item._links)
+  // Base del player real (dembed…/daddy.php): una sola sonda por tanda —
+  // watch.php?id=N se enlaza directo al documento del player, saltando los
+  // dos wrappers de anuncios que impedían la resolución en el WebView.
+  const hasWatchLinks = links.some(l => /watch\.php\?id=\d+/.test(l.url))
+  const playerBase = hasWatchLinks && baseCache?.base
+    ? await resolvePlayerBase(baseCache.base, signal).catch(() => null)
+    : null
   // Los jobs corren en paralelo pero el resultado se coloca en el índice
   // original: sortLinks ya puso los canales con nombre real antes que los
   // códigos genéricos de respaldo (admin/delta/foxtrot…) — si se empujara al
@@ -206,10 +248,16 @@ async function resolveEventStreams(item, signal) {
       }
     }
     // Player web (ofuscado) o watchlivelive no resuelto → embed fallback.
-    // Los players tiestep/«Sandbox check» (watch.php, stream-N.php,
-    // watchextra) sirven el m3u8 SOLO a su propio documento — la URL
-    // extraída da 403 en ExoPlayer, así que van directo al WebView playback.
-    const wvPlayback = /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b/i.test(link.url)
+    // Los players sirven el m3u8 firmado con Turnstile SOLO a su propio
+    // documento — la URL extraída da 403 en ExoPlayer, así que van directo
+    // al WebView playback (relay a través del documento).
+    // watch.php?id=N → daddy.php?id=N directo cuando conocemos el host del
+    // player; si no, al menos al stream-N.php (un wrapper menos).
+    const idM = link.url.match(/watch\.php\?id=(\d+)/)
+    const playerUrl = playerBase && idM
+      ? `${playerBase}?id=${idM[1]}`
+      : rewriteToPlayer(link.url)
+    const wvPlayback = /watch\.php|\/stream\/|watchextra|watchplus|\/plus\b|daddy\.php|premiumtv/i.test(playerUrl)
     // Códigos genéricos de respaldo (isGenericLabel) sin nombre real: el
     // proveedor ya no da el canal, así que se numeran en vez de mostrar la
     // palabra en crudo ("admin Stream" → "DLive · Enlace 1").
@@ -217,7 +265,7 @@ async function resolveEventStreams(item, signal) {
     slots[i] = {
       name,
       title: 'DLive · Web',
-      url: link.url,
+      url: playerUrl,
       referer: baseCache?.base ? baseCache.base + '/' : undefined,
       streamType: 'embed',
       lang,

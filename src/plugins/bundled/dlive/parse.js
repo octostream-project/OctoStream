@@ -197,6 +197,37 @@ export function usableLinks(links) {
   return named.length ? named : (links || [])
 }
 
+// El data-time del schedule es UTC "HH:mm" (la web lo convierte a la zona
+// local del visitante con getTimezoneOffset). Como el schedule solo cubre
+// ~24h, la fecha correcta del evento es la instancia UTC de esa hora más
+// cercana a ahora (±12h) — resuelve el cruce de medianoche sin ambigüedad:
+// a las 23:50, "00:10" es mañana; a las 00:05, "23:55" fue hace 10 min.
+export function circularKickoffUtc(hhmm, nowMs = Date.now()) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || '').trim())
+  if (!m) return 0
+  const now = new Date(nowMs)
+  const base = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    Number(m[1]), Number(m[2]))
+  const DAY = 86400000
+  let best = base
+  let bestDiff = Math.abs(base - nowMs)
+  for (const cand of [base - DAY, base + DAY]) {
+    const d = Math.abs(cand - nowMs)
+    if (d < bestDiff) { best = cand; bestDiff = d }
+  }
+  return best
+}
+
+// watch.php?id=N es solo un wrapper de anuncios que iframea el player real
+// en /stream/stream-N.php — cargar el wrapper en el WebView mostraba la
+// página de publicidad en vez del canal. Se reescribe directo al documento
+// del player (responde 200 sin referer), que es donde corre el JS que
+// levanta el m3u8.
+export const rewriteToPlayer = (url) => {
+  const m = String(url || '').match(/^(https?:\/\/[^/]+)\/watch\.php\?id=(\d+)\s*$/)
+  return m ? `${m[1]}/stream/stream-${m[2]}.php` : url
+}
+
 // djb2 — id estable y corto (mismo id en getCatalog/getStreams).
 export const eventId = (e) => {
   const k = eventKey(e)

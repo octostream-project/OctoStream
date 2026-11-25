@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseSchedule, parseEventTitle, extractLiveLiveUrl, catalogFor, eventId, stripIcons,
-  eventKeyNoLeague, isGenericLabel, sortLinks, usableLinks,
+  eventKeyNoLeague, isGenericLabel, sortLinks, usableLinks, circularKickoffUtc,
 } from './parse.js'
 
 const BASE = 'https://dlive.sx'
@@ -202,5 +202,42 @@ describe('usableLinks', () => {
   it('handles empty input', () => {
     expect(usableLinks([])).toEqual([])
     expect(usableLinks(null)).toEqual([])
+  })
+})
+
+describe('circularKickoffUtc', () => {
+  const DAY = 86400000
+  // now = 2026-11-25T18:00:00Z
+  const now = Date.UTC(2026, 10, 25, 18, 0, 0)
+  it('maps same-day times to today UTC', () => {
+    expect(circularKickoffUtc('20:00', now)).toBe(Date.UTC(2026, 10, 25, 20, 0))
+    expect(circularKickoffUtc('17:45', now)).toBe(Date.UTC(2026, 10, 25, 17, 45))
+  })
+  it('resolves midnight crossover forward: at 23:50, 00:10 is tomorrow', () => {
+    const late = Date.UTC(2026, 10, 25, 23, 50)
+    expect(circularKickoffUtc('00:10', late)).toBe(Date.UTC(2026, 10, 26, 0, 10))
+  })
+  it('resolves midnight crossover backward: at 00:05, 23:55 was 10 min ago', () => {
+    const early = Date.UTC(2026, 10, 26, 0, 5)
+    expect(circularKickoffUtc('23:55', early)).toBe(Date.UTC(2026, 10, 25, 23, 55))
+  })
+  it('never returns a time more than 12h away', () => {
+    for (const [hh, mi] of [[0, 0], [6, 30], [12, 0], [18, 0], [23, 59]]) {
+      for (const ev of ['00:00', '03:15', '11:45', '19:30', '23:30']) {
+        const ref = Date.UTC(2026, 10, 25, hh, mi)
+        expect(Math.abs(circularKickoffUtc(ev, ref) - ref)).toBeLessThanOrEqual(12 * 3600e3)
+      }
+    }
+  })
+  it('returns 0 for missing or malformed times', () => {
+    expect(circularKickoffUtc('', now)).toBe(0)
+    expect(circularKickoffUtc(null, now)).toBe(0)
+    expect(circularKickoffUtc('tbd', now)).toBe(0)
+  })
+  it('live window invariance: a ±24h date error does not change circular diff', () => {
+    const ts = circularKickoffUtc('17:30', now)
+    const circDiff = (a, b) => Math.min(Math.abs(a - b) % DAY, DAY - (Math.abs(a - b) % DAY))
+    expect(circDiff(ts, now)).toBe(30 * 60e3)
+    expect(circDiff(ts + DAY, now)).toBe(30 * 60e3)
   })
 })
